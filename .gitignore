@@ -1,11 +1,8 @@
 *.exe
 *.mp3
-*.txt
 *.dll
 *.bin
 whisper-output/*.*
 .env
 *.pyc
 temp.md
-res/*
-
