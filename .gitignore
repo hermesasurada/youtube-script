@@ -6,3 +6,4 @@ whisper-output/*.*
 .env
 *.pyc
 temp.md
+res/.tmp.driveupload/*
