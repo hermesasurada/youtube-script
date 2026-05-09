@@ -297,6 +297,7 @@ header h1 em { color: var(--accent); font-style: normal; }
 }
 
 /* ── Sidebar ── */
+.sidebar-spacer { flex: 1; min-height: 0; }
 .sidebar {
   width: var(--sidebar);
   flex-shrink: 0;
@@ -426,7 +427,6 @@ select option { background: var(--surface2); }
 
 /* ── Start button ── */
 .btn-start {
-  margin-top: auto;
   background: var(--accent);
   color: #fff;
   border: none;
@@ -747,6 +747,40 @@ select option { background: var(--surface2); }
   50%      { box-shadow: 0 0 0 7px rgba(99,102,241,0); }
 }
 
+/* ── Language toggle ── */
+.lang-toggle { display: flex; gap: .3rem; }
+.lang-btn {
+  flex: 1;
+  padding: .3rem .4rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.lang-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.lang-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ── Threads preset ── */
+.threads-preset { display: flex; gap: .3rem; }
+.threads-preset-btn {
+  flex: 1;
+  padding: .3rem .2rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.threads-preset-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.threads-preset-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* ── Stop button ── */
 .btn-stop {
   margin-top: .4rem;
@@ -836,7 +870,7 @@ select option { background: var(--surface2); }
   transition: color .15s, background .15s;
 }
 .queue-clear-btn:hover { color: var(--error); background: var(--err-banner); }
-.queue-list { list-style: none; max-height: 148px; overflow-y: auto; }
+.queue-list { list-style: none; height: 280px; overflow-y: auto; }
 .queue-item {
   display: flex;
   align-items: center;
@@ -879,6 +913,8 @@ select option { background: var(--surface2); }
 .queue-item-done     { background: rgba(16,185,129,.04); }
 .queue-item-error    { background: rgba(244,63,94,.05);  }
 .queue-item-cancelled { opacity: .55; }
+.queue-item-empty .queue-item-idx,
+.queue-item-empty .queue-item-url { color: var(--border); }
 .queue-status {
   flex-shrink: 0;
   font-size: .6rem;
@@ -951,10 +987,6 @@ select option { background: var(--surface2); }
   font-size: .83rem;
   table-layout: fixed;
 }
-.history-table th:nth-child(3), .history-table td:nth-child(3),
-.history-table th:nth-child(4), .history-table td:nth-child(4) {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 .history-table thead tr {
   background: var(--surface2);
   position: sticky;
@@ -962,42 +994,51 @@ select option { background: var(--surface2); }
   z-index: 1;
 }
 .history-table th {
-  padding: .42rem 1rem;
+  padding: .38rem 1rem;
   text-align: left;
   font-size: .68rem;
   font-weight: 600;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: .06em;
+  border-right: 1px solid var(--border);
 }
+.history-table th:last-child { border-right: none; }
 .history-table td {
-  padding: .5rem 1rem;
+  padding: .49rem 1rem;
   border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
+.history-table td:last-child { border-right: none; }
 .history-table tbody tr { cursor: pointer; transition: background .1s; }
 .history-table tbody tr:hover td   { background: var(--surface2); }
 .history-table tbody tr.selected td { background: var(--row-sel); }
 .history-table tbody tr.selected:hover td { background: var(--row-sel-hov); }
-.ht-date  { color: var(--muted); font-family: monospace; font-size: .75rem; white-space: nowrap; }
+.ht-date  { color: var(--muted); font-family: monospace; font-size: .63rem; white-space: nowrap; }
 .ht-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ht-no-txt { color: var(--muted); font-style: italic; font-size: .73rem; }
-.ht-num   { text-align: right; color: var(--muted); font-family: monospace; font-size: .78rem; white-space: nowrap; }
-.ht-url   { max-width: 200px; overflow: hidden; }
-.ht-url-link {
-  color: var(--muted);
-  display: inline-flex;
-  align-items: center;
-  gap: .3rem;
+.ht-num   { text-align: right; color: var(--muted); font-family: monospace; font-size: .63rem; white-space: nowrap; }
+.ht-url   { white-space: nowrap; }
+.ht-url-open {
+  font-size: .7rem;
+  color: var(--accent);
   text-decoration: none;
-  font-size: .75rem;
-  font-family: monospace;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color .15s;
+  padding: .15rem .45rem;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  margin-right: .3rem;
 }
-.ht-url-link:hover { color: var(--accent); }
+.ht-url-open:hover { background: var(--accent); color: #fff; }
+.ht-url-copy {
+  font-size: .7rem;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: .15rem .45rem;
+  cursor: pointer;
+}
+.ht-url-copy:hover { color: var(--text); border-color: var(--text); }
 .history-empty {
   padding: 2.5rem;
   text-align: center;
@@ -1196,7 +1237,7 @@ select option { background: var(--surface2); }
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         대기열에 추가
       </button>
-      <div class="queue-section" id="queue-section" style="display:none">
+      <div class="queue-section" id="queue-section">
         <div class="queue-hdr">
           <span class="queue-hdr-label">대기열</span>
           <span class="queue-count-badge" id="queue-count">0</span>
@@ -1218,25 +1259,28 @@ select option { background: var(--surface2); }
 
     <hr class="sep">
 
+    <div class="sidebar-spacer"></div>
+
     <div class="field">
       <label>언어</label>
-      <select id="language">
-        <option value="auto">auto (자동 감지)</option>
-        <option value="ko">ko — 한국어</option>
-        <option value="en">en — English</option>
-        <option value="ja">ja — 日本語</option>
-        <option value="zh">zh — 中文</option>
-        <option value="fr">fr — Français</option>
-        <option value="de">de — Deutsch</option>
-        <option value="es">es — Español</option>
-        <option value="ru">ru — Русский</option>
-        <option value="ar">ar — العربية</option>
-      </select>
+      <div class="lang-toggle">
+        <button class="lang-btn active" data-val="auto" onclick="setLang(this)">auto</button>
+        <button class="lang-btn" data-val="en" onclick="setLang(this)">영어</button>
+        <button class="lang-btn" data-val="ko" onclick="setLang(this)">한글</button>
+      </div>
+      <input type="hidden" id="language" value="auto">
     </div>
 
     <div class="field">
       <label>스레드 수</label>
-      <input type="number" id="threads" value="6" min="1" max="32" />
+      <div class="threads-preset">
+        <button class="threads-preset-btn" data-val="2"  onclick="setThreads(this)">2</button>
+        <button class="threads-preset-btn" data-val="4"  onclick="setThreads(this)">4</button>
+        <button class="threads-preset-btn active" data-val="6"  onclick="setThreads(this)">6</button>
+        <button class="threads-preset-btn" data-val="8"  onclick="setThreads(this)">8</button>
+        <button class="threads-preset-btn" data-val="12" onclick="setThreads(this)">12</button>
+      </div>
+      <input type="hidden" id="threads" value="6">
     </div>
 
     <div class="field">
@@ -1314,20 +1358,20 @@ select option { background: var(--surface2); }
 
     <!-- Tab bar -->
     <div class="tab-bar">
-      <button class="tab active" id="tab-log-btn"        onclick="switchTab('log')">로그</button>
-      <button class="tab hidden" id="tab-result-btn"     onclick="switchTab('result')">
+      <button class="tab active" id="tab-history-btn" onclick="switchTab('history')">이력</button>
+      <button class="tab" id="tab-log-btn"             onclick="switchTab('log')">로그</button>
+      <button class="tab hidden" id="tab-result-btn"   onclick="switchTab('result')">
         전사결과
         <span class="tab-badge" id="result-badge">NEW</span>
       </button>
-      <button class="tab hidden" id="tab-summary-btn"    onclick="switchTab('summary')">
+      <button class="tab hidden" id="tab-summary-btn"  onclick="switchTab('summary')">
         AI 요약
         <span class="tab-badge" id="summary-badge">NEW</span>
       </button>
-      <button class="tab" id="tab-history-btn" onclick="switchTab('history')" style="margin-left:auto">이력</button>
     </div>
 
     <!-- Log tab -->
-    <div class="tab-pane active" id="pane-log">
+    <div class="tab-pane" id="pane-log">
       <pre id="log-area">대기 중...</pre>
     </div>
 
@@ -1373,7 +1417,7 @@ select option { background: var(--surface2); }
     </div>
 
     <!-- History tab -->
-    <div class="tab-pane" id="pane-history">
+    <div class="tab-pane active" id="pane-history">
       <div class="history-wrap">
         <div class="history-list-section">
           <div class="history-toolbar">
@@ -1392,12 +1436,12 @@ select option { background: var(--surface2); }
           <div id="history-empty" class="history-empty" style="display:none">이력이 없습니다.</div>
           <table class="history-table" id="history-table" style="display:none">
             <colgroup>
-              <col style="width:94px">
+              <col style="width:105px">
               <col>
-              <col style="width:240px">
-              <col style="width:240px">
-              <col style="width:72px">
-              <col style="width:280px">
+              <col style="width:210px">
+              <col style="width:190px">
+              <col style="width:78px">
+              <col style="width:110px">
             </colgroup>
             <thead>
               <tr>
@@ -1470,7 +1514,7 @@ select option { background: var(--surface2); }
 const DEFAULT_PROMPT = {{ default_prompt | tojson }};
 
 let currentJobId    = null;
-let activeTab       = 'log';
+let activeTab       = 'history';
 let saveTimer       = null;
 let currentSource   = 'url';
 let selectedFilePath = '';
@@ -1527,6 +1571,8 @@ let _historyLoaded   = false;
 let _historyItems    = [];
 let _historyFiltered = [];
 let _historySelIdx   = -1;
+
+loadHistory();
 
 async function loadHistory() {
   _historyLoaded = true;
@@ -1593,10 +1639,8 @@ function _renderHistoryList() {
       ? esc(item.categories[0])
       : '<span style="color:var(--muted)">—</span>';
     const urlCell  = item.webpage_url
-      ? `<a class="ht-url-link" href="${esc(item.webpage_url)}" target="_blank" rel="noopener" title="${esc(item.webpage_url)}" onclick="event.stopPropagation()" ondblclick="event.stopPropagation()">
-           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-           ${esc(item.webpage_url)}
-         </a>`
+      ? `<a class="ht-url-open" href="${esc(item.webpage_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" ondblclick="event.stopPropagation()">열기</a
+        ><button class="ht-url-copy" data-url="${esc(item.webpage_url)}" onclick="copyHistoryUrl(this.dataset.url,this);event.stopPropagation()" ondblclick="event.stopPropagation()">복사</button>`
       : '<span style="color:var(--muted)">—</span>';
     const uploaderCell = item.channel_url
       ? `<a class="ht-chan-link" href="${esc(item.channel_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" ondblclick="event.stopPropagation()">${esc(item.uploader)}</a>`
@@ -1606,7 +1650,7 @@ function _renderHistoryList() {
       <td class="ht-title">${esc(item.title)}${noTxt}</td>
       <td>${uploaderCell}</td>
       <td>${catCell}</td>
-      <td class="ht-num">${fmtDur(item.duration)}</td>
+      <td class="ht-num">${fmtDurKo(item.duration)}</td>
       <td class="ht-url">${urlCell}</td>
     </tr>`;
   }).join('');
@@ -1631,7 +1675,7 @@ function openHistoryDetail(idx) {
   if (item.categories && item.categories.length)
     metaHtml += `<div class="hd-meta-row"><span class="hd-meta-key">카테고리</span><span class="hd-meta-val">${esc(item.categories.join(', '))}</span></div>`;
   if (item.duration)
-    metaHtml += `<div class="hd-meta-row"><span class="hd-meta-key">길이</span><span class="hd-meta-val">${fmtDur(item.duration)}</span></div>`;
+    metaHtml += `<div class="hd-meta-row"><span class="hd-meta-key">길이</span><span class="hd-meta-val">${fmtDurKo(item.duration)}</span></div>`;
   if (item.webpage_url)
     metaHtml += `<div class="hd-meta-row"><span class="hd-meta-key">URL</span><span class="hd-meta-val"><a href="${esc(item.webpage_url)}" target="_blank" rel="noopener">${esc(item.webpage_url)}</a></span></div>`;
   if (item.txt_path)
@@ -1671,6 +1715,29 @@ function openHistoryDetail(idx) {
 
 function closeHistoryDetail() {
   document.getElementById('hd-modal').classList.remove('open');
+}
+
+function copyHistoryUrl(url, btn) {
+  const orig = btn ? btn.textContent : '';
+  const done = () => {
+    if (btn) { btn.textContent = '✓'; setTimeout(() => { btn.textContent = orig; }, 1200); }
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    done();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
 }
 
 function copyFilePath() {
@@ -2171,6 +2238,13 @@ function fmtDur(secs) {
   const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60);
   return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
 }
+function fmtDurKo(secs) {
+  if (!secs) return '—';
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60);
+  if (h > 0) return `${h}시간 ${m}분 ${s}초`;
+  if (m > 0) return `${m}분 ${s}초`;
+  return `${s}초`;
+}
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -2212,6 +2286,7 @@ document.getElementById('url-input').addEventListener('keydown', (e) => {
 /* ── URL Queue ── */
 // 큐 아이템: {url, meta, status: 'waiting'|'running'|'done'|'error'|'cancelled'}
 let urlQueue = [];
+renderQueue();
 
 function _runningItem() { return urlQueue.find(i => i.status === 'running') || null; }
 
@@ -2272,6 +2347,18 @@ async function addToQueue() {
   renderQueue();
 }
 
+function setLang(btn) {
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('language').value = btn.dataset.val;
+}
+
+function setThreads(btn) {
+  document.querySelectorAll('.threads-preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('threads').value = btn.dataset.val;
+}
+
 function removeFromQueue(idx) {
   urlQueue.splice(idx, 1);
   renderQueue();
@@ -2292,17 +2379,12 @@ const _STATUS_CFG = {
 };
 
 function renderQueue() {
-  const section = document.getElementById('queue-section');
   const list    = document.getElementById('queue-list');
   const countEl = document.getElementById('queue-count');
-
-  if (urlQueue.length === 0) { section.style.display = 'none'; _hideQTip(); return; }
-
-  section.style.display = '';
   const waiting = urlQueue.filter(i => i.status === 'waiting').length;
-  countEl.textContent = waiting > 0 ? `${waiting}` : urlQueue.length;
+  countEl.textContent = urlQueue.length > 0 ? (waiting > 0 ? `${waiting}` : urlQueue.length) : '0';
 
-  list.innerHTML = urlQueue.map((item, i) => {
+  const itemRows = urlQueue.map((item, i) => {
     const cfg = _STATUS_CFG[item.status] || _STATUS_CFG.waiting;
     const removeBtn = item.status !== 'running'
       ? `<button class="queue-item-remove" onclick="removeFromQueue(${i})">✕</button>`
@@ -2313,9 +2395,18 @@ function renderQueue() {
       <span class="queue-status ${cfg.cls}">${cfg.label}</span>
       ${removeBtn}
     </li>`;
-  }).join('');
+  });
 
-  list.querySelectorAll('.queue-item').forEach((li, i) => {
+  const emptyRows = Array.from({ length: Math.max(0, 10 - urlQueue.length) }, (_, i) =>
+    `<li class="queue-item queue-item-empty">
+      <span class="queue-item-idx">${urlQueue.length + i + 1}</span>
+      <span class="queue-item-url">—</span>
+    </li>`
+  );
+
+  list.innerHTML = [...itemRows, ...emptyRows].join('');
+
+  list.querySelectorAll('.queue-item:not(.queue-item-empty)').forEach((li, i) => {
     li.addEventListener('mouseenter', (e) => _showQTip(e, urlQueue[i].meta, urlQueue[i].url));
     li.addEventListener('mouseleave', _hideQTip);
   });
