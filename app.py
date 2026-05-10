@@ -342,6 +342,10 @@ def run_job(job_id: str, params: dict) -> None:
             "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
             "quiet": True,
             "progress_hooks": [_progress_hook],
+            "socket_timeout": 60,
+            "retries": 10,
+            "fragment_retries": 10,
+            "concurrent_fragment_downloads": 1,
         }) as ydl:
             ydl.download([url])
     except Exception as e:
