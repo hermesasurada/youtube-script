@@ -5,6 +5,7 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 import uuid
 from datetime import datetime
 
@@ -70,6 +71,15 @@ _duration_cache: dict[str, tuple[float, float]] = {}
 def _json(data, status=200):
     return Response(json.dumps(data, ensure_ascii=False),
                     status=status, mimetype="application/json")
+
+
+def _nfc(value):
+    """iOS/macOS의 자모분리(NFD) 한글을 정상 결합형(NFC)으로 변환한다."""
+    if isinstance(value, str):
+        return unicodedata.normalize("NFC", value)
+    if isinstance(value, list):
+        return [_nfc(v) for v in value]
+    return value
 
 
 def _safe_stem(title: str, maxlen: int = 60) -> str:
@@ -302,8 +312,8 @@ def run_job(job_id: str, params: dict) -> None:
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
-        title    = info.get("title", "audio")
-        uploader = info.get("uploader") or info.get("channel") or "—"
+        title    = _nfc(info.get("title", "audio"))
+        uploader = _nfc(info.get("uploader") or info.get("channel") or "—")
         total    = float(info.get("duration") or 0)
     except Exception as e:
         q.put(f"오류: {e}")
@@ -312,7 +322,7 @@ def run_job(job_id: str, params: dict) -> None:
         return
 
     jobs[job_id]["total_duration"] = total
-    jobs[job_id]["meta"] = {k: info[k] for k in _META_KEYS if info.get(k) is not None}
+    jobs[job_id]["meta"] = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
     if total > 0:
         q.put(f"영상 길이: {_format_duration(total)}")
         q.put({"type": "duration", "seconds": total})
@@ -388,8 +398,8 @@ def run_file_job(job_id: str, file_path: str, params: dict) -> None:
         try:
             with open(meta_json, encoding="utf-8") as f:
                 m = json.load(f)
-            title    = m.get("title") or "N/A"
-            uploader = m.get("uploader") or m.get("channel") or "N/A"
+            title    = _nfc(m.get("title") or "N/A")
+            uploader = _nfc(m.get("uploader") or m.get("channel") or "N/A")
         except Exception:
             pass
     q.put({"type": "videoinfo", "title": title, "uploader": uploader})
@@ -400,7 +410,7 @@ def run_file_job(job_id: str, file_path: str, params: dict) -> None:
         "title":       title if title != "N/A" else "",
         "uploader":    uploader if uploader != "N/A" else "",
         "duration":    total,
-        "source_file": os.path.basename(file_path),
+        "source_file": _nfc(os.path.basename(file_path)),
     }
     if total > 0:
         q.put(f"파일 길이: {_format_duration(total)}")
@@ -698,8 +708,8 @@ def video_info():
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
         return _json({
-            "title":    info.get("title") or "",
-            "uploader": info.get("uploader") or info.get("channel") or "",
+            "title":    _nfc(info.get("title") or ""),
+            "uploader": _nfc(info.get("uploader") or info.get("channel") or ""),
             "duration": float(info.get("duration") or 0),
         })
     except Exception as e:

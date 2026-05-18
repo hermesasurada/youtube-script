@@ -1051,6 +1051,30 @@ select option { background: var(--surface); color: var(--text); }
 }
 .queue-clear-btn:hover { color: var(--error); background: var(--err-banner); }
 .queue-list { list-style: none; max-height: 280px; overflow-y: auto; }
+.queue-footer {
+  display: flex;
+  padding: .42rem .65rem;
+  background: var(--surface2);
+  border-top: 1px solid var(--border);
+}
+.queue-export-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  width: 100%;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: .35rem .5rem;
+  transition: all .15s;
+}
+.queue-export-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.queue-export-btn:disabled { opacity: .45; cursor: default; }
 .queue-item {
   display: flex;
   align-items: center;
@@ -1460,6 +1484,12 @@ select option { background: var(--surface); color: var(--text); }
           <button class="queue-clear-btn" onclick="clearQueue()">전체삭제</button>
         </div>
         <ul class="queue-list" id="queue-list"></ul>
+        <div class="queue-footer">
+          <button class="queue-export-btn" id="queue-export-btn" onclick="copyQueue()" title="대기열 URL과 정보를 클립보드로 복사">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span id="queue-export-label">클립보드로 내보내기</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -2144,11 +2174,12 @@ async function startTranscription() {
   } catch (e) {
     showError('서버 연결 실패: ' + e.message);
     setRunning(false);
+    _failCurrentAndNext();
     return;
   }
 
   const data = await resp.json();
-  if (data.error) { showError(data.error); setRunning(false); return; }
+  if (data.error) { showError(data.error); setRunning(false); _failCurrentAndNext(); return; }
   currentJobId = data.job_id;
 
   const es = new EventSource('/stream/' + currentJobId);
@@ -2228,7 +2259,7 @@ async function startTranscription() {
       const _ri = _runningItem(); if (_ri) { _ri.status = 'cancelled'; renderQueue(); }
     } else {
       showError('전사 실패. 위의 로그를 확인해주세요.');
-      const _ri = _runningItem(); if (_ri) { _ri.status = 'error'; renderQueue(); }
+      _failCurrentAndNext();
     }
   });
 
@@ -2236,6 +2267,7 @@ async function startTranscription() {
     es.close();
     setRunning(false);
     showError('스트리밍 연결이 끊어졌습니다.');
+    _failCurrentAndNext();
   };
 }
 
@@ -2597,6 +2629,35 @@ function clearQueue() {
   renderQueue();
 }
 
+async function copyQueue() {
+  if (urlQueue.length === 0) return;
+  const btn   = document.getElementById('queue-export-btn');
+  const label = document.getElementById('queue-export-label');
+  const text = urlQueue.map((item, i) => {
+    const m     = item.meta || {};
+    const stCfg = _STATUS_CFG[item.status] || _STATUS_CFG.waiting;
+    const lines = [`[${i + 1}] ${m.title || '(정보 없음)'}`];
+    if (m.uploader) lines.push(`업로더: ${m.uploader}`);
+    if (m.duration) lines.push(`길이: ${fmtDur(m.duration)}`);
+    lines.push(`상태: ${stCfg.label}`);
+    lines.push(item.url);
+    return lines.join('\n');
+  }).join('\n\n');
+
+  try {
+    await navigator.clipboard.writeText(text);
+    label.textContent = '복사됨';
+    btn.style.color = 'var(--success)';
+  } catch (e) {
+    label.textContent = '복사 실패';
+    btn.style.color = 'var(--error)';
+  }
+  setTimeout(() => {
+    label.textContent = '클립보드로 내보내기';
+    btn.style.color = '';
+  }, 1500);
+}
+
 const _STATUS_CFG = {
   running:   {cls: 'qs-running',   label: '진행중', rowCls: 'queue-item-active'},
   done:      {cls: 'qs-done',      label: '완료',   rowCls: 'queue-item-done'},
@@ -2637,6 +2698,9 @@ function renderQueue() {
     li.addEventListener('mouseenter', (e) => _showQTip(e, urlQueue[i].meta, urlQueue[i].url));
     li.addEventListener('mouseleave', _hideQTip);
   });
+
+  const exportBtn = document.getElementById('queue-export-btn');
+  if (exportBtn) exportBtn.disabled = urlQueue.length === 0;
 }
 
 function _autoStartNext() {
@@ -2649,6 +2713,23 @@ function _autoStartNext() {
   renderQueue();
   const rem = urlQueue.filter(i => i.status === 'waiting').length - 1;
   appendLog(`\n⏭ 대기열 다음 항목 자동 시작 (남은: ${rem}개)...`);
+  setTimeout(() => {
+    document.getElementById('url-input').value = next.url;
+    startTranscription();
+  }, 1500);
+}
+
+/* 현재 항목을 오류로 표기하고 다음 대기열로 넘어간다 */
+function _failCurrentAndNext() {
+  const running = _runningItem();
+  if (running) running.status = 'error';
+  renderQueue();
+
+  const next = urlQueue.find(i => i.status === 'waiting');
+  if (!next) return;
+
+  const rem = urlQueue.filter(i => i.status === 'waiting').length - 1;
+  appendLog(`\n⏭ 오류 발생 — 대기열 다음 항목으로 넘어갑니다 (남은: ${rem}개)...`);
   setTimeout(() => {
     document.getElementById('url-input').value = next.url;
     startTranscription();
