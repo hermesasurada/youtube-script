@@ -1328,6 +1328,20 @@ select option { background: var(--surface); color: var(--text); }
   transition: border-color .15s;
 }
 .hf-date:focus { border-color: var(--text); }
+.hf-uploader {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: .35rem .5rem;
+  outline: none;
+  cursor: pointer;
+  max-width: 220px;
+  transition: border-color .15s;
+}
+.hf-uploader:focus { border-color: var(--text); }
 .hf-title-wrap { flex: 1; min-width: 100px; position: relative; display: flex; }
 .hf-title {
   flex: 1;
@@ -1664,6 +1678,9 @@ select option { background: var(--surface); color: var(--text); }
                 <span class="hf-sep">~</span>
                 <input type="date" id="hf-date-to"   class="hf-date" onchange="applyHistoryFilter()" title="종료 날짜">
               </div>
+              <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
+                <option value="">전체 업로더</option>
+              </select>
               <div class="hf-title-wrap">
                 <input type="text" id="hf-title" class="hf-title" placeholder="제목 검색..." oninput="applyHistoryFilter()">
                 <button class="hf-clear-btn" id="hf-clear-btn" onclick="clearTitleSearch()" title="지우기">✕</button>
@@ -1824,7 +1841,19 @@ async function loadHistory() {
   } catch {
     _historyItems = [];
   }
+  _populateUploaderOptions();
   applyHistoryFilter();
+}
+
+function _populateUploaderOptions() {
+  const sel = document.getElementById('hf-uploader');
+  const prev = sel.value;
+  const uploaders = [...new Set(
+    _historyItems.map(i => i.uploader).filter(u => u && u !== '—')
+  )].sort((a, b) => a.localeCompare(b, 'ko'));
+  sel.innerHTML = '<option value="">전체 업로더</option>' +
+    uploaders.map(u => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
+  if (prev && uploaders.includes(prev)) sel.value = prev;
 }
 
 function clearTitleSearch() {
@@ -1838,6 +1867,7 @@ function clearTitleSearch() {
 function applyHistoryFilter() {
   const dateFrom = document.getElementById('hf-date-from').value;
   const dateTo   = document.getElementById('hf-date-to').value;
+  const uploader = document.getElementById('hf-uploader').value;
   const titleQ   = document.getElementById('hf-title').value.trim().toLowerCase();
   document.getElementById('hf-clear-btn').classList.toggle('visible', titleQ.length > 0);
 
@@ -1845,6 +1875,7 @@ function applyHistoryFilter() {
   _historyFiltered = _historyItems.filter(item => {
     if (dateFrom && item.date < toYMD(dateFrom)) return false;
     if (dateTo   && item.date > toYMD(dateTo))   return false;
+    if (uploader && item.uploader !== uploader)  return false;
     if (titleQ   && !item.title.toLowerCase().includes(titleQ)) return false;
     return true;
   });
@@ -1855,6 +1886,7 @@ function applyHistoryFilter() {
 function resetHistoryFilter() {
   document.getElementById('hf-date-from').value = '';
   document.getElementById('hf-date-to').value   = '';
+  document.getElementById('hf-uploader').value  = '';
   document.getElementById('hf-title').value      = '';
   applyHistoryFilter();
 }
