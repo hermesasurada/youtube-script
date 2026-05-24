@@ -23,6 +23,7 @@ except ImportError:
     yt_dlp = None
 
 app      = Flask(__name__)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 jobs: dict[str, dict] = {}
@@ -35,6 +36,7 @@ MODEL_PATH  = os.path.join(BASE_DIR, "whisper.cpp-windows-vulkan", "ggml-large-v
 FFPROBE_EXE = os.path.join(BASE_DIR, "ffprobe.exe")
 AUDIO_DIR   = os.environ.get("AUDIO_DIR", BASE_DIR)
 RES_DIR     = os.path.join(BASE_DIR, "res")
+SUMMARY_DIR = os.path.join(RES_DIR, "summary")
 AUDIO_EXT   = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".mp4", ".webm"}
 
 DEFAULT_PROMPT = """\
@@ -350,6 +352,7 @@ def run_job(job_id: str, params: dict) -> None:
             "format": "bestaudio/best",
             "outtmpl": os.path.splitext(audio_path)[0],
             "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+            "ffmpeg_location": BASE_DIR,
             "quiet": True,
             "progress_hooks": [_progress_hook],
             "socket_timeout": 60,
@@ -651,18 +654,20 @@ def get_history():
                 meta, transcript = _parse_md(md_path)
             except Exception:
                 continue
+            summary_md = os.path.join(SUMMARY_DIR, date_dir, fname)
             items.append({
-                "date":        date_dir,
-                "stem":        fname[:-3],
-                "title":       meta.get("title") or fname[:-3],
-                "uploader":    meta.get("uploader") or meta.get("channel") or "—",
-                "duration":    float(meta.get("duration") or 0),
-                "webpage_url": meta.get("webpage_url") or "",
-                "categories":  meta.get("categories") or [],
-                "tags":        meta.get("tags") or [],
-                "channel_url": meta.get("channel_url") or "",
-                "has_txt":     bool(transcript),
-                "txt_path":    md_path,
+                "date":         date_dir,
+                "stem":         fname[:-3],
+                "title":        meta.get("title") or fname[:-3],
+                "uploader":     meta.get("uploader") or meta.get("channel") or "—",
+                "duration":     float(meta.get("duration") or 0),
+                "webpage_url":  meta.get("webpage_url") or "",
+                "categories":   meta.get("categories") or [],
+                "tags":         meta.get("tags") or [],
+                "channel_url":  meta.get("channel_url") or "",
+                "has_txt":      bool(transcript),
+                "txt_path":     md_path,
+                "summary_path": summary_md if os.path.isfile(summary_md) else None,
             })
     return _json({"items": items})
 
@@ -714,6 +719,76 @@ def video_info():
         })
     except Exception as e:
         return _json({"error": str(e)}, 400)
+
+
+def _parse_summary_title(md_path: str) -> str:
+    try:
+        with open(md_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("# "):
+                    return stripped[2:]
+    except Exception:
+        pass
+    return os.path.basename(md_path)[:-3]
+
+
+@app.route("/summary")
+def summary_view():
+    return render_template("summary.html")
+
+
+@app.route("/summary/list")
+def summary_list():
+    if not os.path.isdir(SUMMARY_DIR):
+        return _json({"groups": []})
+    try:
+        date_dirs = sorted(
+            [d for d in os.listdir(SUMMARY_DIR)
+             if os.path.isdir(os.path.join(SUMMARY_DIR, d))],
+            reverse=True,
+        )
+    except Exception:
+        return _json({"groups": []})
+
+    groups = []
+    for date_dir in date_dirs:
+        date_path = os.path.join(SUMMARY_DIR, date_dir)
+        try:
+            fnames = sorted(
+                [f for f in os.listdir(date_path) if f.endswith(".md")],
+                reverse=True,
+            )
+        except Exception:
+            continue
+        files = []
+        for fname in fnames:
+            md_path = os.path.join(date_path, fname)
+            files.append({
+                "name": fname,
+                "title": _parse_summary_title(md_path),
+                "path": md_path,
+            })
+        if files:
+            groups.append({"date": date_dir, "files": files})
+    return _json({"groups": groups})
+
+
+@app.route("/summary/content", methods=["POST"])
+def summary_content():
+    path = (request.get_json(force=True).get("path") or "").strip()
+    abs_path = os.path.realpath(path)
+    summary_real = os.path.realpath(SUMMARY_DIR)
+    if not (abs_path.startswith(summary_real + os.sep) or abs_path == summary_real):
+        return _json({"error": "접근 거부"}, 403)
+    if not os.path.isfile(abs_path):
+        return _json({"error": "파일 없음"}, 404)
+    try:
+        with open(abs_path, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return _json({"content": content})
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
 
 
 if __name__ == "__main__":
