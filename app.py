@@ -2,7 +2,9 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -31,9 +33,30 @@ jobs_lock = threading.Lock()
 
 TIMESTAMP_RE = re.compile(r'\[(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->')
 
-WHISPER_EXE = os.path.join(BASE_DIR, "whisper.cpp-windows-vulkan", "whisper-cli.exe")
-MODEL_PATH  = os.path.join(BASE_DIR, "whisper.cpp-windows-vulkan", "ggml-large-v3-turbo-q5_0.bin")
-FFPROBE_EXE = os.path.join(BASE_DIR, "ffprobe.exe")
+# ── 플랫폼 어댑터 ─────────────────────────────────────────────────────
+IS_WIN = sys.platform.startswith("win")
+IS_MAC = sys.platform == "darwin"
+EXE    = ".exe" if IS_WIN else ""
+
+def _resolve_binary(name: str) -> str:
+    """프로젝트 루트의 바이너리를 우선 사용, 없으면 PATH에서 찾음."""
+    local = os.path.join(BASE_DIR, f"{name}{EXE}")
+    if os.path.exists(local):
+        return local
+    found = shutil.which(name)
+    return found if found else local
+
+# whisper.cpp 디렉토리: 환경변수 우선 → Windows는 -windows-vulkan, 그 외는 whisper.cpp
+WHISPER_DIR = os.environ.get(
+    "WHISPER_DIR",
+    os.path.join(BASE_DIR, "whisper.cpp-windows-vulkan" if IS_WIN else "whisper.cpp"),
+)
+WHISPER_EXE = os.environ.get("WHISPER_EXE", os.path.join(WHISPER_DIR, f"whisper-cli{EXE}"))
+MODEL_PATH  = os.environ.get("MODEL_PATH",  os.path.join(WHISPER_DIR, "ggml-large-v3-turbo-q5_0.bin"))
+
+FFPROBE_EXE     = _resolve_binary("ffprobe")
+FFMPEG_LOCATION = os.path.dirname(_resolve_binary("ffmpeg"))
+
 AUDIO_DIR   = os.environ.get("AUDIO_DIR", BASE_DIR)
 RES_DIR     = os.path.join(BASE_DIR, "res")
 SUMMARY_DIR = os.path.join(RES_DIR, "summary")
@@ -352,7 +375,7 @@ def run_job(job_id: str, params: dict) -> None:
             "format": "bestaudio/best",
             "outtmpl": os.path.splitext(audio_path)[0],
             "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
-            "ffmpeg_location": BASE_DIR,
+            "ffmpeg_location": FFMPEG_LOCATION,
             "quiet": True,
             "progress_hooks": [_progress_hook],
             "socket_timeout": 60,
@@ -686,16 +709,31 @@ def history_text():
         return _json({"error": str(e)}, 500)
 
 
+def _reveal_in_file_manager(abs_path: str) -> None:
+    """OS별 파일 탐색기에서 해당 파일/폴더를 보여준다."""
+    exists  = os.path.exists(abs_path)
+    target  = abs_path if exists else os.path.dirname(abs_path)
+    if IS_WIN:
+        if exists:
+            subprocess.Popen(["explorer", f"/select,{abs_path}"])
+        else:
+            subprocess.Popen(["explorer", target])
+    elif IS_MAC:
+        if exists:
+            subprocess.Popen(["open", "-R", abs_path])
+        else:
+            subprocess.Popen(["open", target])
+    else:  # Linux 등
+        subprocess.Popen(["xdg-open", target])
+
+
 @app.route("/history/explore", methods=["POST"])
 def history_explore():
     abs_path, err = _check_res_path(request.get_json(force=True).get("txt_path") or "")
     if err:
         return err
     try:
-        if os.path.exists(abs_path):
-            subprocess.Popen(["explorer", f"/select,{abs_path}"])
-        else:
-            subprocess.Popen(["explorer", os.path.dirname(abs_path)])
+        _reveal_in_file_manager(abs_path)
         return _json({"ok": True})
     except Exception as e:
         return _json({"error": str(e)}, 500)
