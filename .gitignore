@@ -7,3 +7,11 @@ whisper-output/*.*
 *.pyc
 temp.md
 res/.tmp.driveupload/*
+index.db
+index.db-wal
+index.db-shm
+.venv/
+whisper.cpp/
+*.bak
+flask_out.txt
+flask_err.txt

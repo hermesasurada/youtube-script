@@ -1,4 +1,6 @@
+import glob
 import json
+import logging
 import os
 import queue
 import re
@@ -11,13 +13,21 @@ import unicodedata
 import uuid
 from datetime import datetime
 
-from flask import Flask, Response, render_template, request, send_file
+from flask import Flask, Response, redirect, render_template, request, send_file
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger("yt-script")
 
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 except ImportError:
     pass
+
+import db
 
 try:
     import yt_dlp
@@ -71,6 +81,37 @@ YouTube 영상의 전사 텍스트를 구조화된 요약본으로 재작성해�
 
 PROMPT_FILE  = os.path.join(BASE_DIR, "prompt.txt")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+# 요약 백엔드: "claude" (Claude.app OAuth, 기본) | "gemini" (GEMINI_API_KEY 필요)
+SUMMARY_BACKEND = os.environ.get("SUMMARY_BACKEND", "claude").lower()
+
+
+def _resolve_claude_bin() -> str:
+    """claude CLI 경로 해석: env → PATH → Claude.app 최신 설치본(버전 하드코딩 제거)."""
+    env = os.environ.get("CLAUDE_BIN")
+    if env and os.path.exists(env):
+        return env
+    found = shutil.which("claude")
+    if found:
+        return found
+    base = os.path.expanduser("~/Library/Application Support/Claude/claude-code")
+    cands = glob.glob(os.path.join(base, "*", "claude.app/Contents/MacOS/claude"))
+    cands = [c for c in cands if os.path.exists(c)]
+    if cands:
+        cands.sort(key=os.path.getmtime)  # 가장 최근 설치본
+        return cands[-1]
+    return env or "claude"
+
+
+CLAUDE_BIN   = _resolve_claude_bin()
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
+
+# 전사(whisper)는 무거우므로 동시 실행을 제한해 스래싱 방지.
+_transcribe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_TRANSCRIBE", "1")))
+
+# 전사 완료 후 다운로드한 오디오(mp3)를 삭제할지 여부. KEEP_AUDIO=1 이면 보존.
+# 단, 사용자가 직접 올린 로컬 파일(file 잡)은 이 값과 무관하게 항상 보존한다.
+DELETE_AUDIO_AFTER = os.environ.get("KEEP_AUDIO", "0") != "1"
 
 # view_count, like_count 제외
 _META_KEYS = [
@@ -215,6 +256,10 @@ def _save_md(md_path: str, meta: dict, transcript: str) -> None:
     lines.append(transcript)
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+    try:
+        db.upsert(md_path)
+    except Exception:
+        pass
 
 
 def _parse_yaml_front_matter(text: str) -> dict:
@@ -279,7 +324,7 @@ def _parse_transcript(json_path: str) -> str | None:
         if text and text != prev:
             cleaned.append(text)
             prev = text
-    os.remove(json_path)
+    # 주의: JSON 삭제는 md 저장이 확정된 뒤 _finish_transcription에서 수행한다.
     return "\n".join(cleaned)
 
 
@@ -287,41 +332,90 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
                  threads: str, total: float) -> int:
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
-    proc = subprocess.Popen(
-        [WHISPER_EXE, "-m", MODEL_PATH, "-f", audio_path,
-         "--language", language, "--threads", threads,
-         "--output-json", "--temperature", "0",
-         "--best-of", "5", "--no-speech-thold", "0.8"],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=BASE_DIR,
-    )
-    jobs[job_id]["proc"] = proc
-    for raw in iter(proc.stdout.readline, b""):
+
+    # 동시 전사 제한: 슬롯을 못 얻으면 대기 안내 후 블로킹 획득.
+    if not _transcribe_sem.acquire(blocking=False):
+        q.put("다른 전사가 진행 중입니다 — 대기열에서 대기...")
+        _transcribe_sem.acquire()
+    try:
         if stop.is_set():
-            proc.kill()
-            break
-        line = raw.decode("utf-8", errors="replace").rstrip("\n")
-        if line.startswith("whisper_print_timings"):
-            continue
-        q.put(line)
-        _emit_progress(q, line, total)
-    proc.wait()
-    jobs[job_id]["proc"] = None
-    return proc.returncode
+            return -1
+        proc = subprocess.Popen(
+            [WHISPER_EXE, "-m", MODEL_PATH, "-f", audio_path,
+             "--language", language, "--threads", threads,
+             "--output-json", "--temperature", "0",
+             "--best-of", "5", "--beam-size", "5",
+             "--no-speech-thold", "0.8", "--flash-attn"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=BASE_DIR,
+        )
+        jobs[job_id]["proc"] = proc
+        for raw in iter(proc.stdout.readline, b""):
+            if stop.is_set():
+                proc.kill()
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if line.startswith("whisper_print_timings"):
+                continue
+            q.put(line)
+            _emit_progress(q, line, total)
+        proc.wait()
+        jobs[job_id]["proc"] = None
+        return proc.returncode
+    finally:
+        _transcribe_sem.release()
 
 
-def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str) -> None:
+def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
+                          delete_audio: bool = False) -> None:
     q = jobs[job_id]["queue"]
+    json_path = audio_path + ".json"
     if rc == 0:
-        transcript = _parse_transcript(audio_path + ".json")
+        transcript = _parse_transcript(json_path)
         if transcript is not None:
             _save_md(md_path, jobs[job_id].get("meta", {}), transcript)
             jobs[job_id].update({"status": "done", "result": transcript, "output_file": md_path})
+            # md 저장이 확정된 뒤에만 whisper JSON 삭제(실패 시 재전사 없이 복구 가능).
+            try:
+                os.remove(json_path)
+            except OSError:
+                pass
+            # 전사본(.md)이 단일 진실 소스. 다운로드한 오디오는 저장 확정 후 삭제(용량 회수).
+            # delete_audio=True(URL 잡)이고 KEEP_AUDIO 미설정일 때만. 사용자 업로드 파일은 보존.
+            if delete_audio and DELETE_AUDIO_AFTER:
+                try:
+                    os.remove(audio_path)
+                    log.info("source audio removed: %s", os.path.basename(audio_path))
+                except OSError as e:
+                    log.warning("audio cleanup failed: %s (%s)", os.path.basename(audio_path), e)
+            log.info("transcription done: %s", os.path.basename(md_path))
             q.put(f"✅ 전사 저장됨: {os.path.basename(md_path)}")
             q.put({"type": "progress", "pct": 100})
             q.put(None)
             return
     jobs[job_id]["status"] = "error"
+    log.warning("transcription failed (rc=%s): %s", rc, os.path.basename(md_path))
     q.put(None)
+
+
+def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
+                           thr: str, total: float, md_path: str,
+                           delete_audio: bool = False) -> None:
+    """전사 공통 꼬리: stage 전환 → whisper 실행 → 취소 확인 → 결과 저장.
+
+    run_job / run_file_job 양쪽이 공유한다.
+    delete_audio=True 면 전사 성공 시 원본 오디오 삭제(URL 다운로드 건 전용).
+    """
+    q    = jobs[job_id]["queue"]
+    stop = jobs[job_id]["stop_event"]
+    _stage(q, "transcribe")
+    q.put("Whisper 전사 시작...")
+    rc = _run_whisper(job_id, audio_path, lang, thr, total)
+    if stop.is_set():
+        jobs[job_id]["status"] = "cancelled"
+        q.put("중지됨.")
+        q.put(None)
+        return
+    _finish_transcription(job_id, audio_path, rc, md_path, delete_audio=delete_audio)
 
 
 # ── Job runners ───────────────────────────────────────────────────────
@@ -331,7 +425,7 @@ def run_job(job_id: str, params: dict) -> None:
     stop = jobs[job_id]["stop_event"]
     url  = params["url"]
     lang = params.get("language", "auto")
-    thr  = str(params.get("threads", 6))
+    thr  = str(params.get("threads", 8))
 
     q.put("영상 정보 가져오는 중...")
     try:
@@ -397,24 +491,16 @@ def run_job(job_id: str, params: dict) -> None:
         return
 
     q.put(f"저장됨: {os.path.basename(audio_path)}")
-    _stage(q, "transcribe")
-    q.put("Whisper 전사 시작...")
-    rc = _run_whisper(job_id, audio_path, lang, thr, total)
-
-    if stop.is_set():
-        jobs[job_id]["status"] = "cancelled"
-        q.put("중지됨.")
-        q.put(None)
-        return
-
-    _finish_transcription(job_id, audio_path, rc, unique_path(out_dir, stem_final, ".md"))
+    _transcribe_and_finish(job_id, audio_path, lang, thr, total,
+                           unique_path(out_dir, stem_final, ".md"),
+                           delete_audio=True)  # URL 다운로드본은 전사 후 삭제
 
 
 def run_file_job(job_id: str, file_path: str, params: dict) -> None:
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
     lang = params.get("language", "auto")
-    thr  = str(params.get("threads", 6))
+    thr  = str(params.get("threads", 8))
 
     q.put(f"파일: {os.path.basename(file_path)}")
 
@@ -442,19 +528,10 @@ def run_file_job(job_id: str, file_path: str, params: dict) -> None:
         q.put(f"파일 길이: {_format_duration(total)}")
         q.put({"type": "duration", "seconds": total})
 
-    _stage(q, "transcribe")
-    q.put("Whisper 전사 시작...")
-    rc = _run_whisper(job_id, file_path, lang, thr, total)
-
-    if stop.is_set():
-        jobs[job_id]["status"] = "cancelled"
-        q.put("중지됨.")
-        q.put(None)
-        return
-
-    out_dir  = _dated_dir()
-    stem     = datetime.now().strftime("%Y%m%d%H%M_") + os.path.splitext(os.path.basename(file_path))[0]
-    _finish_transcription(job_id, file_path, rc, unique_path(out_dir, stem, ".md"))
+    out_dir = _dated_dir()
+    stem    = datetime.now().strftime("%Y%m%d%H%M_") + os.path.splitext(os.path.basename(file_path))[0]
+    _transcribe_and_finish(job_id, file_path, lang, thr, total,
+                           unique_path(out_dir, stem, ".md"))
 
 
 def _cleanup_old_jobs() -> None:
@@ -471,11 +548,71 @@ def _cleanup_old_jobs() -> None:
 threading.Thread(target=_cleanup_old_jobs, daemon=True).start()
 
 
+# ── SQLite 인덱스 초기화 + 백그라운드 reindex ─────────────────────────
+db.init()
+
+
+def _bg_reindex():
+    try:
+        s = db.reindex_all()
+        log.info("db reindex: %s", s)
+    except Exception as e:
+        log.error("db reindex error: %s", e)
+
+
+threading.Thread(target=_bg_reindex, daemon=True).start()
+
+
+# ── Remote-access gating ──────────────────────────────────────────────
+# 로컬(=동일 머신)에서는 모든 라우트 허용. 외부(Tailscale/LAN)에서는
+# 이력조회 관련 라우트만 허용하고, 그 외 경로는 이력 페이지로 리다이렉트한다.
+#  - 모바일 UA → /m (모바일 이력)
+#  - 데스크톱  → /  (index.html이 원격 읽기전용 이력 모드로 렌더)
+_LOOPBACK = {"127.0.0.1", "::1"}
+# 원격에서 허용되는 데이터 엔드포인트(이력 조회/요약/읽음/삭제). 페이지(/, /m)는 별도 처리.
+_REMOTE_DATA_ALLOWED = {
+    "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
+}
+_MOBILE_UA = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.I)
+
+
+def _is_remote() -> bool:
+    return request.remote_addr not in _LOOPBACK
+
+
+@app.before_request
+def _restrict_remote_access():
+    if request.remote_addr in _LOOPBACK:
+        return
+    p = request.path
+    # 데이터/정적 엔드포인트는 그대로 허용
+    if (p in _REMOTE_DATA_ALLOWED
+            or p.startswith("/m/")
+            or p.startswith("/static/")):
+        return
+    is_mobile = bool(_MOBILE_UA.search(request.headers.get("User-Agent", "")))
+    # 이력 페이지: 디바이스에 맞는 쪽으로 정규화
+    if p in ("/", "/m"):
+        if p == "/" and is_mobile:
+            return redirect("/m", 302)
+        if p == "/m" and not is_mobile:
+            return redirect("/", 302)
+        return  # 디바이스에 맞는 페이지 → 통과
+    # 그 외 모든 경로 → 403 문구 없이 이력 페이지로 이동
+    return redirect("/m" if is_mobile else "/", 302)
+
+
 # ── Routes ────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    return render_template("index.html", default_prompt=DEFAULT_PROMPT)
+    # 원격 접속이면 전사 UI를 숨긴 읽기전용 이력 모드로 렌더
+    return render_template("index.html", default_prompt=DEFAULT_PROMPT, remote=_is_remote())
+
+
+@app.route("/m")
+def mobile_history():
+    return render_template("mobile.html")
 
 
 @app.route("/files")
@@ -548,9 +685,9 @@ def start():
 
 @app.route("/stop/<job_id>", methods=["POST"])
 def stop_job(job_id: str):
-    if job_id not in jobs:
+    job = jobs.get(job_id)
+    if job is None:
         return _json({"error": "Not found"}, 404)
-    job = jobs[job_id]
     job["stop_event"].set()
     proc = job.get("proc")
     if proc and proc.poll() is None:
@@ -560,11 +697,12 @@ def stop_job(job_id: str):
 
 @app.route("/stream/<job_id>")
 def stream(job_id: str):
-    if job_id not in jobs:
+    job = jobs.get(job_id)
+    if job is None:
         return "Not found", 404
 
     def generate():
-        q = jobs[job_id]["queue"]
+        q = job["queue"]
         while True:
             try:
                 item = q.get(timeout=60)
@@ -585,52 +723,189 @@ def stream(job_id: str):
 
 @app.route("/result/<job_id>")
 def result(job_id: str):
-    if job_id not in jobs:
+    job = jobs.get(job_id)
+    if job is None:
         return _json({"error": "Not found"}, 404)
-    job = jobs[job_id]
     return _json({
         "status":   job["status"],
         "result":   job["result"],
         "filename": os.path.basename(job["output_file"]) if job["output_file"] else None,
+        "txt_path": job["output_file"],  # 요약은 이 경로 기반(잡 생명주기와 분리)
     })
 
 
 @app.route("/download/<job_id>")
 def download(job_id: str):
-    if job_id not in jobs:
+    job = jobs.get(job_id)
+    if job is None:
         return "Not found", 404
-    path = jobs[job_id].get("output_file")
+    path = job.get("output_file")
     if not path or not os.path.exists(path):
         return "File not found", 404
     return send_file(path, as_attachment=True)
 
 
-@app.route("/summarize/<job_id>", methods=["POST"])
-def summarize(job_id: str):
-    if job_id not in jobs:
-        return _json({"error": "Not found"}, 404)
-    data       = request.get_json(force=True)
-    transcript = jobs[job_id].get("result")
-    if not transcript:
+def _summary_path_for_md(md_path: str) -> str | None:
+    """전사 md 경로 → res/summary/{date}/{stem}.md 경로 산출(디렉토리 생성 포함)."""
+    try:
+        rel = os.path.relpath(md_path, RES_DIR)
+    except ValueError:
+        return None
+    if rel.startswith(".."):
+        return None
+    p = os.path.join(SUMMARY_DIR, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    return p
+
+
+def _md_from_summary_path(save_path: str) -> str | None:
+    """summary md 경로에서 짝이 되는 전사 md 경로 역산."""
+    try:
+        rel = os.path.relpath(save_path, SUMMARY_DIR)
+    except ValueError:
+        return None
+    if rel.startswith(".."):
+        return None
+    return os.path.join(RES_DIR, rel)
+
+
+def _reindex_summary(save_path: str) -> None:
+    md = _md_from_summary_path(save_path)
+    if md:
+        try:
+            db.upsert_summary_only(md)
+        except Exception:
+            pass
+
+
+def _summarize_with_claude(prompt: str, save_path: str | None):
+    """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장.
+
+    프롬프트는 argv가 아니라 stdin으로 전달한다(긴 전사로 인한 ARG_MAX 초과 회피).
+    """
+    proc = subprocess.Popen(
+        [CLAUDE_BIN, "-p",
+         "--output-format", "stream-json",
+         "--include-partial-messages",
+         "--model", CLAUDE_MODEL,
+         "--verbose"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", bufsize=1,
+    )
+    try:
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+    except Exception as e:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        yield f"event: error\ndata: {json.dumps('프롬프트 전달 실패: ' + str(e))}\n\n"
+        return
+    chunks: list[str] = []
+    final: str | None = None
+    error_msg: str | None = None
+    try:
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = ev.get("type")
+            if t == "stream_event":
+                sub = ev.get("event") or {}
+                if sub.get("type") == "content_block_delta":
+                    delta = sub.get("delta") or {}
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text") or ""
+                        if text:
+                            chunks.append(text)
+                            yield f"data: {json.dumps(text)}\n\n"
+            elif t == "result":
+                if ev.get("is_error"):
+                    error_msg = ev.get("result") or "Claude CLI 오류"
+                else:
+                    final = ev.get("result") or "".join(chunks)
+        proc.wait(timeout=10)
+    except Exception as e:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        error_msg = str(e)
+
+    if error_msg:
+        yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
+        return
+
+    full = final if final is not None else "".join(chunks)
+    if full and save_path:
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(full)
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+            return
+        _reindex_summary(save_path)
+    yield "event: done\ndata: \n\n"
+
+
+def _summarize_with_gemini(prompt: str, save_path: str | None):
+    if not os.environ.get("GEMINI_API_KEY"):
+        yield f"event: error\ndata: {json.dumps('GEMINI_API_KEY가 .env 파일에 없습니다.')}\n\n"
+        return
+    chunks: list[str] = []
+    try:
+        for chunk in _get_gemini_model().generate_content(prompt, stream=True):
+            if chunk.text:
+                chunks.append(chunk.text)
+                yield f"data: {json.dumps(chunk.text)}\n\n"
+    except Exception as e:
+        yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
+        return
+
+    full = "".join(chunks)
+    if full and save_path:
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(full)
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+            return
+        _reindex_summary(save_path)
+    yield "event: done\ndata: \n\n"
+
+
+@app.route("/summarize", methods=["POST"])
+def summarize():
+    """전사 md 파일 경로(txt_path) 기반 요약. 잡 생명주기/메모리 상태와 무관하게 동작."""
+    data = request.get_json(force=True) or {}
+    abs_path, err = _check_res_path(data.get("txt_path") or "")
+    if err:
+        return err
+    if not os.path.isfile(abs_path):
+        return _json({"error": "전사 파일을 찾을 수 없습니다."}, 404)
+
+    # 전사 md(메타+본문) 전체를 프롬프트에 주입 — 메타 표 작성을 위해 필요.
+    with open(abs_path, encoding="utf-8", errors="replace") as f:
+        transcript_blob = f.read()
+    if not transcript_blob.strip():
         return _json({"error": "전사 결과가 없습니다."}, 400)
 
-    if not os.environ.get("GEMINI_API_KEY"):
-        def _err():
-            yield f"event: error\ndata: {json.dumps('GEMINI_API_KEY가 .env 파일에 없습니다.')}\n\n"
-        return Response(_err(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
+    prompt = (data.get("prompt") or DEFAULT_PROMPT).replace("{transcript}", transcript_blob)
+    save_path = _summary_path_for_md(abs_path)
+    log.info("summarize start: %s (backend=%s)", os.path.basename(abs_path), SUMMARY_BACKEND)
 
-    prompt = (data.get("prompt") or DEFAULT_PROMPT).replace("{transcript}", transcript)
+    if SUMMARY_BACKEND == "gemini":
+        gen = _summarize_with_gemini(prompt, save_path)
+    else:
+        gen = _summarize_with_claude(prompt, save_path)
 
-    def generate():
-        try:
-            for chunk in _get_gemini_model().generate_content(prompt, stream=True):
-                if chunk.text:
-                    yield f"data: {json.dumps(chunk.text)}\n\n"
-            yield "event: done\ndata: \n\n"
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream",
+    return Response(gen, mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
@@ -644,55 +919,67 @@ def get_prompt():
 
 @app.route("/prompt", methods=["POST"])
 def save_prompt():
-    data = request.get_json(force=True)
+    data = request.get_json(force=True) or {}
+    prompt = data.get("prompt", "")
+    # {transcript} 자리표시자 필수 — 없으면 요약 시 전사 본문이 주입되지 않음.
+    if "{transcript}" not in prompt:
+        return _json({"error": "{transcript} 자리표시자가 필요합니다."}, 400)
     with open(PROMPT_FILE, "w", encoding="utf-8") as f:
-        f.write(data.get("prompt", ""))
+        f.write(prompt)
     return _json({"ok": True})
 
 
 @app.route("/history")
 def get_history():
-    if not os.path.isdir(RES_DIR):
-        return _json({"items": []})
+    q = (request.args.get("q") or "").strip()
+    unread_only = request.args.get("unread_only") == "1"
     try:
-        date_dirs = sorted(
-            [d for d in os.listdir(RES_DIR) if os.path.isdir(os.path.join(RES_DIR, d))],
-            reverse=True,
-        )
+        items = db.search(q, unread_only=unread_only) if q else db.list_items(unread_only=unread_only)
     except Exception:
-        return _json({"items": []})
-
-    items = []
-    for date_dir in date_dirs:
-        date_path = os.path.join(RES_DIR, date_dir)
-        try:
-            fnames = sorted(os.listdir(date_path), reverse=True)
-        except Exception:
-            continue
-        for fname in fnames:
-            if not fname.endswith(".md"):
-                continue
-            md_path = os.path.join(date_path, fname)
-            try:
-                meta, transcript = _parse_md(md_path)
-            except Exception:
-                continue
-            summary_md = os.path.join(SUMMARY_DIR, date_dir, fname)
-            items.append({
-                "date":         date_dir,
-                "stem":         fname[:-3],
-                "title":        meta.get("title") or fname[:-3],
-                "uploader":     meta.get("uploader") or meta.get("channel") or "—",
-                "duration":     float(meta.get("duration") or 0),
-                "webpage_url":  meta.get("webpage_url") or "",
-                "categories":   meta.get("categories") or [],
-                "tags":         meta.get("tags") or [],
-                "channel_url":  meta.get("channel_url") or "",
-                "has_txt":      bool(transcript),
-                "txt_path":     md_path,
-                "summary_path": summary_md if os.path.isfile(summary_md) else None,
-            })
+        items = []
     return _json({"items": items})
+
+
+@app.route("/history/mark_read", methods=["PATCH"])
+def mark_read():
+    data = request.get_json(force=True)
+    txt_path = (data.get("txt_path") or "").strip()
+    is_read  = bool(data.get("is_read", True))
+    abs_path, err = _check_res_path(txt_path)
+    if err:
+        return err
+    ok = db.mark_read(abs_path, is_read)
+    if not ok:
+        return _json({"error": "항목을 찾을 수 없습니다."}, 404)
+    return _json({"ok": True, "is_read": is_read})
+
+
+@app.route("/history/item", methods=["DELETE"])
+def history_delete():
+    data = request.get_json(force=True)
+    txt_path = (data.get("txt_path") or "").strip()
+    abs_path, err = _check_res_path(txt_path)
+    if err:
+        return err
+    # summary 경로 계산 (DB에서 가져오거나 경로 규칙으로 유추)
+    try:
+        rel = os.path.relpath(abs_path, RES_DIR)
+        summary_path = os.path.join(SUMMARY_DIR, rel)
+    except ValueError:
+        summary_path = None
+    # DB에서 먼저 제거
+    db.delete(abs_path)
+    # 파일 삭제
+    deleted = []
+    errors = []
+    for p in filter(None, [abs_path, summary_path]):
+        if p and os.path.isfile(p):
+            try:
+                os.remove(p)
+                deleted.append(p)
+            except OSError as e:
+                errors.append(str(e))
+    return _json({"ok": True, "deleted": deleted, "errors": errors})
 
 
 @app.route("/history/text", methods=["POST"])
@@ -830,4 +1117,8 @@ def summary_content():
 
 
 if __name__ == "__main__":
-    app.run(debug=False, host="127.0.0.1", port=5000, threaded=True)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "5001"))
+    log.info("starting server on %s:%s — claude=%s, backend=%s, model=%s",
+             host, port, CLAUDE_BIN, SUMMARY_BACKEND, CLAUDE_MODEL)
+    app.run(debug=False, host=host, port=port, threaded=True)

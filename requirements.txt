@@ -1,0 +1,11 @@
+# youtube-script 런타임 의존성
+# 설치: .venv/bin/pip install -r requirements.txt
+#
+# 외부 바이너리(별도 설치 필요): whisper.cpp(whisper-cli), ffmpeg/ffprobe, claude CLI
+
+Flask==3.1.3
+yt-dlp==2026.3.17
+python-dotenv==1.2.2
+
+# 요약 백엔드를 gemini로 쓸 때만 필요 (SUMMARY_BACKEND=gemini)
+google-generativeai==0.8.6

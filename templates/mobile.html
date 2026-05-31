@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <title>이력조회</title>
+  <style>
+    :root {
+      --bg:        #f7f7f8;
+      --surface:   #ffffff;
+      --surface2:  #ececef;
+      --text:      #1a1a1c;
+      --muted:     #6b6b73;
+      --border:    #e2e2e6;
+      --border-strong: #c8c8cf;
+      --highlight: #b07a25;
+      --highlight-soft: rgba(176,122,37,.10);
+      --radius:    10px;
+      --radius-sm: 6px;
+      --row-sel:   rgba(176,122,37,.12);
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:        #0f0f10;
+        --surface:   #1a1a1c;
+        --surface2:  #232326;
+        --text:      #ececef;
+        --muted:     #9a9aa2;
+        --border:    #2c2c30;
+        --border-strong: #3d3d42;
+        --highlight: #e0a64a;
+        --highlight-soft: rgba(224,166,74,.14);
+        --row-sel:   rgba(224,166,74,.16);
+      }
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
+      font-size: 15px; line-height: 1.45; }
+    a { color: inherit; }
+
+    /* 헤더 */
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; gap: .6rem;
+      padding: env(safe-area-inset-top) .9rem .55rem;
+      padding-top: max(env(safe-area-inset-top), .55rem);
+      background: color-mix(in oklab, var(--bg) 88%, transparent);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.01em; flex: 1; }
+    .topbar .count { font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); }
+    .icon-btn {
+      width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+      color: var(--text); cursor: pointer;
+    }
+    .icon-btn:active { background: var(--surface2); }
+    .icon-btn.spin svg { animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 검색 바 */
+    .search {
+      padding: .55rem .9rem .45rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      gap: .5rem;
+      align-items: center;
+    }
+    .search input {
+      flex: 1;
+      min-width: 0;
+      height: 38px;
+      box-sizing: border-box;
+      padding: 0 .75rem;
+      font: inherit; color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: none;
+    }
+    .search input:focus { border-color: var(--highlight); }
+
+    /* PTR */
+    .ptr {
+      height: 0; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11.5px; color: var(--muted);
+      transition: height .15s;
+    }
+    .ptr.visible { height: 38px; }
+
+    /* 카드 1열 */
+    .hist-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: .9rem;
+      padding: .85rem .9rem 2.2rem;
+    }
+    .hist-card {
+      display: flex; flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .hist-card-clickable:active { background: var(--surface2); }
+    .hist-thumb-wrap {
+      position: relative; aspect-ratio: 16/9;
+      background: var(--surface2); overflow: hidden;
+    }
+    .hist-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .hist-thumb-placeholder {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 11px; background: var(--surface2);
+    }
+    .hist-thumb-dur {
+      position: absolute; right: .45rem; bottom: .45rem;
+      background: rgba(0,0,0,.78); color: #fff;
+      font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+      padding: .12rem .4rem; border-radius: 3px; letter-spacing: .02em;
+    }
+    .hist-card-body { display: flex; flex-direction: column; gap: .5rem; padding: .8rem .9rem .85rem; flex: 1; }
+    .hist-card-title {
+      font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.4;
+      margin: 0; color: var(--text);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .hist-card-meta { display: flex; align-items: center; gap: .5rem; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+    .hist-card-uploader {
+      color: var(--text); text-decoration: none; font-weight: 500;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+    }
+    .hist-card-footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .15rem; }
+    .hist-card-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+    .hist-card-actions { display: flex; gap: .35rem; }
+    .hist-icon-btn {
+      width: 34px; height: 34px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: transparent; color: var(--muted); cursor: pointer; padding: 0;
+      text-decoration: none;
+    }
+    .hist-icon-btn:active { background: var(--surface2); color: var(--text); }
+    .hist-icon-btn svg { display: block; }
+    .hist-icon-btn-summary { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+    .hist-icon-btn-youtube { color: #c00; }
+    @media (prefers-color-scheme: dark) { .hist-icon-btn-youtube { color: #ff4d4d; } }
+    .hist-icon-btn:disabled, .hist-icon-btn[disabled] { opacity: .3; pointer-events: none; }
+
+    /* 읽음 여부 */
+    .hist-card-unread { border-left: 3px solid var(--highlight); }
+    .hist-unread-dot {
+      width: 7px; height: 7px;
+      background: var(--highlight);
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: inline-block;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+    .hist-icon-btn-read { color: var(--muted); }
+    .hist-icon-btn-read.is-read { opacity: .45; }
+    .hist-icon-btn-delete { color: var(--muted); }
+    .hist-icon-btn-delete:active { color: #dc2626; background: oklch(0.5 0.2 22 / .08); }
+
+    /* 미읽음 필터 버튼 */
+    .unread-filter-btn {
+      flex-shrink: 0;
+      height: 38px;
+      box-sizing: border-box;
+      padding: 0 .75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      font: inherit; font-size: 13px;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .unread-filter-btn.active {
+      background: var(--highlight-soft);
+      color: var(--highlight);
+      border-color: var(--highlight);
+      font-weight: 600;
+    }
+
+    /* 상태 표시 */
+    .state { padding: 2rem 1rem; text-align: center; color: var(--muted); font-size: 13.5px; }
+    .sentinel { height: 1px; }
+
+    /* 모달 (요약/전사 보기) */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      display: none; z-index: 100;
+    }
+    .modal-backdrop.open { display: block; }
+    .modal {
+      position: fixed; left: 0; right: 0; bottom: 0; top: 0;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      z-index: 101;
+      transform: translateY(100%);
+      transition: transform .22s ease;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .modal.open { transform: translateY(0); }
+    .modal-hdr {
+      display: flex; align-items: center; gap: .6rem;
+      padding: .55rem .85rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .modal-hdr h2 {
+      margin: 0; font-size: 15px; font-weight: 600; flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .modal-body {
+      flex: 1; overflow-y: auto;
+      padding: 1rem 1rem 2rem;
+      font-size: 14px; line-height: 1.62;
+      -webkit-overflow-scrolling: touch;
+    }
+    .modal-body.markdown h1, .modal-body.markdown h2, .modal-body.markdown h3 {
+      margin: 1.1em 0 .4em; line-height: 1.3;
+    }
+    .modal-body.markdown h1 { font-size: 18px; }
+    .modal-body.markdown h2 { font-size: 16.5px; }
+    .modal-body.markdown h3 { font-size: 15px; }
+    .modal-body.markdown p { margin: .55em 0; }
+    .modal-body.markdown ul, .modal-body.markdown ol { padding-left: 1.3em; margin: .55em 0; }
+    .modal-body.markdown li { margin: .25em 0; }
+    .modal-body.markdown code {
+      background: var(--surface2); padding: .1em .35em; border-radius: 4px;
+      font-family: var(--font-mono); font-size: .92em;
+    }
+    .modal-body.markdown pre {
+      background: var(--surface2); padding: .8em; border-radius: 6px;
+      overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px;
+    }
+    .modal-body.markdown blockquote {
+      border-left: 3px solid var(--border-strong); margin: .55em 0; padding: .1em .8em;
+      color: var(--muted);
+    }
+    .modal-body.markdown table {
+      border-collapse: collapse; width: 100%; font-size: 13px; margin: .6em 0;
+    }
+    .modal-body.markdown th, .modal-body.markdown td {
+      border: 1px solid var(--border); padding: .35em .6em; text-align: left;
+    }
+    .modal-body.markdown th { background: var(--surface2); font-weight: 600; }
+    .modal-body.markdown tr:nth-child(even) td { background: oklch(0 0 0 / .025); }
+    .modal-body.markdown hr {
+      border: none; border-top: 1px solid var(--border); margin: 1em 0;
+    }
+    .modal-body.transcript {
+      white-space: pre-wrap; word-break: break-word;
+      font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <h1>이력조회</h1>
+    <span class="count" id="count">—</span>
+    <button class="icon-btn" id="refresh-btn" onclick="loadHistory(true)" aria-label="새로고침">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+  </header>
+
+  <div class="search">
+    <input type="search" id="q" placeholder="제목/업로더 검색…" autocomplete="off" enterkeyhint="search">
+    <button class="unread-filter-btn" id="unread-filter-btn" onclick="toggleUnreadFilter()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      미읽음만
+    </button>
+  </div>
+
+  <div class="ptr" id="ptr"><span id="ptr-text">아래로 당겨 새로고침</span></div>
+
+  <main>
+    <div class="hist-grid" id="grid"></div>
+    <div class="state" id="state">로드 중…</div>
+    <div class="sentinel" id="sentinel"></div>
+  </main>
+
+  <div class="modal-backdrop" id="modal-bd" onclick="closeModal()"></div>
+  <div class="modal" id="modal" role="dialog" aria-modal="true">
+    <header class="modal-hdr">
+      <button class="icon-btn" onclick="closeModal()" aria-label="닫기">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+      </button>
+      <h2 id="modal-title">제목</h2>
+    </header>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<script src="/static/js/common.js"></script>
+<script>
+const SVG = {
+  summary:    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3V2z"/><path d="M10 2v3h3"/><path d="M5.5 8h5M5.5 10.5h5M5.5 6h2.5"/></svg>',
+  transcript: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7"/></svg>',
+  youtube:    '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>',
+  eye:        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eye_off:    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+  delete:     '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>',
+};
+
+const PAGE = 20;
+let ALL = [], FILTERED = [], shownCount = 0, _unreadOnly = false;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+}[c]));
+const attrEsc = s => esc(s);
+
+function ytVideoId(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    const h = u.hostname.replace(/^www\./, '');
+    if (h === 'youtu.be') return u.pathname.slice(1).split('/')[0];
+    if (h.endsWith('youtube.com')) {
+      const v = u.searchParams.get('v'); if (v) return v;
+      const m = u.pathname.match(/^\/(?:shorts|embed|v|live)\/([^/?#]+)/);
+      if (m) return m[1];
+    }
+  } catch (e) {}
+  return '';
+}
+
+function fmtDate(yyyymmdd) {
+  if (!/^\d{8}$/.test(yyyymmdd)) return yyyymmdd || '';
+  return `${yyyymmdd.slice(0,4)}-${yyyymmdd.slice(4,6)}-${yyyymmdd.slice(6,8)}`;
+}
+function fmtDur(secs) {
+  if (!secs || secs <= 0) return '';
+  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);
+  if (h) return `${h}시간 ${m}분`;
+  if (m) return s ? `${m}분 ${s}초` : `${m}분`;
+  return `${s}초`;
+}
+function fmtDurBadge(secs) {
+  if (!secs || secs <= 0) return '';
+  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);
+  const mm = String(m).padStart(2,'0'), ss = String(s).padStart(2,'0');
+  return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+async function loadHistory(force) {
+  const btn = $('refresh-btn');
+  btn.classList.add('spin');
+  $('state').textContent = '로드 중…';
+  try {
+    const r = await fetch('/history', { cache: force ? 'no-store' : 'default' });
+    const d = await r.json();
+    ALL = d.items || [];
+  } catch (e) {
+    $('state').textContent = '오류: ' + e.message;
+    btn.classList.remove('spin');
+    return;
+  }
+  btn.classList.remove('spin');
+  applyFilter();
+}
+
+function applyFilter() {
+  const q = $('q').value.trim().toLowerCase();
+  FILTERED = ALL.filter(i => {
+    if (q && !(i.title||'').toLowerCase().includes(q) && !(i.uploader||'').toLowerCase().includes(q)) return false;
+    if (_unreadOnly && i.is_read) return false;
+    return true;
+  });
+  shownCount = 0;
+  $('grid').innerHTML = '';
+  appendPage();
+  $('count').textContent = `${FILTERED.length}건`;
+}
+
+function toggleUnreadFilter() {
+  _unreadOnly = !_unreadOnly;
+  $('unread-filter-btn').classList.toggle('active', _unreadOnly);
+  applyFilter();
+}
+
+function appendPage() {
+  const slice = FILTERED.slice(shownCount, shownCount + PAGE);
+  if (slice.length === 0) {
+    $('state').textContent = FILTERED.length === 0
+      ? (ALL.length === 0 ? '이력이 없습니다.' : '검색 결과가 없습니다.')
+      : '';
+    return;
+  }
+  const html = slice.map(renderCard).join('');
+  $('grid').insertAdjacentHTML('beforeend', html);
+  shownCount += slice.length;
+  $('state').textContent = shownCount >= FILTERED.length ? '' : '스크롤해서 더 보기…';
+}
+
+function renderCard(item) {
+  const vid = ytVideoId(item.webpage_url);
+  const thumb = vid
+    ? `<img class="hist-thumb" src="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" alt="" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${vid}/hqdefault.jpg'">`
+    : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
+  const dur = item.duration
+    ? `<span class="hist-thumb-dur">${fmtDurBadge(item.duration)}</span>` : '';
+  const uploader = item.uploader && item.uploader !== '—'
+    ? (item.channel_url
+        ? `<a class="hist-card-uploader" href="${attrEsc(item.channel_url)}" target="_blank" rel="noopener">${esc(item.uploader)}</a>`
+        : `<span class="hist-card-uploader">${esc(item.uploader)}</span>`)
+    : '';
+  const sumBtn = item.summary_path
+    ? `<button class="hist-icon-btn hist-icon-btn-summary" data-path="${attrEsc(item.summary_path)}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openSummary(this.dataset.path,this.dataset.title)" aria-label="요약">${SVG.summary}</button>`
+    : `<button class="hist-icon-btn hist-icon-btn-summary" disabled aria-label="요약 없음">${SVG.summary}</button>`;
+  const txtBtn = item.has_txt
+    ? `<button class="hist-icon-btn" data-path="${attrEsc(item.txt_path)}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openTranscript(this.dataset.path,this.dataset.title)" aria-label="전사">${SVG.transcript}</button>`
+    : `<button class="hist-icon-btn" disabled aria-label="전사 없음">${SVG.transcript}</button>`;
+  const ytBtn = item.webpage_url
+    ? `<a class="hist-icon-btn hist-icon-btn-youtube" href="${attrEsc(item.webpage_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" aria-label="YouTube">${SVG.youtube}</a>`
+    : `<button class="hist-icon-btn hist-icon-btn-youtube" disabled aria-label="URL 없음">${SVG.youtube}</button>`;
+  const readBtn = `<button class="hist-icon-btn hist-icon-btn-read${item.is_read ? ' is-read' : ''}"
+    data-path="${attrEsc(item.txt_path)}" data-read="${item.is_read ? '1' : '0'}"
+    onclick="event.stopPropagation();toggleRead(this)"
+    aria-label="${item.is_read ? '읽음' : '안읽음'}">${item.is_read ? SVG.eye_off : SVG.eye}</button>`;
+  const delBtn = `<button class="hist-icon-btn hist-icon-btn-delete"
+    data-path="${attrEsc(item.txt_path)}" data-title="${attrEsc(item.title)}"
+    onclick="event.stopPropagation();deleteCard(this)"
+    aria-label="삭제">${SVG.delete}</button>`;
+
+  const unreadDot = !item.is_read ? '<span class="hist-unread-dot"></span>' : '';
+  const unreadClass = !item.is_read ? ' hist-card-unread' : '';
+  const clickable = item.summary_path
+    ? ` hist-card-clickable" data-sum-path="${attrEsc(item.summary_path)}" data-title="${attrEsc(item.title)}" onclick="openSummary(this.dataset.sumPath,this.dataset.title)`
+    : '';
+  return `<article class="hist-card${unreadClass}${clickable}">
+    <div class="hist-thumb-wrap">${thumb}${dur}</div>
+    <div class="hist-card-body">
+      <h3 class="hist-card-title">${unreadDot}${esc(item.title)}</h3>
+      <div class="hist-card-meta">${uploader}</div>
+      <div class="hist-card-footer">
+        <span class="hist-card-date">${fmtDate(item.date)}</span>
+        <div class="hist-card-actions">${readBtn}${sumBtn}${txtBtn}${ytBtn}${delBtn}</div>
+      </div>
+    </div>
+  </article>`;
+}
+
+async function toggleRead(btn) {
+  const mdPath  = btn.dataset.path;
+  const wasRead = btn.dataset.read === '1';
+  const newRead = !wasRead;
+  try {
+    if (!(await YS.apiMarkRead(mdPath, newRead))) return;
+  } catch { return; }
+
+  // ALL 배열 내 항목 업데이트
+  const item = ALL.find(i => i.txt_path === mdPath);
+  if (item) item.is_read = newRead;
+
+  // 버튼 즉시 갱신
+  btn.dataset.read = newRead ? '1' : '0';
+  btn.innerHTML = newRead ? SVG.eye_off : SVG.eye;
+  btn.classList.toggle('is-read', newRead);
+
+  const card = btn.closest('article');
+  if (card) {
+    card.classList.toggle('hist-card-unread', !newRead);
+    const dot = card.querySelector('.hist-unread-dot');
+    if (newRead && dot) dot.remove();
+    else if (!newRead && !dot) {
+      const titleEl = card.querySelector('.hist-card-title');
+      if (titleEl) titleEl.insertAdjacentHTML('afterbegin', '<span class="hist-unread-dot"></span>');
+    }
+  }
+
+  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거
+  if (_unreadOnly && newRead) applyFilter();
+}
+
+async function deleteCard(btn) {
+  const mdPath = btn.dataset.path;
+  const title  = btn.dataset.title || '이 항목';
+  if (!confirm(`"${title}" 을(를) 삭제하시겠습니까?\n\n전사 파일과 요약 파일이 모두 삭제됩니다.`)) return;
+
+  btn.disabled = true;
+  try {
+    if (!(await YS.apiDeleteItem(mdPath))) { btn.disabled = false; return; }
+  } catch { btn.disabled = false; return; }
+
+  // ALL 배열에서 제거 후 다시 필터 적용
+  const idx = ALL.findIndex(i => i.txt_path === mdPath);
+  if (idx !== -1) ALL.splice(idx, 1);
+  applyFilter();
+}
+
+/* ── 모달 ── */
+let _modalPushed = false;
+
+function openModal(title) {
+  $('modal-title').textContent = title || '';
+  $('modal-body').textContent = '로드 중…';
+  $('modal-body').className = 'modal-body';
+  $('modal-bd').classList.add('open');
+  $('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  if (!_modalPushed) {
+    history.pushState({ modal: true }, '');
+    _modalPushed = true;
+  }
+}
+
+function _closeModalUI() {
+  $('modal').classList.remove('open');
+  $('modal-bd').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function closeModal() {
+  _closeModalUI();
+  if (_modalPushed) {
+    _modalPushed = false;
+    history.back(); // 열 때 push한 state를 다시 pop
+  }
+}
+
+/* ── 뒤로가기로 모달 닫기 ── */
+window.addEventListener('popstate', () => {
+  if (_modalPushed) {
+    _modalPushed = false;
+    _closeModalUI();
+  }
+});
+
+async function openSummary(path, title) {
+  openModal(title);
+  try {
+    const d = await YS.apiSummaryContent(path);
+    if (d.error) {
+      $('modal-body').textContent = '오류: ' + d.error;
+    } else {
+      $('modal-body').className = 'modal-body markdown';
+      $('modal-body').innerHTML = YS.renderMarkdown(d.content || '');
+    }
+  } catch (e) {
+    $('modal-body').textContent = '오류: ' + e.message;
+  }
+}
+
+async function openTranscript(path, title) {
+  openModal(title);
+  try {
+    const r = await fetch('/history/text', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ txt_path: path })
+    });
+    const d = await r.json();
+    if (d.error) {
+      $('modal-body').textContent = '오류: ' + d.error;
+    } else {
+      $('modal-body').className = 'modal-body transcript';
+      $('modal-body').textContent = d.text || '';
+    }
+  } catch (e) {
+    $('modal-body').textContent = '오류: ' + e.message;
+  }
+}
+
+/* 아주 가벼운 markdown 렌더러 (요약 표시용) */
+// 마크다운 렌더링은 공유 모듈(YS.renderMarkdown, marked.js 기반)로 일원화.
+// 수제 파서 제거 → index/summary와 동일 엔진으로 표·이스케이프 처리 일치.
+function mdToHtml(src) { return YS.renderMarkdown(src); }
+
+/* ── 검색 디바운스 ── */
+let searchTimer;
+$('q').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applyFilter, 180);
+});
+
+/* ── 무한 스크롤 ── */
+const io = new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting && shownCount < FILTERED.length) appendPage();
+}, { rootMargin: '400px' });
+io.observe($('sentinel'));
+
+/* ── Pull-to-refresh ── */
+let ptrY0 = 0, ptrDy = 0, ptrActive = false;
+window.addEventListener('touchstart', e => {
+  if (window.scrollY > 0) return;
+  ptrY0 = e.touches[0].clientY; ptrDy = 0; ptrActive = true;
+}, { passive: true });
+window.addEventListener('touchmove', e => {
+  if (!ptrActive) return;
+  ptrDy = e.touches[0].clientY - ptrY0;
+  if (ptrDy > 8) {
+    $('ptr').classList.add('visible');
+    $('ptr-text').textContent = ptrDy > 70 ? '놓으면 새로고침' : '아래로 당겨 새로고침';
+  }
+}, { passive: true });
+window.addEventListener('touchend', () => {
+  if (!ptrActive) return;
+  if (ptrDy > 70) loadHistory(true);
+  $('ptr').classList.remove('visible');
+  ptrActive = false; ptrDy = 0;
+}, { passive: true });
+
+/* ── ESC로 모달 닫기 ── */
+window.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* ── 진입 시 자동 fetch ── */
+loadHistory();
+
+/* ── 페이지 가시화 시 자동 새로고침 (다른 탭에서 돌아올 때) ── */
+let lastRefresh = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - lastRefresh > 60_000) {
+    lastRefresh = Date.now();
+    loadHistory(true);
+  }
+});
+</script>
+</body>
+</html>

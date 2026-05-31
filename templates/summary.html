@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<script src="/static/js/common.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -496,14 +497,7 @@ function toggleTheme() {
   $('theme-btn').textContent = t === 'light' ? '☀' : '◐';
 })();
 
-// ── marked.js 설정 ─────────────────────────────────────
-const renderer = new marked.Renderer();
-renderer.link = function(href, title, text) {
-  const h = (typeof href === 'object') ? href.href : href;
-  const t = (typeof href === 'object') ? href.text : text;
-  return `<a href="${h}" target="_blank" rel="noopener noreferrer">${t}</a>`;
-};
-marked.use({ renderer, breaks: false, gfm: true });
+// marked.js 설정은 공유 모듈 common.js(YS)에서 일원화.
 
 // ── State ──────────────────────────────────────────────
 let currentPath = null;
@@ -619,7 +613,7 @@ async function selectFile(path, itemEl) {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    $('md-body').innerHTML = marked.parse(data.content);
+    $('md-body').innerHTML = YS.renderMarkdown(data.content);
     $('content').scrollTop = 0;
   } catch (e) {
     $('md-body').innerHTML = `<p class="md-error">오류: ${e.message}</p>`;
