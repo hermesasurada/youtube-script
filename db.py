@@ -268,6 +268,22 @@ def delete(md_path: str) -> None:
         _conn().execute("DELETE FROM items WHERE md_path = ?", (md_path,))
 
 
+def close_conn() -> None:
+    """현재 스레드의 SQLite 연결을 닫는다.
+
+    Flask 개발 서버는 요청마다 새 스레드를 만들고, 각 스레드가 _conn()으로
+    별도 연결(WAL이면 db/-wal/-shm = FD 3개)을 열어 threadlocal에 캐시한다.
+    요청 종료 시 닫지 않으면 FD가 누적돼 'Too many open files'로 이어진다.
+    """
+    c = getattr(_local, "c", None)
+    if c is not None:
+        try:
+            c.close()
+        except Exception:
+            pass
+        _local.c = None
+
+
 # ── 조회 ───────────────────────────────────────────────────────────────
 
 def _row_to_item(r: sqlite3.Row) -> dict:

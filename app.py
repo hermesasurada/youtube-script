@@ -21,6 +21,28 @@ logging.basicConfig(
 )
 log = logging.getLogger("yt-script")
 
+
+def _raise_fd_limit():
+    """launchd 기본 소프트 한도(256)는 너무 낮다 — 가능한 만큼 상향(FD 고갈 방지)."""
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        for target in (16384, 10240, 8192, 4096):
+            cap = target if hard == resource.RLIM_INFINITY else min(target, hard)
+            if cap <= soft:
+                return
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (cap, hard))
+                log.info("FD soft limit raised: %d -> %d", soft, cap)
+                return
+            except (ValueError, OSError):
+                continue
+    except Exception as e:
+        log.warning("could not raise FD limit: %s", e)
+
+
+_raise_fd_limit()
+
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -578,6 +600,15 @@ _MOBILE_UA = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.I)
 
 def _is_remote() -> bool:
     return request.remote_addr not in _LOOPBACK
+
+
+@app.teardown_request
+def _close_db_conn(exc):
+    # 요청 처리 스레드의 SQLite 연결을 닫아 FD 누적 방지(개발서버 thread-per-request).
+    try:
+        db.close_conn()
+    except Exception:
+        pass
 
 
 @app.before_request
