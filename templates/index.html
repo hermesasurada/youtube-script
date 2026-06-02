@@ -63,25 +63,9 @@
 
     <div class="sidebar-spacer"></div>
 
-    <div class="field">
-      <label>언어</label>
-      <div class="lang-toggle">
-        <button class="lang-btn active" data-val="auto" onclick="setLang(this)">AUTO</button>
-        <button class="lang-btn" data-val="en" onclick="setLang(this)">영어</button>
-        <button class="lang-btn" data-val="ko" onclick="setLang(this)">한글</button>
-      </div>
-      <input type="hidden" id="language" value="auto">
-    </div>
-
-    <div class="field">
-      <label>스레드 수</label>
-      <div class="threads-preset">
-        <button class="threads-preset-btn" data-val="4"  onclick="setThreads(this)">4</button>
-        <button class="threads-preset-btn" data-val="6"  onclick="setThreads(this)">6</button>
-        <button class="threads-preset-btn active" data-val="8"  onclick="setThreads(this)">8</button>
-      </div>
-      <input type="hidden" id="threads" value="8">
-    </div>
+    <!-- 언어=auto, 스레드=8 고정 (옵션 UI 제거, 기본값 유지) -->
+    <input type="hidden" id="language" value="auto">
+    <input type="hidden" id="threads" value="8">
 
     <div class="field">
       <label>완료 후 동작</label>
@@ -1460,18 +1444,6 @@ function toggleVideoFrames() {
   cb.checked = !cb.checked;
   btn.classList.toggle('on', cb.checked);
   btn.querySelector('.onoff-state').textContent = cb.checked ? 'ON' : 'OFF';
-}
-
-function setLang(btn) {
-  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('language').value = btn.dataset.val;
-}
-
-function setThreads(btn) {
-  document.querySelectorAll('.threads-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('threads').value = btn.dataset.val;
 }
 
 function removeFromQueue(idx) {
