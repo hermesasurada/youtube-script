@@ -302,8 +302,9 @@ _KF_APX_RE   = re.compile(r"\n*##\s*기타 자료 캡처[ \t]*\n*")
 def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], url_base: str):
     """요약 md에 가로 스크롤 kf-strip(<div>) 주입. 재실행 시 기존 주입 제거(멱등).
 
-    한 소제목 아래에 몰리지 않도록, 섹션 내부의 '안전한 경계'(소제목 직후 + 섹션 내 빈 줄
-    = 블록 경계)에 프레임을 시간순으로 분산 삽입한다. 리스트/표 중간을 깨지 않음.
+    배치 정책: '한 소제목당 한 묶음'. 각 섹션의 프레임을 소제목 직후에 하나의
+    가로 스크롤 스트립으로 모은다(이미지↔텍스트 잦은 교차 방지). 섹션 간 분산은
+    요약의 ### 소제목 수로 자연 확보된다. 주입 <div>는 앞뒤 빈 줄로 독립 블록화.
     """
     text = open(md_path, encoding="utf-8", errors="replace").read()
     # 이전 주입 제거(멱등) — 제거 후 문단이 붙지 않도록 빈 줄로 치환하고 과한 공백 정리
@@ -327,54 +328,30 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
         return f'<div class="kf-strip">{figs}</div>'
 
     lines = text.split("\n")
-    is_head = [bool(re.match(r"^#{2,3}\s+", ln)) for ln in lines]
-    sec_of = []                       # 각 줄의 소속 섹션 인덱스
+    # 각 섹션(소제목)의 heading 줄 인덱스
+    head_line_of_sec: dict = {}
     hc = -1
-    for h in is_head:
-        if h:
-            hc += 1
-        sec_of.append(hc)
-
-    # 섹션별 삽입 후보 줄(이 줄 '뒤'에 삽입): 소제목 줄 + 섹션 내부 빈 줄(블록 경계)
-    points: dict = {}
     for i, ln in enumerate(lines):
-        sec = sec_of[i]
-        if sec < 0:
-            continue
-        if is_head[i] or ln.strip() == "":
-            points.setdefault(sec, []).append(i)
+        if re.match(r"^#{2,3}\s+", ln):
+            hc += 1
+            head_line_of_sec[hc] = i
 
-    inserts: dict = {}                # line_index -> [strip_html, ...]
+    inserts: dict = {}                # heading 줄 인덱스 -> strip_html (섹션당 1개)
     for sec, frames in bysec.items():
         if sec is None:
             continue
-        pts = points.get(sec) or []
-        if not pts:                   # 안전 지점 없으면 소제목 줄 뒤에 한 번에
-            hl = next((i for i in range(len(lines)) if sec_of[i] == sec and is_head[i]), None)
-            if hl is not None:
-                inserts.setdefault(hl, []).append(strip_html(frames))
-            continue
-        g = min(len(frames), len(pts))            # 그룹(=삽입 지점) 수
-        for j in range(g):
-            chunk = frames[round(j * len(frames) / g):round((j + 1) * len(frames) / g)]
-            pt = pts[round(j * (len(pts) - 1) / (g - 1))] if g > 1 else pts[0]
-            if chunk:
-                inserts.setdefault(pt, []).append(strip_html(chunk))
+        hl = head_line_of_sec.get(sec)
+        if hl is not None:
+            inserts[hl] = strip_html(frames)
 
     # 주입되는 <div>는 앞뒤에 빈 줄을 둬야 marked가 독립 HTML 블록으로 처리한다.
-    # (빈 줄이 없으면 div가 시작한 HTML 블록이 다음 빈 줄까지 뒤 내용을 raw로 삼켜
-    #  ### 헤딩이 렌더되지 않고 문단이 붙어버린다.)
-    def _emit(out, s):
-        if out and out[-1].strip() != "":
-            out.append("")
-        out.append(s)
-        out.append("")
-
     out = []
     for i, ln in enumerate(lines):
         out.append(ln)
-        for s in inserts.get(i, []):
-            _emit(out, s)
+        if i in inserts:
+            out.append("")
+            out.append(inserts[i])
+            out.append("")
     if None in bysec:                 # 섹션 미정 → 부록
         if out and out[-1].strip() != "":
             out.append("")
