@@ -50,6 +50,7 @@ except ImportError:
     pass
 
 import db
+import keyframe_report
 
 try:
     import yt_dlp
@@ -616,10 +617,11 @@ def _restrict_remote_access():
     if request.remote_addr in _LOOPBACK:
         return
     p = request.path
-    # 데이터/정적 엔드포인트는 그대로 허용
+    # 데이터/정적 엔드포인트는 그대로 허용 (/sframe = 요약 키프레임 이미지)
     if (p in _REMOTE_DATA_ALLOWED
             or p.startswith("/m/")
-            or p.startswith("/static/")):
+            or p.startswith("/static/")
+            or p.startswith("/sframe/")):
         return
     is_mobile = bool(_MOBILE_UA.search(request.headers.get("User-Agent", "")))
     # 이력 페이지: 디바이스에 맞는 쪽으로 정규화
@@ -1145,6 +1147,59 @@ def summary_content():
         return _json({"content": content})
     except Exception as e:
         return _json({"error": str(e)}, 500)
+
+
+@app.route("/sframe/<path:rel>")
+def serve_summary_frame(rel: str):
+    """요약 키프레임 이미지 서빙 (res/summary 하위로 경로 검증)."""
+    p = os.path.realpath(os.path.join(SUMMARY_DIR, rel))
+    base = os.path.realpath(SUMMARY_DIR)
+    if not p.startswith(base + os.sep):
+        return "denied", 403
+    if not os.path.isfile(p):
+        return "not found", 404
+    return send_file(p)
+
+
+@app.route("/keyframes", methods=["POST"])
+def keyframes():
+    """전사 md(txt_path) 기반으로 영상 키프레임을 추출·정렬해 요약에 합친다.
+
+    요약이 먼저 있어야 함(섹션 정렬 대상). 영상 다운로드 실패 시 요약은 그대로 유지(폴백).
+    """
+    data = request.get_json(force=True) or {}
+    abs_path, err = _check_res_path(data.get("txt_path") or "")
+    if err:
+        return err
+    summary_path = _summary_path_for_md(abs_path)
+    if not summary_path or not os.path.isfile(summary_path):
+        return _json({"ok": False, "reason": "no_summary", "error": "요약이 먼저 필요합니다."}, 400)
+
+    rel = os.path.relpath(summary_path, SUMMARY_DIR)        # {date}/{stem}.md
+    date_dir = rel.split(os.sep)[0]
+    stem = os.path.splitext(os.path.basename(summary_path))[0]
+    frames_dir = os.path.join(SUMMARY_DIR, date_dir, stem + ".frames")
+    url_base = f"/sframe/{date_dir}/{stem}.frames"
+
+    try:
+        res = keyframe_report.generate_keyframes(
+            summary_path, (data.get("url") or "").strip(), frames_dir, url_base)
+    except Exception as e:
+        log.warning("keyframes error: %s", e)
+        return _json({"ok": False, "reason": "error", "error": str(e)})
+
+    if res.get("ok") and res.get("n_frames"):
+        try:
+            db.upsert_summary_only(abs_path)   # 검색 인덱스 갱신
+        except Exception:
+            pass
+        try:
+            with open(summary_path, encoding="utf-8", errors="replace") as f:
+                res["summary_md"] = f.read()   # 갱신된 요약(라이브 재렌더용)
+        except Exception:
+            pass
+    log.info("keyframes: %s (%s)", os.path.basename(summary_path), res)
+    return _json(res)
 
 
 if __name__ == "__main__":

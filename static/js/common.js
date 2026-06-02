@@ -119,4 +119,43 @@
     apiDeleteItem,
     apiSummaryContent,
   };
+
+  // ── 키프레임 스트립(가로 스크롤) + 라이트박스(원본 보기) ────────────
+  // 요약 md에 주입된 <div class="kf-strip">…</div> 를 모든 요약 뷰어에서 공통 처리.
+  function _setupKeyframeUI() {
+    if (document.getElementById("ys-kf-style")) return;
+    const css = `
+.kf-strip{display:flex;gap:.55rem;overflow-x:auto;padding:.4rem 0 .7rem;margin:.5rem 0 1.1rem;-webkit-overflow-scrolling:touch;}
+.kf-strip figure{margin:0;flex:0 0 auto;width:280px;border:1px solid var(--border,#e5e5e5);border-radius:8px;overflow:hidden;background:var(--surface,#fff);}
+.kf-strip img{display:block;width:100%;height:158px;object-fit:cover;cursor:zoom-in;}
+.kf-strip figcaption{font-size:.74rem;color:var(--muted,#666);padding:.35rem .5rem;line-height:1.4;}
+.kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;margin-right:.35rem;}
+.ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:99999;cursor:zoom-out;padding:1.5rem;}
+.ys-lb.open{display:flex;}
+.ys-lb img{max-width:96vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}`;
+    const st = document.createElement("style");
+    st.id = "ys-kf-style"; st.textContent = css;
+    document.head.appendChild(st);
+
+    const lb = document.createElement("div");
+    lb.className = "ys-lb"; lb.id = "ys-lb";
+    lb.innerHTML = '<img alt="">';
+    lb.addEventListener("click", () => lb.classList.remove("open"));
+    document.body.appendChild(lb);
+
+    // 이벤트 위임: 동적으로 삽입된 스트립 이미지도 클릭 시 원본 확대
+    document.addEventListener("click", (e) => {
+      const im = e.target.closest && e.target.closest(".kf-strip img");
+      if (!im) return;
+      lb.querySelector("img").src = im.src;
+      lb.classList.add("open");
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") lb.classList.remove("open");
+    });
+  }
+  if (document.body) _setupKeyframeUI();
+  else document.addEventListener("DOMContentLoaded", _setupKeyframeUI);
+
+  global.YS.setupKeyframeUI = _setupKeyframeUI;
 })(window);

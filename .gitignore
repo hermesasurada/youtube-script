@@ -15,3 +15,5 @@ whisper.cpp/
 *.bak
 flask_out.txt
 flask_err.txt
+.DS_Store
+reports/
