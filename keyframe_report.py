@@ -295,8 +295,8 @@ def build_report(meta: dict, frames: list[tuple[float, str]], verdict: dict, out
 
 # ── 서버 통합 모드: 요약 md에 키프레임 스트립 주입 ──────────────────
 
-_KF_STRIP_RE = re.compile(r"\n?<div class=\"kf-strip\">.*?</div>", re.S)
-_KF_APX_RE   = re.compile(r"\n## 기타 자료 캡처\n", re.S)
+_KF_STRIP_RE = re.compile(r"\n*<div class=\"kf-strip\">.*?</div>[ \t]*\n*", re.S)
+_KF_APX_RE   = re.compile(r"\n*##\s*기타 자료 캡처[ \t]*\n*")
 
 
 def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], url_base: str):
@@ -306,8 +306,10 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
     = 블록 경계)에 프레임을 시간순으로 분산 삽입한다. 리스트/표 중간을 깨지 않음.
     """
     text = open(md_path, encoding="utf-8", errors="replace").read()
-    text = _KF_STRIP_RE.sub("", text)
-    text = _KF_APX_RE.sub("\n", text)
+    # 이전 주입 제거(멱등) — 제거 후 문단이 붙지 않도록 빈 줄로 치환하고 과한 공백 정리
+    text = _KF_STRIP_RE.sub("\n\n", text)
+    text = _KF_APX_RE.sub("\n\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip() + "\n"
     nheads = len(headings)
 
     bysec: dict = {}
@@ -359,14 +361,27 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
             if chunk:
                 inserts.setdefault(pt, []).append(strip_html(chunk))
 
+    # 주입되는 <div>는 앞뒤에 빈 줄을 둬야 marked가 독립 HTML 블록으로 처리한다.
+    # (빈 줄이 없으면 div가 시작한 HTML 블록이 다음 빈 줄까지 뒤 내용을 raw로 삼켜
+    #  ### 헤딩이 렌더되지 않고 문단이 붙어버린다.)
+    def _emit(out, s):
+        if out and out[-1].strip() != "":
+            out.append("")
+        out.append(s)
+        out.append("")
+
     out = []
     for i, ln in enumerate(lines):
         out.append(ln)
         for s in inserts.get(i, []):
-            out.append(s)
+            _emit(out, s)
     if None in bysec:                 # 섹션 미정 → 부록
-        out.append("\n## 기타 자료 캡처")
+        if out and out[-1].strip() != "":
+            out.append("")
+        out.append("## 기타 자료 캡처")
+        out.append("")
         out.append(strip_html(bysec[None]))
+        out.append("")
     open(md_path, "w", encoding="utf-8").write("\n".join(out))
 
 
