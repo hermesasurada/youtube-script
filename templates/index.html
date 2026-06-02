@@ -75,12 +75,12 @@
         <span class="onoff-state">ON</span>
       </button>
       <input type="checkbox" id="auto-summarize" checked style="display:none">
-      <button class="onoff-btn" id="video-frames-btn" onclick="toggleVideoFrames()" title="요약에 영상 키프레임(자료성 캡처) 포함">
+      <button class="onoff-btn on" id="video-frames-btn" onclick="toggleVideoFrames()" title="요약에 영상 키프레임(자료성 캡처) 포함">
         <span class="onoff-dot"></span>
         <span class="onoff-label">영상 캡처 포함</span>
-        <span class="onoff-state">OFF</span>
+        <span class="onoff-state">ON</span>
       </button>
-      <input type="checkbox" id="video-frames" style="display:none">
+      <input type="checkbox" id="video-frames" checked style="display:none">
       <button class="prompt-edit-btn" type="button" onclick="openPromptModal()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         요약 프롬프트 편집
@@ -1505,9 +1505,11 @@ function renderQueue() {
     const removeBtn = item.status !== 'running'
       ? `<button class="queue-item-remove" onclick="removeFromQueue(${i})">✕</button>`
       : '';
+    // 영상정보(제목) 확보 시 제목으로 치환 표시(URL은 내부/툴팁 보존)
+    const display = (item.meta && item.meta.title) ? item.meta.title : item.url;
     return `<li class="queue-item ${cfg.rowCls}">
       <span class="queue-item-idx">${i + 1}</span>
-      <span class="queue-item-url">${esc(item.url)}</span>
+      <span class="queue-item-url" title="${_attrEsc(item.url)}">${esc(display)}</span>
       <span class="queue-status ${cfg.cls}">${cfg.label}</span>
       ${removeBtn}
     </li>`;
