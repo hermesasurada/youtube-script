@@ -1145,25 +1145,29 @@ async function generateSummary() {
       rendered.innerHTML = YS.renderMarkdown(area.textContent);
       area.style.display = 'none';
       rendered.style.display = '';
-      // 영상 캡처 포함 ON이면 키프레임 처리 후 재렌더(다운로드 실패 시 음성 요약 유지)
+      // 영상 캡처 포함 ON이면 백그라운드로 키프레임 처리(큐 정체 방지).
+      // await 하지 않으므로 다음 대기열 항목이 바로 시작됨. 완료 시 같은 항목이면 재렌더.
       if (document.getElementById('video-frames').checked && currentTxtPath) {
-        await runKeyframes(rendered);
+        runKeyframes(currentTxtPath, rendered);
       }
     }
   }
 }
 
-/* 영상 키프레임 추출→요약에 합치기. 실패해도 요약은 유지(폴백). */
-async function runKeyframes(renderedEl) {
+/* 영상 키프레임 추출→요약에 합치기(백그라운드). 실패해도 요약은 유지(폴백).
+   처리 도중 대기열이 다음으로 넘어갔으면(현재 항목 불일치) UI 갱신은 생략. */
+async function runKeyframes(capPath, renderedEl) {
   const statusEl = document.getElementById('summary-status');
-  statusEl.textContent = '🎞 영상 캡처 처리 중…';
+  const here = () => currentTxtPath === capPath;   // 아직 같은 항목을 보고 있나
+  if (here()) statusEl.textContent = '🎞 영상 캡처 처리 중…';
   try {
     const r = await fetch('/keyframes', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({txt_path: currentTxtPath}),
+      body: JSON.stringify({txt_path: capPath}),
     });
     const d = await r.json();
+    if (!here()) return;   // 다른 항목으로 이동함 → 저장은 됐으니 이력에서 확인 가능
     if (d.ok && d.n_frames > 0 && d.summary_md) {
       renderedEl.innerHTML = YS.renderMarkdown(d.summary_md);
       statusEl.textContent = `✓ 완료 · 자료 캡처 ${d.n_frames}장`;
@@ -1175,7 +1179,7 @@ async function runKeyframes(renderedEl) {
       statusEl.textContent = '✓ 완료 (영상 캡처 건너뜀)';
     }
   } catch {
-    statusEl.textContent = '✓ 완료 (영상 캡처 오류 — 음성 요약만 유지)';
+    if (here()) statusEl.textContent = '✓ 완료 (영상 캡처 오류 — 음성 요약만 유지)';
   }
 }
 

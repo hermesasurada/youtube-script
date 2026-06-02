@@ -109,10 +109,12 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
     # 1) 균등 간격 — 전체 타임라인 보장 커버
     if dur > 0:
         interval = max(15, int(dur / MAX_CANDIDATES))
-        subprocess.run([FFMPEG, "-hide_banner", "-i", video,
+        ri = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
                         "-vf", f"fps=1/{interval},scale={FRAME_WIDTH}:-2", "-vsync", "vfr",
                         "-q:v", "3", os.path.join(outdir, "iv_%03d.jpg")],
                        capture_output=True, text=True)
+        if ri.returncode != 0:
+            log(f"    [warn] ffmpeg 균등추출 rc={ri.returncode}: {ri.stderr.strip().splitlines()[-1] if ri.stderr.strip() else ''}")
         for i, f in enumerate(sorted(g for g in os.listdir(outdir) if g.startswith("iv_"))):
             pairs.append((i * interval, os.path.join(outdir, f)))
         log(f"[2] 균등 간격 {interval}s × {len([p for p in pairs])}장 (영상 {int(dur)}s)")
@@ -122,6 +124,8 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
                         "-vf", f"select='gt(scene,{SCENE_THRESHOLD})',showinfo,scale={FRAME_WIDTH}:-2",
                         "-vsync", "vfr", "-q:v", "3", os.path.join(outdir, "scene_%03d.jpg")],
                        capture_output=True, text=True)
+    if r.returncode != 0:
+        log(f"    [warn] ffmpeg 장면추출 rc={r.returncode}: {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ''}")
     times = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", r.stderr)]
     sc = sorted(g for g in os.listdir(outdir) if g.startswith("scene_"))
     for i, f in enumerate(sc):
@@ -173,12 +177,30 @@ JSON 배열로만 답하라(다른 설명 금지):
 
 이미지: {refs}"""
     log(f"[3] 비전 분류+정렬 ({len(frames)}장, 1회 호출)")
-    r = subprocess.run([CLAUDE_BIN, "-p", "--model", VISION_MODEL, prompt],
-                       capture_output=True, text=True)
-    m = re.search(r"\[.*\]", r.stdout, re.S)
-    if not m:
-        log("  비전 응답 파싱 실패:", r.stdout[:500]); return {}
-    res = {d["name"]: d for d in json.loads(m.group(0))}
+
+    def _call() -> list | None:
+        r = subprocess.run([CLAUDE_BIN, "-p", "--model", VISION_MODEL, prompt],
+                           capture_output=True, text=True)
+        out = (r.stdout or "").strip()
+        # 코드펜스 제거
+        out = re.sub(r"^```(?:json)?\s*|\s*```$", "", out, flags=re.M).strip()
+        m = re.search(r"\[.*\]", out, re.S)
+        if not m:
+            return None
+        try:
+            data = json.loads(m.group(0))
+            return data if isinstance(data, list) else None
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    data = _call()
+    if data is None:               # 1회 재시도(모델 형식 일탈 대비)
+        log("  비전 응답 파싱 실패 → 재시도")
+        data = _call()
+    if data is None:
+        log("  비전 응답 파싱 실패(재시도 후) — 키프레임 생략")
+        return {}
+    res = {d["name"]: d for d in data if isinstance(d, dict) and d.get("name")}
     kept = sum(1 for d in res.values() if d.get("keep"))
     log(f"    유지 {kept} / 드롭 {len(res) - kept}")
     return res
@@ -278,32 +300,71 @@ _KF_APX_RE   = re.compile(r"\n## 기타 자료 캡처\n", re.S)
 
 
 def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], url_base: str):
-    """요약 md의 각 소제목 아래에 가로 스크롤 kf-strip(<div>) 주입. 재실행 시 기존 주입은 제거(멱등)."""
+    """요약 md에 가로 스크롤 kf-strip(<div>) 주입. 재실행 시 기존 주입 제거(멱등).
+
+    한 소제목 아래에 몰리지 않도록, 섹션 내부의 '안전한 경계'(소제목 직후 + 섹션 내 빈 줄
+    = 블록 경계)에 프레임을 시간순으로 분산 삽입한다. 리스트/표 중간을 깨지 않음.
+    """
     text = open(md_path, encoding="utf-8", errors="replace").read()
-    # 이전 주입 제거(멱등)
     text = _KF_STRIP_RE.sub("", text)
     text = _KF_APX_RE.sub("\n", text)
+    nheads = len(headings)
 
     bysec: dict = {}
     for k in kept:
-        s = k["section"] if (k["section"] is not None and 0 <= k["section"] < len(headings)) else None
+        s = k["section"] if (k.get("section") is not None and 0 <= k["section"] < nheads) else None
         bysec.setdefault(s, []).append(k)
+    for arr in bysec.values():
+        arr.sort(key=lambda x: x["ts"])
 
     def strip_html(items):
         figs = "".join(
             f'<figure><img src="{url_base}/{it["file"]}" loading="lazy" alt="">'
             f'<figcaption><b>{_hms(it["ts"])}</b> {_html.escape(it.get("caption") or "")}</figcaption></figure>'
-            for it in sorted(items, key=lambda x: x["ts"]))
+            for it in items)
         return f'<div class="kf-strip">{figs}</div>'
 
-    out, hcount = [], -1
-    for ln in text.split("\n"):
+    lines = text.split("\n")
+    is_head = [bool(re.match(r"^#{2,3}\s+", ln)) for ln in lines]
+    sec_of = []                       # 각 줄의 소속 섹션 인덱스
+    hc = -1
+    for h in is_head:
+        if h:
+            hc += 1
+        sec_of.append(hc)
+
+    # 섹션별 삽입 후보 줄(이 줄 '뒤'에 삽입): 소제목 줄 + 섹션 내부 빈 줄(블록 경계)
+    points: dict = {}
+    for i, ln in enumerate(lines):
+        sec = sec_of[i]
+        if sec < 0:
+            continue
+        if is_head[i] or ln.strip() == "":
+            points.setdefault(sec, []).append(i)
+
+    inserts: dict = {}                # line_index -> [strip_html, ...]
+    for sec, frames in bysec.items():
+        if sec is None:
+            continue
+        pts = points.get(sec) or []
+        if not pts:                   # 안전 지점 없으면 소제목 줄 뒤에 한 번에
+            hl = next((i for i in range(len(lines)) if sec_of[i] == sec and is_head[i]), None)
+            if hl is not None:
+                inserts.setdefault(hl, []).append(strip_html(frames))
+            continue
+        g = min(len(frames), len(pts))            # 그룹(=삽입 지점) 수
+        for j in range(g):
+            chunk = frames[round(j * len(frames) / g):round((j + 1) * len(frames) / g)]
+            pt = pts[round(j * (len(pts) - 1) / (g - 1))] if g > 1 else pts[0]
+            if chunk:
+                inserts.setdefault(pt, []).append(strip_html(chunk))
+
+    out = []
+    for i, ln in enumerate(lines):
         out.append(ln)
-        if re.match(r"^#{2,3}\s+", ln):
-            hcount += 1
-            if hcount in bysec:
-                out.append(strip_html(bysec[hcount]))
-    if None in bysec:
+        for s in inserts.get(i, []):
+            out.append(s)
+    if None in bysec:                 # 섹션 미정 → 부록
         out.append("\n## 기타 자료 캡처")
         out.append(strip_html(bysec[None]))
     open(md_path, "w", encoding="utf-8").write("\n".join(out))
@@ -319,12 +380,19 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
     url = (url or meta.get("url") or "").strip()
     if not url:
         return {"ok": False, "reason": "no_url"}
-    os.makedirs(frames_out_dir, exist_ok=True)
     kept: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
         video = download_video(url, os.path.join(tmp, "v"))
         if not video:
             return {"ok": False, "reason": "download_failed"}
+        # 다운로드 성공 후에만 기존 프레임 정리(재생성 시 옛 kf_*.jpg 잔존 방지)
+        if os.path.isdir(frames_out_dir):
+            for old in glob.glob(os.path.join(frames_out_dir, "kf_*.jpg")):
+                try:
+                    os.remove(old)
+                except OSError:
+                    pass
+        os.makedirs(frames_out_dir, exist_ok=True)
         cands = extract_candidates(video, os.path.join(tmp, "f"))
         verdict = classify_and_assign(cands, meta["headings"])
         for ts, path in cands:

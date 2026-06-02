@@ -131,6 +131,8 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 
 # 전사(whisper)는 무거우므로 동시 실행을 제한해 스래싱 방지.
 _transcribe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_TRANSCRIBE", "1")))
+# 키프레임(다운로드+ffmpeg+비전)도 무거우므로 동시 실행 제한(자원 경쟁 방지).
+_keyframe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_KEYFRAMES", "1")))
 
 # 전사 완료 후 다운로드한 오디오(mp3)를 삭제할지 여부. KEEP_AUDIO=1 이면 보존.
 # 단, 사용자가 직접 올린 로컬 파일(file 잡)은 이 값과 무관하게 항상 보존한다.
@@ -1012,6 +1014,15 @@ def history_delete():
                 deleted.append(p)
             except OSError as e:
                 errors.append(str(e))
+    # 키프레임 디렉토리({stem}.frames/)도 함께 정리(누수 방지)
+    if summary_path:
+        frames_dir = os.path.splitext(summary_path)[0] + ".frames"
+        if os.path.isdir(frames_dir):
+            try:
+                shutil.rmtree(frames_dir)
+                deleted.append(frames_dir)
+            except OSError as e:
+                errors.append(str(e))
     return _json({"ok": True, "deleted": deleted, "errors": errors})
 
 
@@ -1182,8 +1193,9 @@ def keyframes():
     url_base = f"/sframe/{date_dir}/{stem}.frames"
 
     try:
-        res = keyframe_report.generate_keyframes(
-            summary_path, (data.get("url") or "").strip(), frames_dir, url_base)
+        with _keyframe_sem:   # 동시 키프레임 처리 직렬화(자원 경쟁 방지)
+            res = keyframe_report.generate_keyframes(
+                summary_path, (data.get("url") or "").strip(), frames_dir, url_base)
     except Exception as e:
         log.warning("keyframes error: %s", e)
         return _json({"ok": False, "reason": "error", "error": str(e)})
