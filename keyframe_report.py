@@ -180,6 +180,7 @@ def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict]) -
 각 캡처에 대해 판단:
 - keep=true 조건: 슬라이드·차트/그래프·다이어그램·스크린샷·데이터 시각화·제품/기기/시연/수술·장비 등 '자료로서 정보를 전달'하는 화면
 - keep=false 조건: 발표자/진행자/인터뷰이 얼굴·토킹헤드, 청중, 블랙/전환 화면, 흐릿하거나 정보없는 장면
+- **중복 제거**: 여러 장이 동일하거나 거의 같은 화면(같은 슬라이드·같은 장면·같은 인물 구도)이면, 그 중 가장 선명하고 정보가 잘 보이는 1장만 keep=true로 하고 나머지는 keep=false. 단 차트의 데이터·텍스트·피사체 등 '내용'이 다르면 서로 다른 것으로 보고 각각 유지할 것.
 - keep=true면 위 소제목 중 내용상 가장 관련있는 번호(section)와 8단어 이내 한국어 caption 부여
 
 JSON 배열로만 답하라(다른 설명 금지):
@@ -396,7 +397,7 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
                     pass
         os.makedirs(frames_out_dir, exist_ok=True)
         cands = extract_candidates(video, os.path.join(tmp, "f"))
-        verdict = classify_and_assign(cands, meta["headings"])
+        verdict = classify_and_assign(cands, meta["headings"])  # 중복은 비전이 keep=false로 표시
         for ts, path in cands:
             v = verdict.get(os.path.basename(path), {})
             if not v.get("keep"):
