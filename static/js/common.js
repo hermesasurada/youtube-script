@@ -89,9 +89,8 @@
       if (h.endsWith('youtube.com')) {
         const v = u.searchParams.get('v');
         if (v) return v;
-        const parts = u.pathname.split('/');
-        const i = parts.findIndex(p => p === 'shorts' || p === 'embed' || p === 'live');
-        if (i !== -1 && parts[i + 1]) return parts[i + 1];
+        const m = u.pathname.match(/^\/(?:shorts|embed|v|live)\/([^/?#]+)/);
+        if (m) return m[1];
       }
     } catch (_) {}
     return '';

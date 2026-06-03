@@ -319,30 +319,12 @@ const PAGE = 20;
 let ALL = [], FILTERED = [], shownCount = 0, _unreadOnly = false;
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
-  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-}[c]));
-const attrEsc = s => esc(s);
+// 순수 헬퍼는 공유 모듈(common.js, YS)로 일원화 — 위임만.
+const esc = s => YS.escapeHtml(s);
+const attrEsc = s => YS.attrEscape(s);
+const ytVideoId = url => YS.ytVideoId(url);
+const fmtDate = d => YS.fmtDate(d);
 
-function ytVideoId(url) {
-  if (!url) return '';
-  try {
-    const u = new URL(url);
-    const h = u.hostname.replace(/^www\./, '');
-    if (h === 'youtu.be') return u.pathname.slice(1).split('/')[0];
-    if (h.endsWith('youtube.com')) {
-      const v = u.searchParams.get('v'); if (v) return v;
-      const m = u.pathname.match(/^\/(?:shorts|embed|v|live)\/([^/?#]+)/);
-      if (m) return m[1];
-    }
-  } catch (e) {}
-  return '';
-}
-
-function fmtDate(yyyymmdd) {
-  if (!/^\d{8}$/.test(yyyymmdd)) return yyyymmdd || '';
-  return `${yyyymmdd.slice(0,4)}-${yyyymmdd.slice(4,6)}-${yyyymmdd.slice(6,8)}`;
-}
 function fmtDur(secs) {
   if (!secs || secs <= 0) return '';
   const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);

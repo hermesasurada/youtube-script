@@ -274,27 +274,9 @@ function resetHistoryFilter() {
   applyHistoryFilter();
 }
 
-function _ytVideoId(url) {
-  if (!url) return '';
-  try {
-    const u = new URL(url);
-    const h = u.hostname.replace(/^www\./, '');
-    if (h === 'youtu.be') return u.pathname.slice(1).split('/')[0];
-    if (h.endsWith('youtube.com')) {
-      const v = u.searchParams.get('v');
-      if (v) return v;
-      const m = u.pathname.match(/^\/(?:shorts|embed|v|live)\/([^/?#]+)/);
-      if (m) return m[1];
-    }
-  } catch (e) {}
-  return '';
-}
-
-function _attrEsc(s) {
-  return (s == null ? '' : String(s))
-    .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// 순수 헬퍼는 공유 모듈(common.js)로 일원화 — 여기선 위임만(함수 선언이라 호이스팅 안전).
+function _ytVideoId(url) { return YS.ytVideoId(url); }
+function _attrEsc(s) { return YS.attrEscape(s); }
 
 const ICON_SUMMARY  = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3V2z"/><path d="M10 2v3h3"/><path d="M5.5 8h5M5.5 10.5h5M5.5 6h2.5"/></svg>';
 const ICON_TRANSCRIPT = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7"/></svg>';
@@ -1042,9 +1024,7 @@ function fmtSize(bytes) {
   return bytes + ' B';
 }
 
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function esc(s) { return YS.escapeHtml(s); }   // 공유 모듈로 일원화(따옴표까지 이스케이프 — 텍스트 노드 안전)
 
 /* ── Build payload (URL or file) ── */
 function buildPayload() {
