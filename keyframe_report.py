@@ -72,8 +72,8 @@ def parse_summary(md_path: str) -> dict:
 
 
 def _parse_ts_label(text: str) -> float | None:
-    """소제목 앞 [mm:ss] 또는 [h:mm:ss] 라벨 → 시작 초. 없으면 None."""
-    m = re.match(r"\s*\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]", text)
+    """소제목의 [mm:ss] 또는 [h:mm:ss] 라벨(앞/뒤 무관) → 시작 초. 없으면 None."""
+    m = re.search(r"\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]", text)
     if not m:
         return None
     a, b, c = m.group(1), m.group(2), m.group(3)

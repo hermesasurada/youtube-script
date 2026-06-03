@@ -38,12 +38,28 @@
     return src;
   }
 
-  /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js. */
+  /**
+   * 렌더된 h3 소제목 꾸미기: 앞에 아이콘(▸) 추가, 본문 내 [mm:ss] 시각 라벨은
+   * 추출해 제목 '뒤'에 회색(.kf-time)으로 배치. (위치 무관 — 앞/뒤 라벨 모두 처리)
+   */
+  function _decorateHeadings(html) {
+    return html.replace(/<h3([^>]*)>([\s\S]*?)<\/h3>/g, (_, attrs, inner) => {
+      let body = inner, time = '';
+      const m = inner.match(/\s*\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*/);
+      if (m) {
+        body = (inner.slice(0, m.index) + inner.slice(m.index + m[0].length)).trim();
+        time = ` <span class="kf-time">${m[1]}</span>`;
+      }
+      return `<h3${attrs}><span class="kf-ico">▸</span> ${body}${time}</h3>`;
+    });
+  }
+
+  /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목 꾸미기. */
   function renderMarkdown(src) {
     src = String(src || '').replace(/^---\n[\s\S]*?\n---\n?/, '');
     src = _fixCjkEmphasis(src);
     if (global.marked && typeof global.marked.parse === 'function') {
-      return global.marked.parse(src);
+      return _decorateHeadings(global.marked.parse(src));
     }
     // marked 미로딩 시 최소 폴백(이스케이프된 평문)
     return '<pre>' + escapeHtml(src) + '</pre>';
@@ -132,7 +148,9 @@
 .kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;margin-right:.35rem;}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:99999;cursor:zoom-out;padding:1.5rem;}
 .ys-lb.open{display:flex;}
-.ys-lb img{max-width:96vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}`;
+.ys-lb img{max-width:96vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}
+.kf-ico{color:var(--highlight,var(--accent,#2563eb));margin-right:.1em;}
+.kf-time{color:var(--muted,#999);font-weight:400;font-size:.82em;font-family:ui-monospace,monospace;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
     document.head.appendChild(st);
