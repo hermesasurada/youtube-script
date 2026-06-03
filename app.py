@@ -813,6 +813,24 @@ def _reindex_summary(save_path: str) -> None:
             pass
 
 
+# Claude Code CLI(에이전트)가 요약을 '파일로 저장'하려다 권한 거부되면 본문 앞에
+# "파일 쓰기 권한이 없어..." 같은 메타문구를 붙이는 경우가 있다. 요약은 출력 형식상
+# 항상 '# 제목' H1로 시작하므로, 첫 H1 앞의 군더더기는 저장 전에 잘라낸다(결정적 보장).
+def _clean_summary(text: str) -> str:
+    if not text:
+        return text
+    m = re.search(r"^#\s+\S", text, re.M)
+    if m and m.start() > 0:
+        return text[m.start():].lstrip()
+    return text
+
+
+# 요약 생성용 시스템 프롬프트: 출력 전용 강제(도구/파일/승인 언급 금지).
+_SUMMARY_SYS = ("요청된 마크다운 요약 결과 본문만 그대로 출력한다. "
+                "파일을 생성·저장하지 말고, 도구를 사용하거나 저장 여부·권한·승인을 "
+                "언급하거나 묻지 말 것. 메타 코멘트 없이 결과만 출력한다.")
+
+
 def _summarize_with_claude(prompt: str, save_path: str | None):
     """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장.
 
@@ -823,6 +841,8 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
          "--output-format", "stream-json",
          "--include-partial-messages",
          "--model", CLAUDE_MODEL,
+         "--allowedTools", "",                       # 도구 비활성(파일 쓰기 시도 차단)
+         "--append-system-prompt", _SUMMARY_SYS,     # 출력 전용 강제
          "--verbose"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -877,7 +897,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
         yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
         return
 
-    full = final if final is not None else "".join(chunks)
+    full = _clean_summary(final if final is not None else "".join(chunks))
     if full and save_path:
         try:
             with open(save_path, "w", encoding="utf-8") as f:
@@ -903,7 +923,7 @@ def _summarize_with_gemini(prompt: str, save_path: str | None):
         yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
         return
 
-    full = "".join(chunks)
+    full = _clean_summary("".join(chunks))
     if full and save_path:
         try:
             with open(save_path, "w", encoding="utf-8") as f:
