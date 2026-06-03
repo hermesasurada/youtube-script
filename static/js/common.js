@@ -152,7 +152,7 @@
 .kf-ico{color:var(--highlight,var(--accent,#2563eb));margin-right:.1em;}
 .kf-time{color:var(--muted,#999);font-weight:400;font-size:.82em;font-family:ui-monospace,monospace;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 강조 틴트 배경(가시성↑, 테마 적응) */
-.sum-md h3,.md-body h3,.markdown h3{background:var(--highlight-soft,rgba(99,102,241,.1));border-left:4px solid var(--highlight,var(--accent,#6366f1));padding:.45rem .7rem;border-radius:0 7px 7px 0;margin:1.5rem 0 .7rem;}`;
+.sum-md h3,.md-body h3,.markdown h3{background:var(--highlight-soft,rgba(99,102,241,.1));border-left:4px solid var(--highlight,var(--accent,#6366f1));padding:.45rem .7rem;border-radius:7px;margin:1.5rem 0 .7rem;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
     document.head.appendChild(st);
