@@ -1191,6 +1191,10 @@ async function runKeyframes(capPath, renderedEl) {
       statusEl.textContent = `✓ 완료 · 자료 캡처 ${d.n_frames}장`;
     } else if (d.reason === 'download_failed') {
       statusEl.textContent = '✓ 완료 (영상 다운로드 실패 — 음성 요약만 유지)';
+    } else if (d.reason === 'vision_failed') {
+      statusEl.textContent = '⚠ 영상 분석 실패(일시 오류) — 다시 시도해 주세요';   // '자료 없음'과 구분
+    } else if (d.reason === 'no_frames') {
+      statusEl.textContent = '⚠ 프레임 추출 실패 — 다시 시도해 주세요';
     } else if (d.ok) {
       statusEl.textContent = '✓ 완료 (자료성 캡처 없음)';
     } else {

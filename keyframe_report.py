@@ -48,12 +48,16 @@ def _claude_bin() -> str:
         cands.sort(key=os.path.getmtime)   # 가장 최근 설치본(존재하는 것만)
         return cands[-1]
     return env or "claude"
-SCENE_THRESHOLD = float(os.environ.get("SCENE_THRESHOLD", "0.3"))
+SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3"))))  # ffmpeg 필터 삽입값 — [0,1] clamp
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
 VISION_MODEL    = os.environ.get("VISION_MODEL", "sonnet")
 VIDEO_MAXH      = int(os.environ.get("VIDEO_MAXH", "1080"))   # 다운로드 최대 높이(해상도)
 FRAME_WIDTH     = int(os.environ.get("FRAME_WIDTH", "1708"))  # 프레임 가로폭(이전 854의 2배)
+# subprocess 타임아웃(초) — 멈춘 ffmpeg/ffprobe/claude가 키프레임 세마포어를 영구 점유하는 것 방지
+PROBE_TIMEOUT   = int(os.environ.get("PROBE_TIMEOUT", "30"))
+FFMPEG_TIMEOUT  = int(os.environ.get("FFMPEG_TIMEOUT", "600"))
+VISION_TIMEOUT  = int(os.environ.get("VISION_TIMEOUT", "300"))
 
 
 def log(*a): print(*a, flush=True)
@@ -106,11 +110,12 @@ def download_video(url: str, out_noext: str) -> str | None:
 
 
 def _probe_duration(video: str) -> float:
-    r = subprocess.run([FFPROBE, "-v", "quiet", "-show_format", "-print_format", "json", video],
-                       capture_output=True, text=True)
     try:
+        r = subprocess.run([FFPROBE, "-v", "quiet", "-show_format", "-print_format", "json", video],
+                           capture_output=True, text=True, timeout=PROBE_TIMEOUT)
         return float(json.loads(r.stdout)["format"]["duration"])
-    except Exception:
+    except Exception as e:
+        log(f"    [warn] ffprobe 실패/타임아웃: {e}")
         return 0.0
 
 
@@ -126,25 +131,36 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
     # 1) 균등 간격 — 전체 타임라인 보장 커버
     if dur > 0:
         interval = max(15, int(dur / MAX_CANDIDATES))
-        ri = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
-                        "-vf", f"fps=1/{interval},scale={FRAME_WIDTH}:-2", "-vsync", "vfr",
-                        "-q:v", "3", os.path.join(outdir, "iv_%03d.jpg")],
-                       capture_output=True, text=True)
-        if ri.returncode != 0:
-            log(f"    [warn] ffmpeg 균등추출 rc={ri.returncode}: {ri.stderr.strip().splitlines()[-1] if ri.stderr.strip() else ''}")
+        try:
+            ri = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
+                            "-vf", f"fps=1/{interval},scale={FRAME_WIDTH}:-2", "-vsync", "vfr",
+                            "-q:v", "3", os.path.join(outdir, "iv_%03d.jpg")],
+                           capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+            if ri.returncode != 0:
+                log(f"    [warn] ffmpeg 균등추출 rc={ri.returncode}: {ri.stderr.strip().splitlines()[-1] if ri.stderr.strip() else ''}")
+        except subprocess.TimeoutExpired:
+            log(f"    [warn] ffmpeg 균등추출 {FFMPEG_TIMEOUT}s 타임아웃 — 부분 결과 사용")
         for i, f in enumerate(sorted(g for g in os.listdir(outdir) if g.startswith("iv_"))):
             pairs.append((i * interval, os.path.join(outdir, f)))
         log(f"[2] 균등 간격 {interval}s × {len([p for p in pairs])}장 (영상 {int(dur)}s)")
 
     # 2) 장면전환 — 짧은 컷/데모/B-roll 포착
-    r = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
-                        "-vf", f"select='gt(scene,{SCENE_THRESHOLD})',showinfo,scale={FRAME_WIDTH}:-2",
-                        "-vsync", "vfr", "-q:v", "3", os.path.join(outdir, "scene_%03d.jpg")],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        log(f"    [warn] ffmpeg 장면추출 rc={r.returncode}: {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ''}")
-    times = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", r.stderr)]
+    scene_stderr = ""
+    try:
+        r = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
+                            "-vf", f"select='gt(scene,{SCENE_THRESHOLD})',showinfo,scale={FRAME_WIDTH}:-2",
+                            "-vsync", "vfr", "-q:v", "3", os.path.join(outdir, "scene_%03d.jpg")],
+                           capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+        scene_stderr = r.stderr or ""
+        if r.returncode != 0:
+            log(f"    [warn] ffmpeg 장면추출 rc={r.returncode}: {scene_stderr.strip().splitlines()[-1] if scene_stderr.strip() else ''}")
+    except subprocess.TimeoutExpired as e:
+        scene_stderr = (e.stderr.decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")) if e.stderr else ""
+        log(f"    [warn] ffmpeg 장면추출 {FFMPEG_TIMEOUT}s 타임아웃 — 부분 결과 사용")
+    times = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", scene_stderr)]
     sc = sorted(g for g in os.listdir(outdir) if g.startswith("scene_"))
+    if len(times) < len(sc):   # 타임스탬프 누락 → 해당 프레임은 0.0(시작)으로 잘못 배치될 수 있음
+        log(f"    [warn] 장면 pts_time {len(times)}개 < 프레임 {len(sc)}장 — 일부 시각 미상(0.0)")
     for i, f in enumerate(sc):
         pairs.append((times[i] if i < len(times) else 0.0, os.path.join(outdir, f)))
     log(f"    장면전환 {len(sc)}장 → 후보 합계 {len(pairs)}장")
@@ -209,8 +225,12 @@ JSON 배열로만 답하라(다른 설명 금지):
     log(f"[3] 비전 분류+정렬 ({len(frames)}장, 1회 호출)")
 
     def _call() -> list | None:
-        r = subprocess.run([_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
-                           capture_output=True, text=True)
+        try:
+            r = subprocess.run([_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
+                               capture_output=True, text=True, timeout=VISION_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            log(f"  비전 호출 {VISION_TIMEOUT}s 타임아웃")
+            return None
         out = (r.stdout or "").strip()
         # 코드펜스 제거
         out = re.sub(r"^```(?:json)?\s*|\s*```$", "", out, flags=re.M).strip()
@@ -224,12 +244,13 @@ JSON 배열로만 답하라(다른 설명 금지):
             return None
 
     data = _call()
-    if data is None:               # 1회 재시도(모델 형식 일탈 대비)
-        log("  비전 응답 파싱 실패 → 재시도")
+    if data is None:               # 1회 재시도(모델 형식 일탈/타임아웃 대비)
+        log("  비전 응답 실패 → 재시도")
         data = _call()
     if data is None:
-        log("  비전 응답 파싱 실패(재시도 후) — 키프레임 생략")
-        return {}
+        # None = '비전 호출 자체 실패'(파싱/타임아웃). 빈 dict('자료 없음')과 구분해 호출측에 전파.
+        log("  비전 호출 실패(재시도 후) — vision_failed")
+        return None
     res = {d["name"]: d for d in data if isinstance(d, dict) and d.get("name")}
     kept = sum(1 for d in res.values() if d.get("keep"))
     log(f"    유지 {kept} / 드롭 {len(res) - kept}")
@@ -310,7 +331,8 @@ def build_report(meta: dict, frames: list[tuple[float, str]], verdict: dict, out
         v = verdict.get(os.path.basename(path), {})
         if not v.get("keep"):
             continue
-        b64 = base64.b64encode(open(path, "rb").read()).decode()
+        with open(path, "rb") as _f:
+            b64 = base64.b64encode(_f.read()).decode()
         shots.append({"ts": _hms(ts), "b64": b64,
                       "section": v.get("section"), "caption": v.get("caption", "")})
     url_html = f'<a href="{meta["url"]}" target="_blank">{meta["url"]}</a>' if meta["url"] else ""
@@ -319,7 +341,8 @@ def build_report(meta: dict, frames: list[tuple[float, str]], verdict: dict, out
         markdown=meta["markdown"].replace("</script>", "<\\/script>"),
         shots_json=json.dumps(shots, ensure_ascii=False).replace("</script>", "<\\/script>"))
     os.makedirs(os.path.dirname(out_html), exist_ok=True)
-    open(out_html, "w", encoding="utf-8").write(html)
+    with open(out_html, "w", encoding="utf-8") as _f:
+        _f.write(html)
     return len(shots)
 
 
@@ -410,7 +433,11 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
         # 무거운 작업(추출·비전)은 임시 폴더에서만 수행 — 완성 전엔 기존 결과를 건드리지 않는다.
         # (중단/재기동되어도 기존 캡처·요약이 보존됨)
         cands = extract_candidates(video, os.path.join(tmp, "f"))
+        if not cands:
+            return {"ok": False, "reason": "no_frames"}    # ffmpeg 추출 실패/0장
         verdict = classify_and_assign(cands, meta["headings"])  # 중복은 비전이 keep=false로 표시
+        if verdict is None:
+            return {"ok": False, "reason": "vision_failed"}  # 비전 호출 실패 — '자료 없음'과 구분
         for ts, path in cands:
             v = verdict.get(os.path.basename(path), {})
             if not v.get("keep"):
@@ -471,7 +498,7 @@ def main():
 
     if args.frames_dir:
         frames = load_frames_dir(args.frames_dir)
-        verdict = classify_and_assign(frames, meta["headings"])
+        verdict = classify_and_assign(frames, meta["headings"]) or {}
         out = os.path.join(REPORTS_DIR, f"{stem}_report.html")
         n = build_report(meta, frames, verdict, out)
     else:
@@ -482,7 +509,7 @@ def main():
             if not video:
                 sys.exit("다운로드 실패")
             frames = extract_candidates(video, os.path.join(tmp, "f"))
-            verdict = classify_and_assign(frames, meta["headings"])
+            verdict = classify_and_assign(frames, meta["headings"]) or {}
             out = os.path.join(REPORTS_DIR, f"{stem}_report.html")
             n = build_report(meta, frames, verdict, out)
     log(f"[4] 리포트 저장: {out} (자료 프레임 {n}장, {os.path.getsize(out)//1000}KB)")

@@ -434,7 +434,10 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
                 continue
             q.put(line)
             _emit_progress(q, line, total)
-        proc.wait()
+        try:
+            proc.wait(timeout=60)          # stdout EOF 후엔 즉시 끝나야 함 — 좀비 방지 안전망
+        except subprocess.TimeoutExpired:
+            proc.kill(); proc.wait()
         jobs[job_id]["proc"] = None
         return proc.returncode
     finally:
@@ -900,64 +903,68 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
         text=True, encoding="utf-8", bufsize=1,
     )
     try:
-        proc.stdin.write(prompt)
-        proc.stdin.close()
-    except Exception as e:
         try:
-            proc.kill()
-        except Exception:
-            pass
-        yield f"event: error\ndata: {json.dumps('프롬프트 전달 실패: ' + str(e))}\n\n"
-        return
-    chunks: list[str] = []
-    final: str | None = None
-    error_msg: str | None = None
-    try:
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            t = ev.get("type")
-            if t == "stream_event":
-                sub = ev.get("event") or {}
-                if sub.get("type") == "content_block_delta":
-                    delta = sub.get("delta") or {}
-                    if delta.get("type") == "text_delta":
-                        text = delta.get("text") or ""
-                        if text:
-                            chunks.append(text)
-                            yield f"data: {json.dumps(text)}\n\n"
-            elif t == "result":
-                if ev.get("is_error"):
-                    error_msg = ev.get("result") or "Claude CLI 오류"
-                else:
-                    final = ev.get("result") or "".join(chunks)
-        proc.wait(timeout=10)
-    except Exception as e:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        error_msg = str(e)
-
-    if error_msg:
-        yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
-        return
-
-    full = _clean_summary(final if final is not None else "".join(chunks))
-    if full and save_path:
-        try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write(full)
+            proc.stdin.write(prompt)
+            proc.stdin.close()
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+            yield f"event: error\ndata: {json.dumps('프롬프트 전달 실패: ' + str(e))}\n\n"
             return
-        _reindex_summary(save_path)
-    yield "event: done\ndata: \n\n"
+        chunks: list[str] = []
+        final: str | None = None
+        error_msg: str | None = None
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                t = ev.get("type")
+                if t == "stream_event":
+                    sub = ev.get("event") or {}
+                    if sub.get("type") == "content_block_delta":
+                        delta = sub.get("delta") or {}
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text") or ""
+                            if text:
+                                chunks.append(text)
+                                yield f"data: {json.dumps(text)}\n\n"
+                elif t == "result":
+                    if ev.get("is_error"):
+                        error_msg = ev.get("result") or "Claude CLI 오류"
+                    else:
+                        final = ev.get("result") or "".join(chunks)
+            proc.wait(timeout=10)
+        except Exception as e:
+            error_msg = str(e)
+
+        if error_msg:
+            yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
+            return
+
+        full = _clean_summary(final if final is not None else "".join(chunks))
+        if full and save_path:
+            try:
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(full)
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+                return
+            _reindex_summary(save_path)
+        yield "event: done\ndata: \n\n"
+    finally:
+        # 정상 종료/에러/클라이언트 조기 종료(GeneratorExit) 어느 경우든 claude 프로세스가
+        # 고아로 남아 계속 돌지 않도록 정리. 정상 완료 시엔 이미 죽어 no-op.
+        if proc.poll() is None:
+            try:
+                proc.terminate(); proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
 
 def _summarize_with_gemini(prompt: str, save_path: str | None):
