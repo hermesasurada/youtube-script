@@ -388,33 +388,32 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
         video = download_video(url, os.path.join(tmp, "v"))
         if not video:
             return {"ok": False, "reason": "download_failed"}
-        # 다운로드 성공 후에만 기존 프레임 정리(재생성 시 옛 kf_*.jpg 잔존 방지)
-        if os.path.isdir(frames_out_dir):
-            for old in glob.glob(os.path.join(frames_out_dir, "kf_*.jpg")):
-                try:
-                    os.remove(old)
-                except OSError:
-                    pass
-        os.makedirs(frames_out_dir, exist_ok=True)
+        # 무거운 작업(추출·비전)은 임시 폴더에서만 수행 — 완성 전엔 기존 결과를 건드리지 않는다.
+        # (중단/재기동되어도 기존 캡처·요약이 보존됨)
         cands = extract_candidates(video, os.path.join(tmp, "f"))
         verdict = classify_and_assign(cands, meta["headings"])  # 중복은 비전이 keep=false로 표시
         for ts, path in cands:
             v = verdict.get(os.path.basename(path), {})
             if not v.get("keep"):
                 continue
-            dst = f"kf_{int(ts):05d}.jpg"
+            kept.append({"ts": ts, "tmp": path, "file": f"kf_{int(ts):05d}.jpg",
+                         "section": v.get("section"), "caption": v.get("caption", "")})
+        if not kept:
+            return {"ok": True, "n_frames": 0, "reason": "no_material"}
+        # ── 여기서부터 교체(원자적에 가깝게, 마지막에 빠르게) ──
+        _assign_sections_by_time(kept, meta["headings"])   # Tier3 시간범위 배정(라벨 없으면 비전 유지)
+        os.makedirs(frames_out_dir, exist_ok=True)
+        for old in glob.glob(os.path.join(frames_out_dir, "kf_*.jpg")):  # 기존 프레임 정리
             try:
-                shutil.copy(path, os.path.join(frames_out_dir, dst))
+                os.remove(old)
             except OSError:
-                continue
-            kept.append({"ts": ts, "file": dst, "section": v.get("section"),
-                         "caption": v.get("caption", "")})
-    if not kept:
-        return {"ok": True, "n_frames": 0, "reason": "no_material"}
-    # Tier3: 요약 소제목에 [mm:ss] 시작시각이 있으면 프레임을 '시각→시간범위'로 배정
-    # (없으면 비전이 준 section 그대로 — 기존 방식 폴백).
-    _assign_sections_by_time(kept, meta["headings"])
-    _augment_summary_md(summary_md_path, meta["headings"], kept, url_base)
+                pass
+        for k in kept:
+            try:
+                shutil.copy(k["tmp"], os.path.join(frames_out_dir, k["file"]))
+            except OSError:
+                pass
+        _augment_summary_md(summary_md_path, meta["headings"], kept, url_base)
     return {"ok": True, "n_frames": len(kept)}
 
 
