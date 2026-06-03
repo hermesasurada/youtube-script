@@ -6,6 +6,7 @@ whisper-output/*.*
 .env
 *.pyc
 temp.md
+res/
 res/.tmp.driveupload/*
 index.db
 index.db-wal
