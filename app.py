@@ -338,17 +338,44 @@ def _stage(q: queue.Queue, stage: str) -> None:
     q.put({"type": "stage", "stage": stage})
 
 
+def _seg_start_sec(seg: dict) -> float | None:
+    """whisper 세그먼트 시작 시각(초). offsets(ms) 우선, timestamps 문자열 폴백."""
+    off = (seg.get("offsets") or {}).get("from")
+    if isinstance(off, (int, float)):
+        return off / 1000.0
+    ts = (seg.get("timestamps") or {}).get("from")  # "00:00:04,000"
+    if isinstance(ts, str):
+        m = re.match(r"(\d+):(\d+):(\d+)", ts)
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+    return None
+
+
+def _ts_tag(sec: float) -> str:
+    s = int(sec); h, r = divmod(s, 3600); m, s = divmod(r, 60)
+    return f"[{h}:{m:02d}:{s:02d}]" if h else f"[{m:02d}:{s:02d}]"
+
+
 def _parse_transcript(json_path: str) -> str | None:
+    """whisper JSON → 본문. 약 15초 간격으로 [mm:ss] 시각 마커를 삽입해
+    이후 요약기가 주제별 시작 시각을 라벨링(Tier3 타임스탬프 정렬)할 수 있게 한다."""
     if not os.path.exists(json_path):
         return None
     with open(json_path, encoding="utf-8", errors="replace") as f:
         data = json.load(f)
-    cleaned, prev = [], ""
+    cleaned, prev, last_bucket = [], "", -1
     for seg in data.get("transcription", []):
         text = seg.get("text", "").strip()
-        if text and text != prev:
-            cleaned.append(text)
-            prev = text
+        if not text or text == prev:
+            continue
+        prev = text
+        start = _seg_start_sec(seg)
+        if start is not None:
+            bucket = int(start // 15)            # 약 15초 간격으로만 마커 삽입(가독성)
+            if bucket != last_bucket:
+                last_bucket = bucket
+                text = f"{_ts_tag(start)} {text}"
+        cleaned.append(text)
     # 주의: JSON 삭제는 md 저장이 확정된 뒤 _finish_transcription에서 수행한다.
     return "\n".join(cleaned)
 

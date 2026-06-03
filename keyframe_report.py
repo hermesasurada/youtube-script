@@ -65,9 +65,19 @@ def parse_summary(md_path: str) -> dict:
     url = m.group(1).strip() if m else ""
     headings = []
     for mm in re.finditer(r"^(#{2,3})\s+(.+)$", text, re.M):
+        htext = mm.group(2).strip()
         headings.append({"idx": len(headings), "level": len(mm.group(1)),
-                         "text": mm.group(2).strip()})
+                         "text": htext, "start": _parse_ts_label(htext)})
     return {"title": title, "url": url, "markdown": text, "headings": headings}
+
+
+def _parse_ts_label(text: str) -> float | None:
+    """소제목 앞 [mm:ss] 또는 [h:mm:ss] 라벨 → 시작 초. 없으면 None."""
+    m = re.match(r"\s*\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]", text)
+    if not m:
+        return None
+    a, b, c = m.group(1), m.group(2), m.group(3)
+    return (int(a) * 3600 + int(b) * 60 + int(c)) if c else (int(a) * 60 + int(b))
 
 
 # ── 프레임 확보 ───────────────────────────────────────────────────────
@@ -400,8 +410,32 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
                          "caption": v.get("caption", "")})
     if not kept:
         return {"ok": True, "n_frames": 0, "reason": "no_material"}
+    # Tier3: 요약 소제목에 [mm:ss] 시작시각이 있으면 프레임을 '시각→시간범위'로 배정
+    # (없으면 비전이 준 section 그대로 — 기존 방식 폴백).
+    _assign_sections_by_time(kept, meta["headings"])
     _augment_summary_md(summary_md_path, meta["headings"], kept, url_base)
     return {"ok": True, "n_frames": len(kept)}
+
+
+def _assign_sections_by_time(kept: list[dict], headings: list[dict]):
+    """시간 라벨이 달린 소제목 기준으로 각 프레임을 '등장 시각이 속한 섹션'에 배정.
+
+    timed = [(섹션idx, 시작초)] 오름차순. 프레임 ts 이하의 가장 큰 시작초 섹션에 배정.
+    ts가 첫 섹션보다 앞서면 첫 시간섹션에. 시간 라벨이 하나도 없으면 비전 결과 유지.
+    """
+    timed = sorted(((h["idx"], h["start"]) for h in headings if h.get("start") is not None),
+                   key=lambda x: x[1])
+    if not timed:
+        return
+    for k in kept:
+        ts = k["ts"]
+        sec = timed[0][0]
+        for idx, start in timed:
+            if start <= ts:
+                sec = idx
+            else:
+                break
+        k["section"] = sec
 
 
 def main():
