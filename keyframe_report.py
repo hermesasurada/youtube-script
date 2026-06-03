@@ -33,14 +33,21 @@ FFPROBE     = shutil.which("ffprobe") or "ffprobe"
 FFMPEG_DIR  = os.path.dirname(FFMPEG)
 
 def _claude_bin() -> str:
+    """claude CLI 경로(호출 시마다 재해석) — Claude 자동업데이트로 버전 폴더가 바뀌어도
+    삭제된 옛 경로를 쓰지 않도록 '존재하는 최신 설치본'을 고른다."""
     env = os.environ.get("CLAUDE_BIN")
     if env and os.path.exists(env):
         return env
-    c = sorted(glob.glob(os.path.expanduser(
-        "~/Library/Application Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude")))
-    return c[-1] if c else "claude"
-
-CLAUDE_BIN      = _claude_bin()
+    found = shutil.which("claude")
+    if found:
+        return found
+    cands = [c for c in glob.glob(os.path.expanduser(
+        "~/Library/Application Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude"))
+        if os.path.exists(c)]
+    if cands:
+        cands.sort(key=os.path.getmtime)   # 가장 최근 설치본(존재하는 것만)
+        return cands[-1]
+    return env or "claude"
 SCENE_THRESHOLD = float(os.environ.get("SCENE_THRESHOLD", "0.3"))
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
@@ -190,7 +197,7 @@ JSON 배열로만 답하라(다른 설명 금지):
     log(f"[3] 비전 분류+정렬 ({len(frames)}장, 1회 호출)")
 
     def _call() -> list | None:
-        r = subprocess.run([CLAUDE_BIN, "-p", "--model", VISION_MODEL, prompt],
+        r = subprocess.run([_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
                            capture_output=True, text=True)
         out = (r.stdout or "").strip()
         # 코드펜스 제거

@@ -864,7 +864,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
     프롬프트는 argv가 아니라 stdin으로 전달한다(긴 전사로 인한 ARG_MAX 초과 회피).
     """
     proc = subprocess.Popen(
-        [CLAUDE_BIN, "-p",
+        [_resolve_claude_bin(), "-p",   # 호출 시마다 재해석(Claude 자동업데이트로 경로 변동 대비)
          "--output-format", "stream-json",
          "--include-partial-messages",
          "--model", CLAUDE_MODEL,
