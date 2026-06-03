@@ -95,6 +95,19 @@ header {
   align-items: center;
   gap: 1rem;
 }
+/* 백그라운드 키프레임 처리 상태 배지 */
+.kf-status-badge {
+  font-size: 11px;
+  color: var(--highlight, var(--accent, #2563eb));
+  background: var(--highlight-soft, rgba(99,102,241,.12));
+  border: 1px solid var(--highlight, var(--accent, #2563eb));
+  border-radius: 999px;
+  padding: .18rem .6rem;
+  white-space: nowrap;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 header h1 {
   font-size: 14px;
   font-weight: 600;

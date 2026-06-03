@@ -134,6 +134,30 @@ _transcribe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_TRANSCR
 # 키프레임(다운로드+ffmpeg+비전)도 무거우므로 동시 실행 제한(자원 경쟁 방지).
 _keyframe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_KEYFRAMES", "1")))
 
+# 키프레임 처리 상태 추적(UI 배지용): 현재 처리 중 영상 + 대기 건수
+_kf_lock = threading.Lock()
+_kf_jobs: dict = {}   # id -> {"title": str, "state": "queued"|"processing"}
+_kf_seq = 0
+
+
+def _kf_register(title: str) -> int:
+    global _kf_seq
+    with _kf_lock:
+        _kf_seq += 1
+        _kf_jobs[_kf_seq] = {"title": title, "state": "queued"}
+        return _kf_seq
+
+
+def _kf_set(kid: int, state: str) -> None:
+    with _kf_lock:
+        if kid in _kf_jobs:
+            _kf_jobs[kid]["state"] = state
+
+
+def _kf_unregister(kid: int) -> None:
+    with _kf_lock:
+        _kf_jobs.pop(kid, None)
+
 # 전사 완료 후 다운로드한 오디오(mp3)를 삭제할지 여부. KEEP_AUDIO=1 이면 보존.
 # 단, 사용자가 직접 올린 로컬 파일(file 잡)은 이 값과 무관하게 항상 보존한다.
 DELETE_AUDIO_AFTER = os.environ.get("KEEP_AUDIO", "0") != "1"
@@ -1239,13 +1263,17 @@ def keyframes():
     frames_dir = os.path.join(SUMMARY_DIR, date_dir, stem + ".frames")
     url_base = f"/sframe/{date_dir}/{stem}.frames"
 
+    kid = _kf_register(_parse_summary_title(summary_path))   # 상태 추적(대기→처리)
     try:
         with _keyframe_sem:   # 동시 키프레임 처리 직렬화(자원 경쟁 방지)
+            _kf_set(kid, "processing")
             res = keyframe_report.generate_keyframes(
                 summary_path, (data.get("url") or "").strip(), frames_dir, url_base)
     except Exception as e:
         log.warning("keyframes error: %s", e)
         return _json({"ok": False, "reason": "error", "error": str(e)})
+    finally:
+        _kf_unregister(kid)
 
     if res.get("ok") and res.get("n_frames"):
         try:
@@ -1259,6 +1287,16 @@ def keyframes():
             pass
     log.info("keyframes: %s (%s)", os.path.basename(summary_path), res)
     return _json(res)
+
+
+@app.route("/keyframes/status")
+def keyframes_status():
+    """백그라운드 키프레임 처리 상태(UI 배지용): 현재 처리 중 영상 + 대기 건수."""
+    with _kf_lock:
+        jobs_ = list(_kf_jobs.values())
+    cur = next((j["title"] for j in jobs_ if j["state"] == "processing"), None)
+    queued = sum(1 for j in jobs_ if j["state"] == "queued")
+    return _json({"processing": cur, "queued": queued, "active": len(jobs_)})
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@
 <header>
   <h1>YouTube <em>Transcription</em></h1>
   <span class="tag">whisper.cpp</span>
+  <span class="kf-status-badge" id="kf-status" hidden></span>
   <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="라이트/다크 전환">◐</button>
 </header>
 
@@ -399,6 +400,23 @@ async function savePromptFromModal() {
 
 const IS_REMOTE = document.body.classList.contains('remote-mode');
 if (!IS_REMOTE) loadSavedPrompt();   // /prompt 는 원격 비허용
+
+/* ── 백그라운드 키프레임 처리 상태 배지(헤더) ── */
+async function _pollKfStatus() {
+  const el = document.getElementById('kf-status');
+  if (!el) return;
+  try {
+    const d = await (await fetch('/keyframes/status')).json();
+    if (d.processing) {
+      const t = d.processing.length > 30 ? d.processing.slice(0, 30) + '…' : d.processing;
+      el.textContent = `🎞 캡처 처리 중: ${t}` + (d.queued ? `  ·  대기 ${d.queued}` : '');
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  } catch { /* 무시 */ }
+}
+if (!IS_REMOTE) { _pollKfStatus(); setInterval(_pollKfStatus, 4000); }
 
 /* ── Tab switching ── */
 function switchTab(name) {
