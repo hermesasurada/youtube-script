@@ -210,12 +210,15 @@
       lbShow(imgs.indexOf(im));
       lb.classList.add("open");
     });
+    // 캡처 단계 등록 → 다른 모달의 ESC 핸들러(버블)보다 먼저 가로챔.
+    // 라이트박스가 열려 있을 때만 처리하고 stopPropagation으로 이벤트를 막아,
+    // ESC가 아래의 요약/전사 팝업까지 닫는 것을 방지(라이트박스만 닫힘).
     document.addEventListener("keydown", (e) => {
       if (!lb.classList.contains("open")) return;
-      if (e.key === "Escape") lbClose();
-      else if (e.key === "ArrowLeft") lbShow(lbIdx - 1);
-      else if (e.key === "ArrowRight") lbShow(lbIdx + 1);
-    });
+      if (e.key === "Escape") { e.stopPropagation(); lbClose(); }
+      else if (e.key === "ArrowLeft") { e.stopPropagation(); lbShow(lbIdx - 1); }
+      else if (e.key === "ArrowRight") { e.stopPropagation(); lbShow(lbIdx + 1); }
+    }, true);
   }
   if (document.body) _setupKeyframeUI();
   else document.addEventListener("DOMContentLoaded", _setupKeyframeUI);
