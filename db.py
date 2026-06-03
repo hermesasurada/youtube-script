@@ -89,15 +89,22 @@ END;
 
 
 def init() -> None:
-    """앱 시작 시 1회 호출 — 스키마 생성/마이그레이션."""
+    """앱 시작 시 1회 호출 — 스키마 생성/마이그레이션.
+
+    버전 게이팅은 SQLite 내장 `PRAGMA user_version`(DB 헤더의 정수) 사용 — 별도 테이블 불필요.
+    향후 마이그레이션은 `if ver < N: ...; PRAGMA user_version = N` 형태로 추가한다.
+    """
     with _lock:
         c = _conn()
         c.executescript(_SCHEMA)
-        # 마이그레이션: is_read 컬럼 (최초 1회)
-        cols = {r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()}
-        if "is_read" not in cols:
-            c.execute("ALTER TABLE items ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0")
-            c.execute("UPDATE items SET is_read = 1 WHERE date <= '20260517'")
+        ver = c.execute("PRAGMA user_version").fetchone()[0]
+        if ver < 1:
+            # v1: is_read 컬럼(레거시 DB 보강) + 과거분(≤20260517) 읽음 처리 — 최초 1회뿐
+            cols = {r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()}
+            if "is_read" not in cols:
+                c.execute("ALTER TABLE items ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0")
+                c.execute("UPDATE items SET is_read = 1 WHERE date <= '20260517'")
+            c.execute("PRAGMA user_version = 1")
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────

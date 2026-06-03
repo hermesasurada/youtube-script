@@ -258,6 +258,8 @@ def get_file_duration(file_path: str) -> float:
     except Exception:
         duration = 0.0
     _duration_cache[file_path] = (mtime, duration)
+    if len(_duration_cache) > 512:          # 무한 증가 방지 — 가장 오래된 항목부터 제거(FIFO)
+        _duration_cache.pop(next(iter(_duration_cache)), None)
     return duration
 
 
@@ -498,6 +500,26 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
 
 
 # ── Job runners ───────────────────────────────────────────────────────
+
+def _job_guard(fn, job_id: str, *a) -> None:
+    """워커 스레드 최상위 가드: 예상치 못한 예외로 스레드가 죽어도
+    job status를 error로 내리고 SSE done 센티넬(None)을 넣어 UI가 멈추지 않게 한다."""
+    try:
+        fn(job_id, *a)
+    except Exception as e:
+        log.exception("job %s crashed", job_id)
+        try:
+            with jobs_lock:
+                j = jobs.get(job_id)
+                if j and j.get("status") == "running":
+                    j["status"] = "error"
+            j = jobs.get(job_id)
+            if j:
+                j["queue"].put(f"오류: {e}")
+                j["queue"].put(None)
+        except Exception:
+            pass
+
 
 def run_job(job_id: str, params: dict) -> None:
     q    = jobs[job_id]["queue"]
@@ -768,7 +790,7 @@ def start():
 
     target = run_file_job if source == "file" else run_job
     args   = (job_id, file_path, data) if source == "file" else (job_id, data)
-    threading.Thread(target=target, args=args, daemon=True).start()
+    threading.Thread(target=_job_guard, args=(target,) + args, daemon=True).start()
     return _json({"job_id": job_id})
 
 

@@ -333,8 +333,8 @@ def build_report(meta: dict, frames: list[tuple[float, str]], verdict: dict, out
             continue
         with open(path, "rb") as _f:
             b64 = base64.b64encode(_f.read()).decode()
-        shots.append({"ts": _hms(ts), "b64": b64,
-                      "section": v.get("section"), "caption": v.get("caption", "")})
+        shots.append({"ts": _hms(ts), "b64": b64, "section": v.get("section"),
+                      "caption": _html.escape(v.get("caption") or "")})  # 비전 출력 — innerHTML 삽입 전 escape
     url_html = f'<a href="{meta["url"]}" target="_blank">{meta["url"]}</a>' if meta["url"] else ""
     html = REPORT_TMPL.format(
         title=meta["title"], url_html=url_html, nkept=len(shots),
