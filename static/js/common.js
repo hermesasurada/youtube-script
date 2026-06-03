@@ -153,6 +153,9 @@
 .ys-lb-nav:hover{background:rgba(0,0,0,.7);}
 .ys-lb-prev{left:1.2rem;} .ys-lb-next{right:1.2rem;}
 .ys-lb-count{position:fixed;bottom:1.2rem;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.85);font-size:13px;font-family:ui-monospace,monospace;background:rgba(0,0,0,.5);padding:.15rem .65rem;border-radius:999px;}
+.ys-lb-cap{position:fixed;bottom:3rem;left:50%;transform:translateX(-50%);max-width:80vw;text-align:center;color:rgba(255,255,255,.92);font-size:13.5px;line-height:1.5;background:rgba(0,0,0,.5);padding:.4rem .85rem;border-radius:8px;}
+.ys-lb-cap:empty{display:none;}
+.ys-lb-cap b{color:#9db4ff;font-family:ui-monospace,monospace;margin-right:.4rem;}
 .kf-ico{color:var(--highlight,var(--accent,#2563eb));margin-right:.1em;}
 .kf-time{color:var(--muted,#999);font-weight:400;font-size:.82em;font-family:ui-monospace,monospace;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 강조 틴트 배경(가시성↑, 테마 적응) */
@@ -166,18 +169,21 @@
     lb.innerHTML = '<button class="ys-lb-nav ys-lb-prev" aria-label="이전">‹</button>'
                  + '<img alt="">'
                  + '<button class="ys-lb-nav ys-lb-next" aria-label="다음">›</button>'
+                 + '<div class="ys-lb-cap"></div>'
                  + '<span class="ys-lb-count"></span>';
     document.body.appendChild(lb);
     const lbImg = lb.querySelector("img");
     const lbPrev = lb.querySelector(".ys-lb-prev");
     const lbNext = lb.querySelector(".ys-lb-next");
     const lbCount = lb.querySelector(".ys-lb-count");
-    let lbList = [], lbIdx = 0;   // 현재 소제목 섹션(스트립) 이미지 src 목록 + 인덱스
+    const lbCap = lb.querySelector(".ys-lb-cap");
+    let lbList = [], lbCaps = [], lbIdx = 0;   // 현재 섹션 이미지 src·캡션 목록 + 인덱스
 
     function lbShow(i) {
       if (!lbList.length) return;
       lbIdx = Math.max(0, Math.min(i, lbList.length - 1));   // 클램프(순환 안 함)
       lbImg.src = lbList[lbIdx];
+      lbCap.innerHTML = lbCaps[lbIdx] || "";   // 이미지 하단 캡션(넘버링 위)
       const multi = lbList.length > 1;
       lbPrev.style.display = (multi && lbIdx > 0) ? "" : "none";                 // 처음이면 이전 숨김
       lbNext.style.display = (multi && lbIdx < lbList.length - 1) ? "" : "none"; // 끝이면 다음 숨김
@@ -197,6 +203,10 @@
       const strip = im.closest(".kf-strip");
       const imgs = strip ? [...strip.querySelectorAll("img")] : [im];
       lbList = imgs.map((x) => x.src);
+      lbCaps = imgs.map((x) => {                 // 각 이미지의 figcaption(시각·설명)
+        const cap = x.closest("figure")?.querySelector("figcaption");
+        return cap ? cap.innerHTML : "";
+      });
       lbShow(imgs.indexOf(im));
       lb.classList.add("open");
     });
