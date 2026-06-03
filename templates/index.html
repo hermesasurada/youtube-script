@@ -198,6 +198,7 @@
         <div class="history-list-section">
           <div class="history-toolbar">
             <div class="history-filter-row">
+              <button class="btn-sm btn-ghost" onclick="loadHistory()" title="새로고침">새로고침</button>
               <div class="hf-group">
                 <input type="date" id="hf-date-from" class="hf-date" onchange="applyHistoryFilter()" title="시작 날짜">
                 <span class="hf-sep">~</span>
@@ -215,7 +216,6 @@
                 미읽음만
               </button>
               <button class="btn-sm btn-ghost" onclick="resetHistoryFilter()" title="검색 초기화">초기화</button>
-              <button class="btn-sm btn-ghost" onclick="loadHistory()">새로고침</button>
               <span class="history-count" id="history-count">—</span>
             </div>
           </div>
@@ -409,7 +409,7 @@ function switchTab(name) {
   });
   if (name === 'result')  document.getElementById('result-badge').classList.remove('visible');
   if (name === 'summary') document.getElementById('summary-badge').classList.remove('visible');
-  if (name === 'history' && !_historyLoaded) loadHistory();
+  if (name === 'history') loadHistory();   // 이력 탭 진입 시 매번 자동 새로고침
 }
 
 /* ── History ── */
