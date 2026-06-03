@@ -150,15 +150,27 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
     log(f"    장면전환 {len(sc)}장 → 후보 합계 {len(pairs)}장")
 
     # 3) 시간순 정렬 → 근접 중복 제거 → 캡
+    #    장면전환(scene_) 프레임은 의미있는 컷이므로 6초 근접 제거에서 '보존'하고,
+    #    균등 간격(iv_) 프레임만 직전 채택분과 6초 미만이면 솎는다.
+    is_scene = lambda p: os.path.basename(p).startswith("scene_")
     pairs.sort(key=lambda x: x[0])
     deduped, last = [], -999.0
     for ts, p in pairs:
-        if ts - last >= MIN_GAP:
+        if is_scene(p) or (ts - last >= MIN_GAP):
             deduped.append((ts, p)); last = ts
+    # 캡: 초과 시에도 장면전환 우선 보존(균등부터 솎고, 장면전환만 초과하면 그때 균등 샘플)
     if len(deduped) > MAX_CANDIDATES:
-        step = len(deduped) / MAX_CANDIDATES
-        deduped = [deduped[int(i * step)] for i in range(MAX_CANDIDATES)]
-    log(f"    중복제거·캡 후 후보 {len(deduped)}장")
+        scenes = [x for x in deduped if is_scene(x[1])]
+        ivs    = [x for x in deduped if not is_scene(x[1])]
+        if len(scenes) >= MAX_CANDIDATES:
+            step = len(scenes) / MAX_CANDIDATES
+            sel = [scenes[int(i * step)] for i in range(MAX_CANDIDATES)]
+        else:
+            need = MAX_CANDIDATES - len(scenes)
+            step = (len(ivs) / need) if need else 1
+            sel = scenes + [ivs[int(i * step)] for i in range(need)] if ivs else scenes
+        deduped = sorted(sel, key=lambda x: x[0])
+    log(f"    중복제거·캡 후 후보 {len(deduped)}장 (장면전환 보존)")
     return deduped
 
 
