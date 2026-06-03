@@ -148,7 +148,10 @@
 .kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;margin-right:.35rem;}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:99999;cursor:zoom-out;padding:1.5rem;}
 .ys-lb.open{display:flex;}
-.ys-lb img{max-width:96vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}
+.ys-lb img{max-width:88vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}
+.ys-lb-nav{position:fixed;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.4);color:#fff;border:none;font-size:2.2rem;line-height:1;width:52px;height:72px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none;}
+.ys-lb-nav:hover{background:rgba(0,0,0,.7);}
+.ys-lb-prev{left:1.2rem;} .ys-lb-next{right:1.2rem;}
 .kf-ico{color:var(--highlight,var(--accent,#2563eb));margin-right:.1em;}
 .kf-time{color:var(--muted,#999);font-weight:400;font-size:.82em;font-family:ui-monospace,monospace;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 강조 틴트 배경(가시성↑, 테마 적응) */
@@ -159,19 +162,44 @@
 
     const lb = document.createElement("div");
     lb.className = "ys-lb"; lb.id = "ys-lb";
-    lb.innerHTML = '<img alt="">';
-    lb.addEventListener("click", () => lb.classList.remove("open"));
+    lb.innerHTML = '<button class="ys-lb-nav ys-lb-prev" aria-label="이전">‹</button>'
+                 + '<img alt="">'
+                 + '<button class="ys-lb-nav ys-lb-next" aria-label="다음">›</button>';
     document.body.appendChild(lb);
+    const lbImg = lb.querySelector("img");
+    const lbPrev = lb.querySelector(".ys-lb-prev");
+    const lbNext = lb.querySelector(".ys-lb-next");
+    let lbList = [], lbIdx = 0;   // 현재 소제목 섹션(스트립) 이미지 src 목록 + 인덱스
 
-    // 이벤트 위임: 동적으로 삽입된 스트립 이미지도 클릭 시 원본 확대
+    function lbShow(i) {
+      if (!lbList.length) return;
+      lbIdx = (i + lbList.length) % lbList.length;   // 순환
+      lbImg.src = lbList[lbIdx];
+      const multi = lbList.length > 1;
+      lbPrev.style.display = multi ? "" : "none";
+      lbNext.style.display = multi ? "" : "none";
+    }
+    const lbClose = () => lb.classList.remove("open");
+
+    lb.addEventListener("click", (e) => { if (e.target === lb) lbClose(); });  // 배경만 닫기
+    lbPrev.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx - 1); });
+    lbNext.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx + 1); });
+
+    // 이벤트 위임: 스트립 이미지 클릭 → 같은 섹션 이미지들로 라이트박스 구성
     document.addEventListener("click", (e) => {
       const im = e.target.closest && e.target.closest(".kf-strip img");
       if (!im) return;
-      lb.querySelector("img").src = im.src;
+      const strip = im.closest(".kf-strip");
+      const imgs = strip ? [...strip.querySelectorAll("img")] : [im];
+      lbList = imgs.map((x) => x.src);
+      lbShow(imgs.indexOf(im));
       lb.classList.add("open");
     });
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") lb.classList.remove("open");
+      if (!lb.classList.contains("open")) return;
+      if (e.key === "Escape") lbClose();
+      else if (e.key === "ArrowLeft") lbShow(lbIdx - 1);
+      else if (e.key === "ArrowRight") lbShow(lbIdx + 1);
     });
   }
   if (document.body) _setupKeyframeUI();
