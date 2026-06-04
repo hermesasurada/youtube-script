@@ -191,7 +191,7 @@
     }
     const lbClose = () => lb.classList.remove("open");
 
-    lb.addEventListener("click", (e) => { if (e.target === lb) lbClose(); });  // 배경만 닫기
+    lb.addEventListener("click", (e) => { if (e.target === lb || e.target === lbImg) lbClose(); });  // 배경 또는 이미지 클릭 시 닫기(화살표는 stopPropagation)
     lbPrev.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx - 1); });
     lbNext.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx + 1); });
 
