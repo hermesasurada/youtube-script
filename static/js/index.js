@@ -1330,10 +1330,13 @@ function _setImmersive(on) {
   [...tmp.querySelectorAll('h2')].forEach(h => {
     if (h.textContent.replace(/\s+/g, '').includes('기타자료캡처')) h.remove();
   });
-  imm.querySelector('.imm-gallery').innerHTML = figs.length
+  const gal = imm.querySelector('.imm-gallery');
+  const txt = imm.querySelector('.imm-text');
+  gal.innerHTML = figs.length
     ? `<div class="kf-strip">${figs.map(f => f.outerHTML).join('')}</div>`   // kf-strip 유지 → 라이트박스 동작
     : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
-  imm.querySelector('.imm-text').innerHTML = tmp.innerHTML;
+  txt.innerHTML = tmp.innerHTML;
+  gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
 }
 
 function closeSummaryModal() {
