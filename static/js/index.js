@@ -1279,6 +1279,9 @@ async function copyUrl() {
 }
 
 /* ── Summary Modal ── (marked.js 설정은 공유 모듈 common.js에서 일원화) */
+let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성에 사용
+let _immersive = false;
+
 async function openSummaryModal(summaryPath, title) {
   const overlay  = document.getElementById('sum-overlay');
   const titleEl  = document.getElementById('sum-panel-title');
@@ -1288,19 +1291,55 @@ async function openSummaryModal(summaryPath, title) {
   bodyEl.innerHTML    = '<p class="sum-loading">불러오는 중…</p>';
   overlay.hidden      = false;
   document.body.style.overflow = 'hidden';
+  _setImmersive(false);                                  // 항상 일반 보기로 시작
+  document.getElementById('sum-immersive-btn').hidden = true;
 
   try {
     const data = await YS.apiSummaryContent(summaryPath);
     if (data.error) throw new Error(data.error);
-    bodyEl.innerHTML = YS.renderMarkdown(data.content);
+    _summaryMd = data.content || '';
+    bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
+    // 캡처 이미지가 있을 때만 몰입형 버튼 노출
+    document.getElementById('sum-immersive-btn').hidden = !bodyEl.querySelector('.kf-strip');
   } catch (e) {
+    _summaryMd = '';
     bodyEl.innerHTML = `<p class="sum-error">오류: ${e.message}</p>`;
   }
+}
+
+function toggleImmersive() { _setImmersive(!_immersive); }
+
+/** 일반 ↔ 몰입형 전환. 몰입형은 좌측 이미지 갤러리 + 우측 텍스트(스트립 제거)로 재구성. */
+function _setImmersive(on) {
+  _immersive = on;
+  const panel  = document.getElementById('sum-panel');
+  const normal = document.getElementById('sum-panel-body');
+  const imm    = document.getElementById('sum-immersive-body');
+  const btn    = document.getElementById('sum-immersive-btn');
+  panel.classList.toggle('immersive', on);
+  normal.hidden = on;
+  imm.hidden    = !on;
+  btn.textContent = on ? '⊠ 일반 보기' : '⊟ 몰입형 읽기';
+  if (!on) return;
+
+  const tmp = document.createElement('div');
+  tmp.innerHTML = YS.renderMarkdown(_summaryMd);
+  const figs = [...tmp.querySelectorAll('.kf-strip figure')];   // 모든 캡처 수집(좌측으로)
+  tmp.querySelectorAll('.kf-strip').forEach(s => s.remove());   // 본문에선 스트립 제거
+  // 이미지가 모두 좌측으로 이동했으니 빈 '기타 자료 캡처' 부록 제목 제거
+  [...tmp.querySelectorAll('h2')].forEach(h => {
+    if (h.textContent.replace(/\s+/g, '').includes('기타자료캡처')) h.remove();
+  });
+  imm.querySelector('.imm-gallery').innerHTML = figs.length
+    ? `<div class="kf-strip">${figs.map(f => f.outerHTML).join('')}</div>`   // kf-strip 유지 → 라이트박스 동작
+    : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
+  imm.querySelector('.imm-text').innerHTML = tmp.innerHTML;
 }
 
 function closeSummaryModal() {
   document.getElementById('sum-overlay').hidden = true;
   document.body.style.overflow = '';
+  _setImmersive(false);                                  // 다음 열림을 위해 초기화
 }
 
 function handleSumOverlayClick(e) {
