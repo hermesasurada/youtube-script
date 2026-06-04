@@ -1702,10 +1702,16 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-immersive-body { flex: 1 1 auto; min-height: 0; display: flex; }
 .sum-immersive-body[hidden] { display: none !important; }
 .imm-gallery {
-  flex: 0 0 44%; max-width: 44%; overflow-y: auto;
+  flex: 0 0 52%; max-width: 52%; overflow-y: auto;
   padding: 1.25rem 1.25rem 2rem; border-right: 1px solid var(--border); background: var(--surface2);
 }
-.imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.5rem 2rem 2.5rem; }
+.imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.4rem 1.6rem 2.5rem; }
+/* 몰입형 우측 본문은 한 단계 작게 */
+.imm-text.sum-md p, .imm-text.sum-md li { font-size: .85rem; line-height: 1.6; }
+.imm-text.sum-md h1 { font-size: 1.15rem; margin-bottom: .9rem; }
+.imm-text.sum-md h2 { font-size: .9rem; }
+.imm-text.sum-md h3 { font-size: .85rem; }
+.imm-text.sum-md td, .imm-text.sum-md th { font-size: .8rem; }
 /* 갤러리: 가로 스트립을 세로 스택 + 원본 비율로 오버라이드 */
 .imm-gallery .kf-strip { display: flex; flex-direction: column; gap: .9rem; overflow: visible; margin: 0; padding: 0; }
 .imm-gallery .kf-strip figure { width: 100%; }
