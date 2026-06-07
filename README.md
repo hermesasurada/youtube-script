@@ -38,7 +38,7 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 
 - 정적 프런트(html/js/css)는 no-store → **새로고침만으로 반영**. `app.py`/`db.py`/`keyframe_report.py` 변경은 재기동 필요.
 - 로그: `~/Library/Logs/hermes/youtube-script.{out,err}.log`
-- 원격 접속(Tailscale 등)은 읽기전용 — 이력 조회만 허용, 전사/프롬프트/파일 등은 차단.
+- 원격 접속(Tailscale 등)은 **이력 모드** — 이력 조회·요약/전사 보기·읽음 표시·삭제는 허용하되, **새 전사·프롬프트 편집·키프레임 생성·로컬 파일 탐색은 차단**(허용 목록은 `app.py`의 `_REMOTE_DATA_ALLOWED`). 사설망(Tailscale, 본인 기기) 전제.
 
 ## 주요 환경변수
 

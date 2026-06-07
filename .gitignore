@@ -18,3 +18,6 @@ flask_out.txt
 flask_err.txt
 .DS_Store
 reports/
+.pytest_cache/
+__pycache__/
+tests/__pycache__/

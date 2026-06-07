@@ -646,9 +646,6 @@ def _cleanup_old_jobs() -> None:
                 jobs.pop(jid)
 
 
-threading.Thread(target=_cleanup_old_jobs, daemon=True).start()
-
-
 # ── SQLite 인덱스 초기화 + 백그라운드 reindex ─────────────────────────
 db.init()
 
@@ -661,14 +658,11 @@ def _bg_reindex():
         log.error("db reindex error: %s", e)
 
 
-threading.Thread(target=_bg_reindex, daemon=True).start()
-
-
 # ── Remote-access gating ──────────────────────────────────────────────
 # 로컬(=동일 머신)에서는 모든 라우트 허용. 외부(Tailscale/LAN)에서는
 # 이력조회 관련 라우트만 허용하고, 그 외 경로는 이력 페이지로 리다이렉트한다.
 #  - 모바일 UA → /m (모바일 이력)
-#  - 데스크톱  → /  (index.html이 원격 읽기전용 이력 모드로 렌더)
+#  - 데스크톱  → /  (index.html이 원격 이력 모드로 렌더; 전사 UI 숨김, 조회·읽음·삭제만)
 _LOOPBACK = {"127.0.0.1", "::1"}
 # 원격에서 허용되는 데이터 엔드포인트(이력 조회/요약/읽음/삭제). 페이지(/, /m)는 별도 처리.
 _REMOTE_DATA_ALLOWED = {
@@ -717,7 +711,7 @@ def _restrict_remote_access():
 
 @app.route("/")
 def index():
-    # 원격 접속이면 전사 UI를 숨긴 읽기전용 이력 모드로 렌더
+    # 원격 접속이면 전사 UI를 숨긴 이력 모드로 렌더(조회·읽음·삭제만 가능)
     return render_template("index.html", default_prompt=DEFAULT_PROMPT, remote=_is_remote())
 
 
@@ -1329,6 +1323,9 @@ def keyframes_status():
 
 
 if __name__ == "__main__":
+    # 백그라운드 유지보수 스레드는 서버 실행 시에만 시작(import 부작용 제거 → 테스트에서 안전)
+    threading.Thread(target=_cleanup_old_jobs, daemon=True).start()
+    threading.Thread(target=_bg_reindex, daemon=True).start()
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "5001"))
     log.info("starting server on %s:%s — claude=%s, backend=%s, model=%s",
