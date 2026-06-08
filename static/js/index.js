@@ -1300,7 +1300,10 @@ async function openSummaryModal(summaryPath, title) {
     _summaryMd = data.content || '';
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
-    document.getElementById('sum-immersive-btn').hidden = !bodyEl.querySelector('.kf-strip');
+    const hasImg = !!bodyEl.querySelector('.kf-strip');
+    document.getElementById('sum-immersive-btn').hidden = !hasImg;
+    // PC(넓은 화면)에서 캡처가 있으면 몰입형을 기본 진입 — 버튼이 보이는 폭(>900px)에서만(되돌리기 가능 보장)
+    if (hasImg && window.innerWidth > 900) _setImmersive(true);
   } catch (e) {
     _summaryMd = '';
     bodyEl.innerHTML = `<p class="sum-error">오류: ${e.message}</p>`;
