@@ -1323,6 +1323,9 @@ function _setImmersive(on) {
   normal.hidden = on;
   imm.hidden    = !on;
   btn.textContent = on ? '⊠ 일반 보기' : '⊟ 몰입형 읽기';
+  const syncBtn = document.getElementById('sum-sync-btn');
+  syncBtn.hidden = !on;            // 동기화 토글은 몰입형일 때만 노출
+  if (on) _updateSyncBtn();
   if (!on) return;
 
   const tmp = document.createElement('div');
@@ -1348,6 +1351,18 @@ function _setImmersive(on) {
  * 좌(이미지 figcaption [mm:ss]) / 우(소제목 .kf-time) 각각의 시각 앵커를 이용해,
  * 한쪽 스크롤 위치의 '현재 시각'을 보간 → 반대쪽을 같은 시각 위치로 맞춘다. */
 let _immProgPane = null, _immRaf = 0, _immScrollBound = false;
+let _immSyncOn = (localStorage.getItem('immScrollSync') ?? '1') !== '0';   // 동기화 켜짐 여부(기본 ON, 기억됨)
+
+function toggleScrollSync() {
+  _immSyncOn = !_immSyncOn;
+  localStorage.setItem('immScrollSync', _immSyncOn ? '1' : '0');
+  _updateSyncBtn();
+}
+function _updateSyncBtn() {
+  const b = document.getElementById('sum-sync-btn');
+  b.textContent = _immSyncOn ? '⇅ 동기화 ON' : '⇅ 동기화 OFF';
+  b.classList.toggle('on', _immSyncOn);
+}
 
 function _tsToSec(t) {
   const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
@@ -1382,6 +1397,7 @@ function _interp(anchors, x, from, to) {   // x(from축) → to축 보간
 }
 
 function _immSync(srcKey) {
+  if (!_immSyncOn) return;                                        // 동기화 OFF면 비활성
   if (srcKey === _immProgPane) { _immProgPane = null; return; }   // 우리가 만든 스크롤 → 무시
   if (_immRaf) return;
   _immRaf = requestAnimationFrame(() => {
