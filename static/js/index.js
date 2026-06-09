@@ -1302,15 +1302,19 @@ async function openSummaryModal(summaryPath, title) {
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
     const hasImg = !!bodyEl.querySelector('.kf-strip');
     document.getElementById('sum-immersive-btn').hidden = !hasImg;
-    // PC(넓은 화면)에서 캡처가 있으면 몰입형을 기본 진입 — 버튼이 보이는 폭(>900px)에서만(되돌리기 가능 보장)
-    if (hasImg && window.innerWidth > 900) _setImmersive(true);
+    // 마지막으로 고른 보기 상태를 기억(기본 'immersive'). 버튼이 보이는 폭(>900px)에서만 자동 몰입(되돌리기 보장)
+    const pref = localStorage.getItem('immViewMode') || 'immersive';
+    if (hasImg && window.innerWidth > 900 && pref === 'immersive') _setImmersive(true);
   } catch (e) {
     _summaryMd = '';
     bodyEl.innerHTML = `<p class="sum-error">오류: ${e.message}</p>`;
   }
 }
 
-function toggleImmersive() { _setImmersive(!_immersive); }
+function toggleImmersive() {
+  _setImmersive(!_immersive);
+  localStorage.setItem('immViewMode', _immersive ? 'immersive' : 'normal');   // 사용자 선택을 로컬에 기억
+}
 
 /** 일반 ↔ 몰입형 전환. 몰입형은 좌측 이미지 갤러리 + 우측 텍스트(스트립 제거)로 재구성. */
 function _setImmersive(on) {
