@@ -1021,6 +1021,15 @@ def get_history():
     return _json({"items": items})
 
 
+@app.route("/history/check")
+def history_check():
+    """영상 중복 확인: 같은 yt_id를 이미 처리한 이력이 있으면 날짜·제목 반환(추가 전 경고용)."""
+    item = db.find_by_yt_id(request.args.get("yt_id") or "")
+    if not item:
+        return _json({"exists": False})
+    return _json({"exists": True, "date": item["date"], "title": item["title"]})
+
+
 @app.route("/history/mark_read", methods=["PATCH"])
 def mark_read():
     data = request.get_json(force=True)

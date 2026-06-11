@@ -57,15 +57,25 @@ def test_db_upsert_search_delete(tmp_path, monkeypatch):
     date_dir.mkdir()
     md = str(date_dir / "202601011200_0m10s_pyt.md")
     with open(md, "w", encoding="utf-8") as f:
-        f.write("---\ntitle: 파이테스트제목 QWERTY\nuploader: 채널\nduration: 10\n"
+        f.write("---\ntitle: 파이테스트제목 QWERTY\nuploader: 채널\nduration: 10\nid: ZZTESTID01\n"
                 "---\n\n# 파이테스트제목 QWERTY\n\n전사 본문\n")
 
     assert db.upsert(md) is True
     assert any(it["title"] == "파이테스트제목 QWERTY" for it in db.list_items())
     assert any(it["title"] == "파이테스트제목 QWERTY" for it in db.search("QWERTY"))
 
+    # 중복 영상 조회(yt_id) + /history/check 엔드포인트
+    hit = db.find_by_yt_id("ZZTESTID01")
+    assert hit and hit["title"] == "파이테스트제목 QWERTY"
+    assert db.find_by_yt_id("NOPE") is None
+    c = app.app.test_client()
+    r = c.get("/history/check?yt_id=ZZTESTID01").get_json()
+    assert r["exists"] is True and r["date"] == "20260101"
+    assert c.get("/history/check?yt_id=NOPE").get_json()["exists"] is False
+
     db.delete(os.path.realpath(md))
     assert all(it["title"] != "파이테스트제목 QWERTY" for it in db.list_items())
+    assert db.find_by_yt_id("ZZTESTID01") is None
 
 
 # ── ④ 키프레임 타임스탬프 → 섹션 배정 (Tier3) ─────────────────────────

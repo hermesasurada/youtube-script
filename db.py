@@ -275,6 +275,18 @@ def delete(md_path: str) -> None:
         _conn().execute("DELETE FROM items WHERE md_path = ?", (md_path,))
 
 
+def find_by_yt_id(yt_id: str) -> dict | None:
+    """같은 영상(yt_id)을 이미 처리한 이력이 있으면 최신 1건 반환(중복 추가 경고용)."""
+    yt_id = (yt_id or "").strip()
+    if not yt_id:
+        return None
+    r = _conn().execute(
+        "SELECT * FROM items WHERE yt_id = ? ORDER BY date DESC, stem DESC LIMIT 1",
+        (yt_id,),
+    ).fetchone()
+    return _row_to_item(r) if r else None
+
+
 def close_conn() -> None:
     """현재 스레드의 SQLite 연결을 닫는다.
 

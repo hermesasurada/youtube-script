@@ -1102,6 +1102,21 @@ async function fetchVideoMeta(url) {
 async function addToQueue() {
   const url = document.getElementById('url-input').value.trim();
   if (!url) return;
+  const vid = YS.ytVideoId(url);
+
+  // 대기열 내 같은 영상(ID 우선, 비유튜브는 URL) → 추가 스킵
+  const dupQ = urlQueue.find(i => (vid && YS.ytVideoId(i.url) === vid) || i.url === url);
+  if (dupQ) { showError('이미 대기열에 있는 영상입니다.'); return; }
+
+  // 처리 이력에 같은 영상이 있으면 확인 후 진행
+  if (vid) {
+    try {
+      const r = await (await fetch('/history/check?yt_id=' + encodeURIComponent(vid))).json();
+      if (r.exists && !confirm(`이미 처리한 영상입니다.\n(${fmtDate(r.date)} · ${r.title})\n\n다시 추가할까요?`)) return;
+    } catch (_) {}   // 체크 실패는 추가를 막지 않음
+  }
+
+  clearError();
   const item = {url, meta: null, status: 'waiting'};
   urlQueue.push(item);
   document.getElementById('url-input').value = '';
