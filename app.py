@@ -102,11 +102,7 @@ YouTube 영상의 전사 텍스트를 구조화된 요약본으로 재작성해�
 {transcript}
 """
 
-PROMPT_FILE  = os.path.join(BASE_DIR, "prompt.txt")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-
-# 요약 백엔드: "claude" (Claude.app OAuth, 기본) | "gemini" (GEMINI_API_KEY 필요)
-SUMMARY_BACKEND = os.environ.get("SUMMARY_BACKEND", "claude").lower()
+PROMPT_FILE = os.path.join(BASE_DIR, "prompt.txt")
 
 
 def _resolve_claude_bin() -> str:
@@ -176,8 +172,6 @@ _MD_META_ORDER = [
     "categories", "tags", "source_file",
 ]
 
-_genai_model = None
-_genai_lock  = threading.Lock()
 _duration_cache: dict[str, tuple[float, float]] = {}
 
 
@@ -261,18 +255,6 @@ def get_file_duration(file_path: str) -> float:
     if len(_duration_cache) > 512:          # 무한 증가 방지 — 가장 오래된 항목부터 제거(FIFO)
         _duration_cache.pop(next(iter(_duration_cache)), None)
     return duration
-
-
-def _get_gemini_model():
-    global _genai_model
-    if _genai_model is not None:
-        return _genai_model
-    with _genai_lock:
-        if _genai_model is None:
-            import google.generativeai as genai
-            genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-            _genai_model = genai.GenerativeModel(GEMINI_MODEL)
-    return _genai_model
 
 
 # ── Markdown I/O ──────────────────────────────────────────────────────
@@ -983,32 +965,6 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
                     pass
 
 
-def _summarize_with_gemini(prompt: str, save_path: str | None):
-    if not os.environ.get("GEMINI_API_KEY"):
-        yield f"event: error\ndata: {json.dumps('GEMINI_API_KEY가 .env 파일에 없습니다.')}\n\n"
-        return
-    chunks: list[str] = []
-    try:
-        for chunk in _get_gemini_model().generate_content(prompt, stream=True):
-            if chunk.text:
-                chunks.append(chunk.text)
-                yield f"data: {json.dumps(chunk.text)}\n\n"
-    except Exception as e:
-        yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
-        return
-
-    full = _clean_summary("".join(chunks))
-    if full and save_path:
-        try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write(full)
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
-            return
-        _reindex_summary(save_path)
-    yield "event: done\ndata: \n\n"
-
-
 @app.route("/summarize", methods=["POST"])
 def summarize():
     """전사 md 파일 경로(txt_path) 기반 요약. 잡 생명주기/메모리 상태와 무관하게 동작."""
@@ -1027,13 +983,9 @@ def summarize():
 
     prompt = (data.get("prompt") or DEFAULT_PROMPT).replace("{transcript}", transcript_blob)
     save_path = _summary_path_for_md(abs_path)
-    log.info("summarize start: %s (backend=%s)", os.path.basename(abs_path), SUMMARY_BACKEND)
+    log.info("summarize start: %s", os.path.basename(abs_path))
 
-    if SUMMARY_BACKEND == "gemini":
-        gen = _summarize_with_gemini(prompt, save_path)
-    else:
-        gen = _summarize_with_claude(prompt, save_path)
-
+    gen = _summarize_with_claude(prompt, save_path)
     return Response(gen, mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -1196,47 +1148,6 @@ def _parse_summary_title(md_path: str) -> str:
     return os.path.basename(md_path)[:-3]
 
 
-@app.route("/summary")
-def summary_view():
-    return render_template("summary.html")
-
-
-@app.route("/summary/list")
-def summary_list():
-    if not os.path.isdir(SUMMARY_DIR):
-        return _json({"groups": []})
-    try:
-        date_dirs = sorted(
-            [d for d in os.listdir(SUMMARY_DIR)
-             if os.path.isdir(os.path.join(SUMMARY_DIR, d))],
-            reverse=True,
-        )
-    except Exception:
-        return _json({"groups": []})
-
-    groups = []
-    for date_dir in date_dirs:
-        date_path = os.path.join(SUMMARY_DIR, date_dir)
-        try:
-            fnames = sorted(
-                [f for f in os.listdir(date_path) if f.endswith(".md")],
-                reverse=True,
-            )
-        except Exception:
-            continue
-        files = []
-        for fname in fnames:
-            md_path = os.path.join(date_path, fname)
-            files.append({
-                "name": fname,
-                "title": _parse_summary_title(md_path),
-                "path": md_path,
-            })
-        if files:
-            groups.append({"date": date_dir, "files": files})
-    return _json({"groups": groups})
-
-
 @app.route("/summary/content", methods=["POST"])
 def summary_content():
     path = (request.get_json(force=True).get("path") or "").strip()
@@ -1328,6 +1239,6 @@ if __name__ == "__main__":
     threading.Thread(target=_bg_reindex, daemon=True).start()
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "5001"))
-    log.info("starting server on %s:%s — claude=%s, backend=%s, model=%s",
-             host, port, CLAUDE_BIN, SUMMARY_BACKEND, CLAUDE_MODEL)
+    log.info("starting server on %s:%s — claude=%s, model=%s",
+             host, port, CLAUDE_BIN, CLAUDE_MODEL)
     app.run(debug=False, host=host, port=port, threaded=True)

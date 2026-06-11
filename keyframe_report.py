@@ -1,21 +1,14 @@
-#!/usr/bin/env python3
-"""[프로토타입] 영상 키프레임 + 요약 → HTML 리포트 (Tier 2: 자료성 필터 + 섹션 정렬).
+"""영상 키프레임 모듈 (서버 전용) — app.py의 /keyframes에서 generate_keyframes()로 호출.
 
 흐름:
-  1) 저해상도 영상 다운로드 → ffmpeg 장면전환 후보 프레임 추출(+타임스탬프)
+  1) 저해상도 영상 다운로드(yt-dlp) → ffmpeg 하이브리드 후보 추출(균등 간격+장면전환, 타임스탬프)
   2) Claude CLI 비전 1회 호출로 각 프레임을 (a)자료성 여부 판별 (b)요약 소제목에 정렬
-     - keep=false: 화자 토킹헤드/청중/블랙·전환/정보없음 → 제거
+     - keep=false: 화자 토킹헤드/청중/블랙·전환/정보없음/중복 → 제거
      - keep=true : 슬라이드·차트·다이어그램·스크린샷·제품/기기/시연 등 자료성
-  3) 요약 본문 각 소제목 아래에 해당 프레임을 끼워 넣어 리포트 HTML 생성(이미지 base64 내장)
-
-사용:
-  python keyframe_report.py <summary.md>                 # 다운로드+추출+분류
-  python keyframe_report.py <summary.md> --frames-dir D  # 기존 프레임 재사용(파일명 NN_MMSS.jpg)
+  3) 프레임을 {stem}.frames/ 에 저장하고 요약 md 소제목 아래에 kf-strip(<div>)으로 주입(멱등)
 """
 from __future__ import annotations
 
-import argparse
-import base64
 import glob
 import html as _html
 import json
@@ -23,11 +16,9 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 FFMPEG      = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE     = shutil.which("ffprobe") or "ffprobe"
 FFMPEG_DIR  = os.path.dirname(FFMPEG)
@@ -190,16 +181,6 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
     return deduped
 
 
-def load_frames_dir(d: str) -> list[tuple[float, str]]:
-    out = []
-    for f in sorted(glob.glob(os.path.join(d, "*.jpg"))):
-        m = re.search(r"_(\d{4})\.jpg$", f)  # NN_MMSS.jpg
-        ts = (int(m.group(1)[:2]) * 60 + int(m.group(1)[2:])) if m else 0.0
-        out.append((float(ts), f))
-    log(f"[2*] 기존 프레임 재사용 {len(out)}장 ({d})")
-    return out
-
-
 # ── 비전: 자료성 판별 + 섹션 정렬 (단일 호출) ─────────────────────────
 
 def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict]) -> dict:
@@ -255,95 +236,6 @@ JSON 배열로만 답하라(다른 설명 금지):
     kept = sum(1 for d in res.values() if d.get("keep"))
     log(f"    유지 {kept} / 드롭 {len(res) - kept}")
     return res
-
-
-# ── 리포트 HTML ───────────────────────────────────────────────────────
-
-REPORT_TMPL = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
-<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-<style>
- :root{{--fg:#1a1a1a;--muted:#666;--border:#e5e5e5;--accent:#2563eb;}}
- *{{box-sizing:border-box;}}
- body{{margin:0;font-family:-apple-system,'Pretendard',system-ui,sans-serif;color:var(--fg);background:#f5f5f5;line-height:1.75;}}
- .wrap{{max-width:960px;margin:0 auto;padding:2rem 1.5rem 4rem;}}
- .hd{{border-bottom:2px solid var(--fg);padding-bottom:1rem;margin-bottom:1.5rem;}}
- .hd h1{{font-size:1.6rem;margin:0 0 .4rem;letter-spacing:-.02em;}}
- .hd a{{color:var(--accent);font-size:.85rem;word-break:break-all;}}
- .hd .sub{{color:var(--muted);font-size:.82rem;margin-top:.3rem;}}
- .card{{background:#fff;border:1px solid var(--border);border-radius:12px;padding:1.5rem 1.9rem 2.2rem;}}
- .md h2{{font-size:1.2rem;border-bottom:1px solid var(--border);padding-bottom:.3rem;margin:2rem 0 .6rem;}}
- .md h3{{font-size:1.02rem;color:var(--accent);margin:1.4rem 0 .4rem;}}
- .md table{{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;}}
- .md th,.md td{{border:1px solid var(--border);padding:.45rem .7rem;text-align:left;}}
- .md th{{background:#fafafa;}} .md strong{{font-weight:700;}}
- .shots{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.8rem;margin:.8rem 0 1.4rem;}}
- figure{{margin:0;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:#fff;}}
- figure img{{width:100%;display:block;cursor:zoom-in;}}
- .lb{{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:999;cursor:zoom-out;padding:1.5rem;}}
- .lb.open{{display:flex;}}
- .lb img{{max-width:96vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}}
- figcaption{{font-size:.8rem;color:var(--muted);padding:.45rem .6rem;}}
- figcaption b{{color:var(--accent);font-family:ui-monospace,monospace;font-weight:600;margin-right:.4rem;}}
- .appendix-hd{{font-size:1.1rem;border-bottom:1px solid var(--border);padding-bottom:.3rem;margin:2.5rem 0 1rem;}}
-</style></head><body><div class="wrap">
- <div class="hd"><h1>{title}</h1>{url_html}
-  <div class="sub">자료성 키프레임 {nkept}장 · 섹션 정렬 리포트(프로토타입)</div></div>
- <div class="card"><div class="md" id="md"></div>
-  <div id="appendix"></div></div>
-<script id="src" type="text/plain">{markdown}</script>
-<script id="shots" type="application/json">{shots_json}</script>
-<script>
- const R=new marked.Renderer();
- R.link=(h,t,x)=>{{const u=(typeof h==='object')?h.href:h;const tx=(typeof h==='object')?(h.text||u):(x||u);return `<a href="${{u}}" target="_blank" rel="noopener">${{tx}}</a>`;}};
- marked.use({{renderer:R,gfm:true,breaks:false}});
- function fixCjk(s){{const st=[];s=s.replace(/```[\\s\\S]*?```|`[^`\\n]+`/g,m=>{{st.push(m);return '\\x01'+(st.length-1)+'\\x01';}});
-  s=s.replace(/\\*\\*([^\\s][^\\n]*?[^\\s]|\\S)\\*\\*/g,(_,t)=>'<strong>'+t+'</strong>');
-  return s.replace(/\\x01(\\d+)\\x01/g,(_,i)=>st[+i]);}}
- function fig(s){{return `<figure><img src="data:image/jpeg;base64,${{s.b64}}" loading="lazy"><figcaption><b>${{s.ts}}</b>${{s.caption||''}}</figcaption></figure>`;}}
- let md=document.getElementById('src').textContent.replace(/^---\\n[\\s\\S]*?\\n---\\n?/,'');
- document.getElementById('md').innerHTML=marked.parse(fixCjk(md));
- const shots=JSON.parse(document.getElementById('shots').textContent);
- const heads=[...document.querySelectorAll('#md h2,#md h3')];
- const used=new Set();
- // 섹션별 프레임 삽입(소제목 바로 뒤)
- const bySec={{}};
- shots.forEach((s,i)=>{{ if(s.section!=null&&heads[s.section]){{(bySec[s.section]=bySec[s.section]||[]).push(s);used.add(i);}} }});
- Object.entries(bySec).forEach(([idx,arr])=>{{
-   const div=document.createElement('div');div.className='shots';div.innerHTML=arr.map(fig).join('');
-   heads[idx].insertAdjacentElement('afterend',div);
- }});
- // 섹션 미정 프레임 → 부록
- const rest=shots.filter((s,i)=>!used.has(i));
- if(rest.length){{document.getElementById('appendix').innerHTML=
-   '<div class="appendix-hd">기타 자료 캡처</div><div class="shots">'+rest.map(fig).join('')+'</div>';}}
- // 라이트박스: 캡처 클릭 시 원본(풀 해상도) 확대 (이벤트 위임)
- document.addEventListener('click',e=>{{const im=e.target.closest('.shots figure img');if(!im)return;const o=document.getElementById('lb');document.getElementById('lb-img').src=im.src;o.classList.add('open');}});
- document.addEventListener('keydown',e=>{{if(e.key==='Escape')document.getElementById('lb').classList.remove('open');}});
-</script>
-<div class="lb" id="lb" onclick="this.classList.remove('open')"><img id="lb-img" alt=""></div>
-</div></body></html>"""
-
-
-def build_report(meta: dict, frames: list[tuple[float, str]], verdict: dict, out_html: str):
-    shots = []
-    for ts, path in frames:
-        v = verdict.get(os.path.basename(path), {})
-        if not v.get("keep"):
-            continue
-        with open(path, "rb") as _f:
-            b64 = base64.b64encode(_f.read()).decode()
-        shots.append({"ts": _hms(ts), "b64": b64, "section": v.get("section"),
-                      "caption": _html.escape(v.get("caption") or "")})  # 비전 출력 — innerHTML 삽입 전 escape
-    url_html = f'<a href="{meta["url"]}" target="_blank">{meta["url"]}</a>' if meta["url"] else ""
-    html = REPORT_TMPL.format(
-        title=meta["title"], url_html=url_html, nkept=len(shots),
-        markdown=meta["markdown"].replace("</script>", "<\\/script>"),
-        shots_json=json.dumps(shots, ensure_ascii=False).replace("</script>", "<\\/script>"))
-    os.makedirs(os.path.dirname(out_html), exist_ok=True)
-    with open(out_html, "w", encoding="utf-8") as _f:
-        _f.write(html)
-    return len(shots)
 
 
 # ── 서버 통합 모드: 요약 md에 키프레임 스트립 주입 ──────────────────
@@ -482,39 +374,3 @@ def _assign_sections_by_time(kept: list[dict], headings: list[dict]):
             else:
                 break
         k["section"] = sec
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("summary")
-    ap.add_argument("--url")
-    ap.add_argument("--frames-dir")
-    args = ap.parse_args()
-    if not os.path.isfile(args.summary):
-        sys.exit("요약 .md 경로 필요")
-    meta = parse_summary(args.summary)
-    meta["url"] = args.url or meta["url"]
-    stem = os.path.splitext(os.path.basename(args.summary))[0]
-
-    if args.frames_dir:
-        frames = load_frames_dir(args.frames_dir)
-        verdict = classify_and_assign(frames, meta["headings"]) or {}
-        out = os.path.join(REPORTS_DIR, f"{stem}_report.html")
-        n = build_report(meta, frames, verdict, out)
-    else:
-        if not meta["url"]:
-            sys.exit("URL 없음(--url)")
-        with tempfile.TemporaryDirectory() as tmp:
-            video = download_video(meta["url"], os.path.join(tmp, "v"))
-            if not video:
-                sys.exit("다운로드 실패")
-            frames = extract_candidates(video, os.path.join(tmp, "f"))
-            verdict = classify_and_assign(frames, meta["headings"]) or {}
-            out = os.path.join(REPORTS_DIR, f"{stem}_report.html")
-            n = build_report(meta, frames, verdict, out)
-    log(f"[4] 리포트 저장: {out} (자료 프레임 {n}장, {os.path.getsize(out)//1000}KB)")
-    print("REPORT_PATH=" + out)
-
-
-if __name__ == "__main__":
-    main()
