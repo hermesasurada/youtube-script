@@ -148,7 +148,7 @@ function clearTitleSearch() {
   inp.focus();
 }
 
-function applyHistoryFilter() {
+function applyHistoryFilter(keepPage = false) {
   const dateFrom = document.getElementById('hf-date-from').value;
   const dateTo   = document.getElementById('hf-date-to').value;
   const uploader = document.getElementById('hf-uploader').value;
@@ -164,7 +164,10 @@ function applyHistoryFilter() {
     if (_histUnreadOnly && item.is_read) return false;
     return true;
   });
-  _historyPage = 1;
+  // keepPage: 읽음/삭제 등 '항목 변경'에 의한 재적용은 현재 페이지 유지
+  // (페이지 수가 줄면 _renderHistoryList의 클램프가 마지막 페이지로 보정).
+  // 필터 조건 자체가 바뀐 경우(기본)는 1페이지부터.
+  if (!keepPage) _historyPage = 1;
   _renderHistoryList();
 }
 
@@ -204,8 +207,8 @@ async function toggleRead(btn) {
     }
   }
 
-  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거
-  if (_histUnreadOnly && newRead) applyHistoryFilter();
+  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거(현재 페이지 유지)
+  if (_histUnreadOnly && newRead) applyHistoryFilter(true);
 }
 
 async function deleteCard(btn) {
@@ -222,8 +225,8 @@ async function deleteCard(btn) {
   const idx = _historyItems.findIndex(i => i.txt_path === mdPath);
   if (idx !== -1) _historyItems.splice(idx, 1);
 
-  // 카드 DOM 제거 후 목록 다시 렌더
-  applyHistoryFilter();
+  // 카드 DOM 제거 후 목록 다시 렌더(현재 페이지 유지)
+  applyHistoryFilter(true);
 }
 
 function _historyGoToPage(p) {
