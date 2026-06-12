@@ -1300,6 +1300,20 @@ async function copyUrl() {
 let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성에 사용
 let _immersive = false;
 
+/* 읽기 진행바: 활성 스크롤 컨테이너(일반=sum-panel-body, 몰입=imm-text) 기준 */
+function _updateSumProgress(el) {
+  const bar = document.getElementById('sum-progress');
+  if (!bar || !el) return;
+  const max = el.scrollHeight - el.clientHeight;
+  bar.style.width = max > 4 ? Math.min(100, el.scrollTop / max * 100) + '%' : '0%';
+}
+document.getElementById('sum-panel-body').addEventListener('scroll', function () {
+  if (!_immersive) _updateSumProgress(this);
+}, { passive: true });
+document.querySelector('#sum-immersive-body .imm-text').addEventListener('scroll', function () {
+  if (_immersive) _updateSumProgress(this);
+}, { passive: true });
+
 async function openSummaryModal(summaryPath, title) {
   const overlay  = document.getElementById('sum-overlay');
   const titleEl  = document.getElementById('sum-panel-title');
@@ -1317,6 +1331,8 @@ async function openSummaryModal(summaryPath, title) {
     if (data.error) throw new Error(data.error);
     _summaryMd = data.content || '';
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
+    bodyEl.scrollTop = 0;
+    _updateSumProgress(bodyEl);
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
     const hasImg = !!bodyEl.querySelector('.kf-strip');
     document.getElementById('sum-immersive-btn').hidden = !hasImg;
@@ -1348,7 +1364,7 @@ function _setImmersive(on) {
   const syncBtn = document.getElementById('sum-sync-btn');
   syncBtn.hidden = !on;            // 동기화 토글은 몰입형일 때만 노출
   if (on) _updateSyncBtn();
-  if (!on) return;
+  if (!on) { _updateSumProgress(normal); return; }
 
   const tmp = document.createElement('div');
   tmp.innerHTML = YS.renderMarkdown(_summaryMd);
@@ -1365,6 +1381,7 @@ function _setImmersive(on) {
     : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
   txt.innerHTML = tmp.innerHTML;
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
+  _updateSumProgress(txt);
   _immProgPane = null;
   _bindImmScroll();
 }

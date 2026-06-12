@@ -54,12 +54,59 @@
     });
   }
 
-  /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목 꾸미기. */
+  /**
+   * 요약 전용 의미 변환(가드되어 일반 마크다운엔 무해):
+   *  1) `## 메타정보` + 표  → 칩 헤더(.ys-meta): 업로더·날짜·길이·YouTube 링크
+   *  2) `## 한눈 요약` + ul → 강조 callout 카드(.ys-tldr)
+   */
+  function _decorateSummary(html) {
+    if (typeof document === 'undefined') return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    const h2s = [...tpl.content.querySelectorAll('h2')];
+
+    const metaH = h2s.find(h => /메타\s*정보/.test(h.textContent));
+    if (metaH && metaH.nextElementSibling && metaH.nextElementSibling.tagName === 'TABLE') {
+      const tbl = metaH.nextElementSibling;
+      const kv = {};
+      tbl.querySelectorAll('tr').forEach(tr => {
+        const c = tr.querySelectorAll('td,th');
+        if (c.length >= 2) kv[c[0].textContent.trim()] = c[1];
+      });
+      const chips = [];
+      if (kv['업로더']) chips.push(`<span class="ys-chip ys-chip-up">${kv['업로더'].innerHTML}</span>`);
+      if (kv['날짜'])   chips.push(`<span class="ys-chip">${kv['날짜'].innerHTML}</span>`);
+      if (kv['길이'])   chips.push(`<span class="ys-chip ys-chip-dur">${kv['길이'].innerHTML}</span>`);
+      const urlA = kv['URL'] && kv['URL'].querySelector('a');
+      if (urlA) chips.push(`<a class="ys-chip ys-chip-link" href="${urlA.href}" target="_blank" rel="noopener noreferrer">YouTube에서 보기 ↗</a>`);
+      if (chips.length) {
+        const bar = document.createElement('div');
+        bar.className = 'ys-meta';
+        bar.innerHTML = chips.join('');
+        tbl.replaceWith(bar);
+        metaH.remove();
+      }
+    }
+
+    const tldrH = h2s.find(h => /한눈\s*요약/.test(h.textContent));
+    if (tldrH && tldrH.nextElementSibling && tldrH.nextElementSibling.tagName === 'UL') {
+      const ul = tldrH.nextElementSibling;
+      const card = document.createElement('section');
+      card.className = 'ys-tldr';
+      card.innerHTML = '<div class="ys-tldr-label">✦ 한눈 요약</div>';
+      ul.replaceWith(card);
+      card.appendChild(ul);
+      tldrH.remove();
+    }
+    return tpl.innerHTML;
+  }
+
+  /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목·요약 꾸미기. */
   function renderMarkdown(src) {
     src = String(src || '').replace(/^---\n[\s\S]*?\n---\n?/, '');
     src = _fixCjkEmphasis(src);
     if (global.marked && typeof global.marked.parse === 'function') {
-      return _decorateHeadings(global.marked.parse(src));
+      return _decorateSummary(_decorateHeadings(global.marked.parse(src)));
     }
     // marked 미로딩 시 최소 폴백(이스케이프된 평문)
     return '<pre>' + escapeHtml(src) + '</pre>';
@@ -140,11 +187,27 @@
   function _setupKeyframeUI() {
     if (document.getElementById("ys-kf-style")) return;
     const css = `
-.kf-strip{display:flex;gap:.55rem;overflow-x:auto;padding:.4rem 0 .7rem;margin:.5rem 0 1.1rem;-webkit-overflow-scrolling:touch;}
-.kf-strip figure{margin:0;flex:0 0 auto;width:280px;border:1px solid var(--border,#e5e5e5);border-radius:8px;overflow:hidden;background:var(--surface,#fff);}
+.kf-strip{display:flex;gap:.7rem;overflow-x:auto;padding:.5rem .15rem .9rem;margin:.6rem 0 1.2rem;-webkit-overflow-scrolling:touch;}
+.kf-strip figure{margin:0;flex:0 0 auto;width:280px;border:1px solid var(--border,#e5e5e5);border-radius:11px;overflow:hidden;background:var(--surface,#fff);box-shadow:0 1px 3px rgba(0,0,0,.07);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;}
+.kf-strip figure:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.16);border-color:var(--border-strong,var(--border,#ccc));}
 .kf-strip img{display:block;width:100%;height:158px;object-fit:cover;cursor:zoom-in;}
-.kf-strip figcaption{font-size:.74rem;color:var(--muted,#666);padding:.35rem .5rem;line-height:1.4;}
-.kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;margin-right:.35rem;}
+.kf-strip figcaption{display:flex;align-items:baseline;gap:.45rem;font-size:.74rem;color:var(--muted,#666);padding:.42rem .6rem .48rem;line-height:1.45;}
+.kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;font-size:.68rem;font-weight:600;flex-shrink:0;background:var(--highlight-soft,rgba(99,102,241,.1));padding:.06rem .38rem;border-radius:999px;}
+/* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
+.ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin:.4rem 0 1.4rem;padding-bottom:1.1rem;border-bottom:1px solid var(--border,#e5e5e5);}
+.ys-chip{display:inline-flex;align-items:center;gap:.35em;font-size:.78rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius:999px;padding:.26rem .72rem;line-height:1.25;}
+.ys-chip-up{color:var(--text,#222);font-weight:600;}
+.ys-chip-dur{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.02em;}
+.ys-chip a{color:inherit;text-decoration:none;}
+a.ys-chip-link{color:var(--highlight,#2563eb);border-color:color-mix(in oklab,var(--highlight,#2563eb) 38%,transparent);background:var(--highlight-soft,rgba(99,102,241,.08));text-decoration:none;font-weight:600;transition:filter .15s;}
+a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
+/* ── 한눈 요약 callout ── */
+.ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:1rem 1.25rem 1.05rem 1.35rem;background:linear-gradient(135deg,var(--highlight-soft,rgba(99,102,241,.08)),transparent 78%),var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden;}
+.ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}
+.ys-tldr-label{font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--highlight,#2563eb);margin-bottom:.55rem;}
+.ys-tldr ul{margin:0 !important;padding-left:1.15rem !important;}
+.ys-tldr li{font-size:.95em;line-height:1.75;margin-bottom:.3rem;}
+.ys-tldr li::marker{color:var(--highlight,#2563eb);}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:99999;cursor:zoom-out;padding:1.5rem;}
 .ys-lb.open{display:flex;}
 .ys-lb img{max-width:88vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}
@@ -155,10 +218,10 @@
 .ys-lb-cap{position:fixed;bottom:3rem;left:50%;transform:translateX(-50%);max-width:80vw;text-align:center;color:rgba(255,255,255,.92);font-size:13.5px;line-height:1.5;background:rgba(0,0,0,.5);padding:.4rem .85rem;border-radius:8px;}
 .ys-lb-cap:empty{display:none;}
 .ys-lb-cap b{color:#9db4ff;font-family:ui-monospace,monospace;margin-right:.4rem;}
-.kf-ico{color:var(--highlight,var(--accent,#2563eb));margin-right:.1em;}
-.kf-time{color:var(--muted,#999);font-weight:400;font-size:.82em;font-family:ui-monospace,monospace;}
-/* 요약 소제목(h3) 리본: 좌측 강조 바 + 강조 틴트 배경(가시성↑, 테마 적응) */
-.sum-md h3,.md-body h3,.markdown h3{background:var(--highlight-soft,rgba(99,102,241,.1));border-left:4px solid var(--highlight,var(--accent,#6366f1));padding:.45rem .7rem;border-radius:7px;margin:1.5rem 0 .7rem;}`;
+.kf-ico{display:none;}  /* 좌측 강조 바가 마커 역할 — 글리프 중복 제거 */
+.kf-time{margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius:999px;}
+/* 요약 소제목(h3) 리본: 좌측 강조 바 + 틴트, 시각 pill은 우측 정렬 */
+.sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius:9px;margin:1.7rem 0 .75rem;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
     document.head.appendChild(st);

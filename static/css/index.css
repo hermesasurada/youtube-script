@@ -1622,16 +1622,25 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-overlay[hidden] { display: none !important; }
 .sum-panel {
   background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   width: 100%;
-  max-width: 840px;
+  max-width: 860px;
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 28px 72px rgba(0,0,0,.45);
-  animation: sumIn .18s ease;
+  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 32px 90px rgba(0,0,0,.5);
+  animation: sumIn .22s cubic-bezier(.2,.8,.25,1);
   overflow: hidden;
+  position: relative;
+}
+/* 읽기 진행바 — 헤더 하단에 얇게 */
+.sum-progress {
+  position: absolute; top: 0; left: 0; height: 2.5px; width: 0%;
+  background: linear-gradient(90deg, var(--highlight), color-mix(in oklab, var(--highlight) 55%, var(--text)));
+  z-index: 5; border-radius: 0 99px 99px 0;
+  transition: width .12s linear;
+  pointer-events: none;
 }
 @keyframes sumIn {
   from { opacity: 0; transform: translateY(-12px) scale(.98); }
@@ -1713,30 +1722,39 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   flex: 0 0 52%; max-width: 52%; overflow-y: auto;
   padding: 1.25rem 1.25rem 2rem; border-right: 1px solid var(--border); background: var(--surface2);
 }
-.imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.4rem 1.6rem 2.5rem; }
+.imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.5rem 2rem 3rem; }
+.imm-text > * { max-width: 660px; }   /* 가독 칼럼 폭 제한 */
 /* 몰입형 우측 본문은 한 단계 작게 */
-.imm-text.sum-md p, .imm-text.sum-md li { font-size: .85rem; line-height: 1.6; }
-.imm-text.sum-md h1 { font-size: 1.15rem; margin-bottom: .9rem; }
-.imm-text.sum-md h2 { font-size: .9rem; }
+.imm-text.sum-md p, .imm-text.sum-md li { font-size: .85rem; line-height: 1.68; }
+.imm-text.sum-md h1 { font-size: 1.18rem; margin-bottom: .8rem; }
 .imm-text.sum-md h3 { font-size: .85rem; }
 .imm-text.sum-md td, .imm-text.sum-md th { font-size: .8rem; }
 /* 갤러리: 가로 스트립을 세로 스택 + 원본 비율로 오버라이드 */
-.imm-gallery .kf-strip { display: flex; flex-direction: column; gap: .9rem; overflow: visible; margin: 0; padding: 0; }
+.imm-gallery .kf-strip { display: flex; flex-direction: column; gap: 1rem; overflow: visible; margin: 0; padding: 0; }
 .imm-gallery .kf-strip figure { width: 100%; }
 .imm-gallery .kf-strip img { width: 100%; height: auto; }
+.imm-gallery .kf-strip figcaption { font-size: .8rem; padding: .5rem .75rem .55rem; }
 .imm-empty { color: var(--muted); font-size: .875rem; padding: 1rem; }
 /* PC라도 폭이 좁으면(2단 무리) 몰입 버튼 숨김 */
 @media (max-width: 900px) { .sum-immersive-btn { display: none !important; } }
 
 /* Markdown styles inside modal */
-.sum-md h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -.025em; line-height: 1.3; margin-bottom: 1.25rem; }
-.sum-md h2 { font-size: 1rem; font-weight: 700; letter-spacing: -.01em; margin-top: 2rem; margin-bottom: .6rem; padding-bottom: .35rem; border-bottom: 1px solid var(--border); }
-.sum-md h3 { font-size: .9375rem; font-weight: 600; color: var(--highlight); margin-top: 1.25rem; margin-bottom: .35rem; }
-.sum-md p { margin-bottom: .75rem; line-height: 1.75; font-size: .9375rem; }
+.sum-md h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -.032em; line-height: 1.3; margin-bottom: .9rem; text-wrap: balance; }
+.sum-md h2 { /* 섹션 라벨(스몰캡스) + 우측 헤어라인 */
+  display: flex; align-items: center; gap: .7rem;
+  font-size: .72rem; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+  color: var(--muted); margin-top: 2.2rem; margin-bottom: .8rem;
+}
+.sum-md h2::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.sum-md h3 { font-size: .9375rem; font-weight: 650; color: var(--text); }
+.sum-md p { margin-bottom: .75rem; line-height: 1.8; font-size: .9375rem; }
 .sum-md hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
-.sum-md ul, .sum-md ol { padding-left: 1.5rem; margin-bottom: .75rem; }
-.sum-md li { line-height: 1.7; font-size: .9375rem; margin-bottom: .15rem; }
-.sum-md strong { font-weight: 600; }
+.sum-md ul, .sum-md ol { padding-left: 1.35rem; margin-bottom: .85rem; }
+.sum-md li { line-height: 1.78; font-size: .9375rem; margin-bottom: .32rem; }
+.sum-md li::marker { color: var(--highlight); }
+.sum-md li ul { margin: .25rem 0 .35rem; }
+.sum-md li li { font-size: .895rem; color: var(--muted); margin-bottom: .18rem; }
+.sum-md strong { font-weight: 700; color: color-mix(in oklab, var(--text) 88%, var(--highlight)); }
 .sum-md table { width: 100%; border-collapse: collapse; margin: .75rem 0 1.25rem; font-size: .875rem; }
 .sum-md th { background: var(--surface2); font-weight: 600; padding: .45rem .75rem; text-align: left; border: 1px solid var(--border); font-size: .8125rem; }
 .sum-md td { padding: .4rem .75rem; border: 1px solid var(--border); line-height: 1.55; vertical-align: top; }
