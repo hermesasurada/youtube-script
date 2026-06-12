@@ -1763,6 +1763,10 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-md li ul { margin: .25rem 0 .35rem; }
 .sum-md li li { font-size: .895rem; color: var(--muted); margin-bottom: .18rem; }
 .sum-md strong { font-weight: 700; color: color-mix(in oklab, var(--text) 88%, var(--highlight)); }
+/* 일반 요약 모달: 캡처를 키워 한 화면 폭에 2개가 꽉 차게(나머지는 가로 스크롤) */
+#sum-panel-body .kf-strip { gap: .55rem; padding-left: 0; padding-right: 0; }
+#sum-panel-body .kf-strip figure { width: calc((100% - .55rem) / 2); }
+#sum-panel-body .kf-strip img { height: auto; aspect-ratio: 16 / 9; }
 .sum-md table { width: 100%; border-collapse: collapse; margin: .75rem 0 1.25rem; font-size: .875rem; }
 .sum-md th { background: var(--surface2); font-weight: 600; padding: .45rem .75rem; text-align: left; border: 1px solid var(--border); font-size: .8125rem; }
 .sum-md td { padding: .4rem .75rem; border: 1px solid var(--border); line-height: 1.55; vertical-align: top; }
