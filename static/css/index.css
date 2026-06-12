@@ -120,9 +120,10 @@ header h1 {
 header h1::before {
   content: '';
   display: inline-block;
-  width: 10px; height: 10px;
-  border-radius: 2px;
-  background: var(--highlight);
+  width: 11px; height: 11px;
+  border-radius: 3.5px;
+  background: linear-gradient(135deg, var(--highlight), color-mix(in oklab, var(--highlight) 55%, var(--text)));
+  box-shadow: 0 0 0 3px var(--highlight-soft);
   margin-right: .15rem;
 }
 header h1 em {
@@ -156,15 +157,15 @@ header h1 em {
 }
 .nav-link:hover { color: var(--text); background: var(--surface2); border-color: var(--border); }
 .tag {
-  font-size: 11px;
-  background: transparent;
+  font-size: 10.5px;
+  background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: .15rem .45rem;
+  border-radius: 999px;
+  padding: .18rem .6rem;
   color: var(--muted);
   font-family: var(--font-mono);
-  letter-spacing: 0;
-  font-weight: 400;
+  letter-spacing: .01em;
+  font-weight: 500;
 }
 
 /* ── Workspace ── */
@@ -537,17 +538,17 @@ select option { background: var(--surface); color: var(--text); }
   background: var(--accent);
   color: var(--accent-fg);
   border: none;
-  border-radius: var(--radius);
-  padding: .72rem;
+  border-radius: 10px;
+  padding: .75rem;
   font-family: inherit;
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
   width: 100%;
   letter-spacing: -.005em;
-  transition: opacity .15s, transform .08s;
+  transition: opacity .15s, transform .12s, box-shadow .15s;
 }
-.btn-start:hover:not(:disabled) { opacity: .88; }
+.btn-start:hover:not(:disabled) { opacity: .9; transform: translateY(-1px); box-shadow: 0 6px 16px -8px rgba(0,0,0,.4); }
 .btn-start:active:not(:disabled) { transform: scale(.99); }
 .btn-start:disabled { opacity: .4; cursor: not-allowed; }
 
@@ -593,29 +594,31 @@ select option { background: var(--surface); color: var(--text); }
   gap: .25rem;
 }
 .tab {
-  padding: .8rem .9rem;
+  padding: .42rem .85rem;
+  margin: .5rem 0;
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 500;
   color: var(--muted);
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  border-bottom: 2px solid transparent;
-  transition: color .15s, border-color .15s;
+  border-radius: 999px;
+  transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
   white-space: nowrap;
   display: flex;
   align-items: center;
   gap: .42rem;
-  margin-bottom: -1px;
   letter-spacing: -.005em;
 }
 .tab svg { opacity: .7; }
-.tab:hover { color: var(--text); }
+.tab:hover { color: var(--text); background: var(--surface2); }
 .tab:hover svg { opacity: 1; }
 .tab.active {
   color: var(--text);
-  border-bottom-color: var(--text);
+  background: var(--surface);
+  border-color: var(--border-strong);
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
   font-weight: 600;
 }
 .tab.active svg { opacity: 1; }
@@ -1170,6 +1173,7 @@ select option { background: var(--surface); color: var(--text); }
 .queue-item-done     { opacity: .65; }
 .queue-item-error    { background: oklch(0.5 0.2 22 / .08); }
 .queue-item-cancelled { opacity: .5; }
+.queue-item-empty { opacity: .45; }
 .queue-item-empty .queue-item-idx,
 .queue-item-empty .queue-item-url { color: var(--subtle); }
 .queue-status {
@@ -1338,17 +1342,18 @@ select option { background: var(--surface); color: var(--text); }
   flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 13px;
   overflow: hidden;
-  transition: border-color .15s, transform .15s, box-shadow .15s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  transition: border-color .18s, transform .18s, box-shadow .18s;
 }
 .hist-card-clickable { cursor: pointer; }
 .hist-card-clickable:hover {
   border-color: var(--border-strong);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 18px -10px rgba(0,0,0,.18);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px -12px rgba(0,0,0,.28);
 }
-.hist-card-clickable:hover .hist-thumb { transform: scale(1.03); }
+.hist-card-clickable:hover .hist-thumb { transform: scale(1.04); }
 .hist-thumb-wrap {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -1371,16 +1376,18 @@ select option { background: var(--surface); color: var(--text); }
 }
 .hist-thumb-dur {
   position: absolute;
-  right: .4rem;
-  bottom: .4rem;
-  background: rgba(0,0,0,.78);
+  right: .45rem;
+  bottom: .45rem;
+  background: rgba(0,0,0,.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #fff;
   font-family: var(--font-mono);
   font-size: 9.5px;
   font-weight: 600;
-  padding: .1rem .35rem;
-  border-radius: 3px;
-  letter-spacing: .02em;
+  padding: .14rem .5rem;
+  border-radius: 999px;
+  letter-spacing: .03em;
   line-height: 1.3;
 }
 .hist-card-body {
@@ -1448,7 +1455,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -1460,6 +1467,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   color: var(--text);
   background: var(--surface2);
   border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
 .hist-icon-btn svg { display: block; }
 .hist-icon-btn-summary {
@@ -1836,7 +1844,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   width: 130px;
   transition: border-color .15s;
 }
-.hf-date:focus { border-color: var(--text); }
+.hf-date:focus { border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft); }
 .hf-uploader {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1850,7 +1858,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   max-width: 220px;
   transition: border-color .15s;
 }
-.hf-uploader:focus { border-color: var(--text); }
+.hf-uploader:focus { border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft); }
 .hf-title-wrap { flex: 1; min-width: 100px; position: relative; display: flex; }
 .hf-title {
   flex: 1;
@@ -1865,7 +1873,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   transition: border-color .15s;
   width: 100%;
 }
-.hf-title:focus { border-color: var(--text); }
+.hf-title:focus { border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft); }
 .hf-title::placeholder { color: var(--muted); }
 .hf-clear-btn {
   position: absolute; right: .35rem; top: 50%; transform: translateY(-50%);
