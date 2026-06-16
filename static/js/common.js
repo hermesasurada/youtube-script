@@ -256,9 +256,20 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
       lbCount.style.display = multi ? "" : "none";
       lbCount.textContent = multi ? `${lbIdx + 1}/${lbList.length}` : "";
     }
-    const lbClose = () => lb.classList.remove("open");
+    // 라이트박스 history 연동 + 스와이프 상태
+    let lbPushed = false;   // 라이트박스용 history 상태 push 여부
+    let lbAbsorb = false;   // 사용자 닫기로 생기는 정리 popstate 1회 흡수
+    let lbSwiped = false;   // 스와이프 직후 click(닫기) 억제
+    function lbClose() {
+      if (!lb.classList.contains("open")) return;
+      lb.classList.remove("open");
+      if (lbPushed) { lbPushed = false; lbAbsorb = true; history.back(); }  // push했던 상태 정리(popstate는 아래서 흡수)
+    }
 
-    lb.addEventListener("click", (e) => { if (e.target === lb || e.target === lbImg) lbClose(); });  // 배경 또는 이미지 클릭 시 닫기(화살표는 stopPropagation)
+    lb.addEventListener("click", (e) => {
+      if (lbSwiped) { lbSwiped = false; return; }            // 스와이프 끝에서 따라오는 click은 무시
+      if (e.target === lb || e.target === lbImg) lbClose();  // 배경/이미지 탭 → 닫기(화살표는 stopPropagation)
+    });
     lbPrev.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx - 1); });
     lbNext.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx + 1); });
 
@@ -275,6 +286,8 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
       });
       lbShow(imgs.indexOf(im));
       lb.classList.add("open");
+      lbPushed = true;
+      history.pushState({ ysLb: 1 }, "");   // 뒤로가기 1회 = (아래 모달이 아니라) 라이트박스만 닫기
     });
     // 캡처 단계 등록 → 다른 모달의 ESC 핸들러(버블)보다 먼저 가로챔.
     // 라이트박스가 열려 있을 때만 처리하고 stopPropagation으로 이벤트를 막아,
@@ -285,6 +298,29 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
       else if (e.key === "ArrowLeft") { e.stopPropagation(); lbShow(lbIdx - 1); }
       else if (e.key === "ArrowRight") { e.stopPropagation(); lbShow(lbIdx + 1); }
     }, true);
+
+    // 뒤로가기(popstate): 라이트박스가 열려 있으면 그것만 닫고 아래 모달 핸들러는 막는다.
+    // 캡처 단계 + stopImmediatePropagation → 등록 순서와 무관하게 모바일 모달 popstate보다 우선.
+    window.addEventListener("popstate", (e) => {
+      if (lbAbsorb) { lbAbsorb = false; e.stopImmediatePropagation(); return; }   // 사용자 닫기 정리 pop 흡수
+      if (lb.classList.contains("open")) {
+        lb.classList.remove("open"); lbPushed = false;
+        e.stopImmediatePropagation();   // 아래 모달까지 닫히지 않게
+      }
+    }, true);
+
+    // 모바일: 좌우 스와이프로 이미지 탐색(왼쪽=다음, 오른쪽=이전)
+    let _tx = 0, _ty = 0;
+    lb.addEventListener("touchstart", (e) => {
+      const t = e.changedTouches[0]; _tx = t.clientX; _ty = t.clientY;
+    }, { passive: true });
+    lb.addEventListener("touchend", (e) => {
+      const t = e.changedTouches[0], dx = t.clientX - _tx, dy = t.clientY - _ty;
+      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        lbSwiped = true;                              // 직후 따라오는 click(닫기) 억제
+        lbShow(dx < 0 ? lbIdx + 1 : lbIdx - 1);
+      }
+    }, { passive: true });
   }
   if (document.body) _setupKeyframeUI();
   else document.addEventListener("DOMContentLoaded", _setupKeyframeUI);
