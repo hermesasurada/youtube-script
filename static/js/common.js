@@ -212,9 +212,13 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-tldr ul{margin:0 !important;padding-left:1.15rem !important;}
 .ys-tldr li{font-size:.95em;line-height:1.75;margin-bottom:.3rem;}
 .ys-tldr li::marker{color:var(--highlight,#2563eb);}
-.ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:99999;cursor:zoom-out;padding:1.5rem;}
-.ys-lb.open{display:flex;}
-.ys-lb img{max-width:88vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);}
+.ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;z-index:99999;cursor:zoom-out;}
+.ys-lb.open{display:block;}
+.ys-lb-viewport{position:absolute;inset:0;overflow:hidden;touch-action:none;}
+.ys-lb-track{display:flex;height:100%;will-change:transform;transition:transform .3s cubic-bezier(.22,.61,.36,1);}
+.ys-lb-track.dragging{transition:none;}
+.ys-lb-slide{flex:0 0 100%;height:100%;display:flex;align-items:center;justify-content:center;padding:1.5rem;}
+.ys-lb-slide img{max-width:88vw;max-height:92vh;border-radius:4px;box-shadow:0 6px 40px rgba(0,0,0,.5);pointer-events:none;-webkit-user-drag:none;user-select:none;}
 .ys-lb-nav{position:fixed;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.4);color:#fff;border:none;font-size:2.2rem;line-height:1;width:52px;height:72px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none;}
 .ys-lb-nav:hover{background:rgba(0,0,0,.7);}
 .ys-lb-prev{left:1.2rem;} .ys-lb-next{right:1.2rem;}
@@ -232,23 +236,34 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 
     const lb = document.createElement("div");
     lb.className = "ys-lb"; lb.id = "ys-lb";
-    lb.innerHTML = '<button class="ys-lb-nav ys-lb-prev" aria-label="이전">‹</button>'
-                 + '<img alt="">'
+    lb.innerHTML = '<div class="ys-lb-viewport"><div class="ys-lb-track"></div></div>'
+                 + '<button class="ys-lb-nav ys-lb-prev" aria-label="이전">‹</button>'
                  + '<button class="ys-lb-nav ys-lb-next" aria-label="다음">›</button>'
                  + '<div class="ys-lb-cap"></div>'
                  + '<span class="ys-lb-count"></span>';
     document.body.appendChild(lb);
-    const lbImg = lb.querySelector("img");
+    const lbViewport = lb.querySelector(".ys-lb-viewport");
+    const lbTrack = lb.querySelector(".ys-lb-track");
     const lbPrev = lb.querySelector(".ys-lb-prev");
     const lbNext = lb.querySelector(".ys-lb-next");
     const lbCount = lb.querySelector(".ys-lb-count");
     const lbCap = lb.querySelector(".ys-lb-cap");
     let lbList = [], lbCaps = [], lbIdx = 0;   // 현재 섹션 이미지 src·캡션 목록 + 인덱스
 
-    function lbShow(i) {
+    function _lbBuild() {                       // 현재 섹션 이미지로 슬라이드 트랙 구성
+      lbTrack.innerHTML = lbList
+        .map((src) => `<div class="ys-lb-slide"><img alt="" src="${src}"></div>`)
+        .join("");
+    }
+    function _lbPos(instant) {                  // 트랙을 현재 인덱스 위치로(instant=애니메이션 없이)
+      if (instant) lbTrack.classList.add("dragging");
+      lbTrack.style.transform = `translateX(${-lbIdx * 100}%)`;
+      if (instant) { void lbTrack.offsetWidth; lbTrack.classList.remove("dragging"); }
+    }
+    function lbShow(i, instant) {
       if (!lbList.length) return;
       lbIdx = Math.max(0, Math.min(i, lbList.length - 1));   // 클램프(순환 안 함)
-      lbImg.src = lbList[lbIdx];
+      _lbPos(instant);
       lbCap.innerHTML = lbCaps[lbIdx] || "";   // 이미지 하단 캡션(넘버링 위)
       const multi = lbList.length > 1;
       lbPrev.style.display = (multi && lbIdx > 0) ? "" : "none";                 // 처음이면 이전 숨김
@@ -267,8 +282,9 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
     }
 
     lb.addEventListener("click", (e) => {
-      if (lbSwiped) { lbSwiped = false; return; }            // 스와이프 끝에서 따라오는 click은 무시
-      if (e.target === lb || e.target === lbImg) lbClose();  // 배경/이미지 탭 → 닫기(화살표는 stopPropagation)
+      if (lbSwiped) { lbSwiped = false; return; }      // 스와이프/드래그 끝에서 따라오는 click은 무시
+      if (e.target.closest(".ys-lb-cap")) return;      // 캡션 클릭은 무시
+      lbClose();                                       // 그 외(배경/이미지) 탭 → 닫기(화살표는 stopPropagation)
     });
     lbPrev.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx - 1); });
     lbNext.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx + 1); });
@@ -284,7 +300,8 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
         const cap = x.closest("figure")?.querySelector("figcaption");
         return cap ? cap.innerHTML : "";
       });
-      lbShow(imgs.indexOf(im));
+      _lbBuild();
+      lbShow(imgs.indexOf(im), true);       // 열 때는 애니메이션 없이 해당 이미지로
       lb.classList.add("open");
       lbPushed = true;
       history.pushState({ ysLb: 1 }, "");   // 뒤로가기 1회 = (아래 모달이 아니라) 라이트박스만 닫기
@@ -309,17 +326,31 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
       }
     }, true);
 
-    // 모바일: 좌우 스와이프로 이미지 탐색(왼쪽=다음, 오른쪽=이전)
-    let _tx = 0, _ty = 0;
+    // 모바일: 손가락을 따라 트랙이 움직이고, 놓으면 다음/이전으로 스냅(부드러운 전환)
+    let _tx = 0, _ty = 0, _drag = false, _moved = false;
     lb.addEventListener("touchstart", (e) => {
-      const t = e.changedTouches[0]; _tx = t.clientX; _ty = t.clientY;
+      if (!lbList.length) return;
+      const t = e.changedTouches[0];
+      _tx = t.clientX; _ty = t.clientY; _drag = true; _moved = false;
+      lbTrack.classList.add("dragging");           // 드래그 중엔 전환 끄고 즉시 추종
+    }, { passive: true });
+    lb.addEventListener("touchmove", (e) => {
+      if (!_drag) return;
+      const t = e.changedTouches[0], dx = t.clientX - _tx, dy = t.clientY - _ty;
+      if (!_moved && Math.abs(dx) < Math.abs(dy)) { _drag = false; lbTrack.classList.remove("dragging"); return; }  // 세로 제스처
+      if (Math.abs(dx) > 6) _moved = true;
+      const atEnd = (lbIdx === 0 && dx > 0) || (lbIdx === lbList.length - 1 && dx < 0);
+      const off = atEnd ? dx * 0.35 : dx;          // 양 끝에선 저항(고무줄)
+      lbTrack.style.transform = `translateX(calc(${-lbIdx * 100}% + ${off}px))`;
     }, { passive: true });
     lb.addEventListener("touchend", (e) => {
-      const t = e.changedTouches[0], dx = t.clientX - _tx, dy = t.clientY - _ty;
-      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        lbSwiped = true;                              // 직후 따라오는 click(닫기) 억제
-        lbShow(dx < 0 ? lbIdx + 1 : lbIdx - 1);
-      }
+      if (!_drag) return;
+      _drag = false; lbTrack.classList.remove("dragging");
+      const dx = e.changedTouches[0].clientX - _tx;
+      const w = lbViewport.clientWidth || 1;
+      if (_moved) lbSwiped = true;                 // 드래그였으면 직후 click(닫기) 억제
+      if (Math.abs(dx) > Math.min(60, w * 0.18)) lbShow(lbIdx + (dx < 0 ? 1 : -1));  // 임계 넘으면 이동
+      else lbShow(lbIdx);                           // 아니면 제자리 스냅(애니메이션)
     }, { passive: true });
   }
   if (document.body) _setupKeyframeUI();
