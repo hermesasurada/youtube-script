@@ -214,7 +214,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-tldr li::marker{color:var(--highlight,#2563eb);}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;z-index:99999;cursor:zoom-out;}
 .ys-lb.open{display:block;}
-.ys-lb-viewport{position:absolute;inset:0;overflow:hidden;touch-action:none;}
+.ys-lb-viewport{position:absolute;inset:0;overflow:hidden;touch-action:pinch-zoom;}
 .ys-lb-track{display:flex;height:100%;will-change:transform;transition:transform .3s cubic-bezier(.22,.61,.36,1);}
 .ys-lb-track.dragging{transition:none;}
 .ys-lb-slide{flex:0 0 100%;height:100%;display:flex;align-items:center;justify-content:center;padding:1.5rem;}
@@ -329,13 +329,14 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
     // 모바일: 손가락을 따라 트랙이 움직이고, 놓으면 다음/이전으로 스냅(부드러운 전환)
     let _tx = 0, _ty = 0, _drag = false, _moved = false;
     lb.addEventListener("touchstart", (e) => {
-      if (!lbList.length) return;
+      if (!lbList.length || e.touches.length > 1) { _drag = false; lbTrack.classList.remove("dragging"); return; }  // 핀치는 브라우저에 양보
       const t = e.changedTouches[0];
       _tx = t.clientX; _ty = t.clientY; _drag = true; _moved = false;
       lbTrack.classList.add("dragging");           // 드래그 중엔 전환 끄고 즉시 추종
     }, { passive: true });
     lb.addEventListener("touchmove", (e) => {
       if (!_drag) return;
+      if (e.touches.length > 1) { _drag = false; lbTrack.classList.remove("dragging"); lbShow(lbIdx); return; }  // 핀치 시작 → 드래그 취소·제자리
       const t = e.changedTouches[0], dx = t.clientX - _tx, dy = t.clientY - _ty;
       if (!_moved && Math.abs(dx) < Math.abs(dy)) { _drag = false; lbTrack.classList.remove("dragging"); return; }  // 세로 제스처
       if (Math.abs(dx) > 6) _moved = true;
