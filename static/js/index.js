@@ -717,8 +717,9 @@ async function startTranscription() {
       document.getElementById('result-badge').classList.add('visible');
       if (document.getElementById('auto-summarize').checked) {
         switchTab('summary');
-        await generateSummary();   // 요약 완료 후 다음 항목 시작
-        _autoStartNext();
+        const summarized = await generateSummary();
+        if (summarized) _autoStartNext();        // 요약 성공 시에만 다음 항목
+        else _haltQueueOnSummaryFail();          // 요약 실패 → 대기열 정지(전사는 보존)
       } else {
         switchTab('result');
         _autoStartNext();
@@ -813,7 +814,7 @@ async function generateSummary() {
   } finally {
     btn.disabled = false;
     btn.textContent = '다시 생성';
-    statusEl.textContent = hasError ? '' : '✓ 완료';
+    statusEl.textContent = hasError ? '⚠ 요약 실패' : '✓ 완료';
     if (!hasError) {
       setStage('complete');
       document.getElementById('copy-summary-btn').style.display = '';
@@ -829,6 +830,7 @@ async function generateSummary() {
       }
     }
   }
+  return !hasError;   // 호출측(대기열)이 성공 여부로 다음 진행 결정
 }
 
 /* 영상 키프레임 추출→요약에 합치기(백그라운드). 실패해도 요약은 유지(폴백).
@@ -1245,6 +1247,18 @@ function _autoStartNext() {
     document.getElementById('url-input').value = next.url;
     startTranscription();
   }, 1500);
+}
+
+/* 요약 실패 시: 전사는 성공(이력 보존)했으나 요약이 실패 → 대기열을 멈춘다(다음 자동시작 안 함).
+   남은 대기 항목은 그대로 두어, 원인(예: Claude 인증) 해결 후 '전사 시작'으로 재개 가능. */
+function _haltQueueOnSummaryFail() {
+  const running = _runningItem();
+  if (running) running.status = 'error';   // 이 항목은 요약 실패로 표기(전사 .md는 이력에 남아있음)
+  renderQueue();
+  const rem = urlQueue.filter(i => i.status === 'waiting').length;
+  showError(`요약 실패로 대기열을 멈췄습니다 (남은 ${rem}개 보류). ` +
+            `Claude 인증 등 원인 해결 후 '전사 시작'으로 재개하세요. 전사본은 이력에 저장돼 있습니다.`);
+  appendLog(`\n⛔ 요약 실패 — 대기열 정지. 남은 ${rem}개는 보류됨(자동 진행 안 함).`);
 }
 
 /* 현재 항목을 오류로 표기하고 다음 대기열로 넘어간다 */

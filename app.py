@@ -518,6 +518,7 @@ def run_job(job_id: str, params: dict) -> None:
         uploader = _nfc(info.get("uploader") or info.get("channel") or "—")
         total    = float(info.get("duration") or 0)
     except Exception as e:
+        log.warning("video info fetch failed: %s — %s", url, e)
         q.put(f"오류: {e}")
         jobs[job_id]["status"] = "error"
         q.put(None)
@@ -564,6 +565,7 @@ def run_job(job_id: str, params: dict) -> None:
     except Exception as e:
         jobs[job_id]["status"] = "cancelled" if stop.is_set() else "error"
         if not stop.is_set():
+            log.warning("download failed: %s — %s", title, e)
             q.put(f"다운로드 오류: {e}")
         q.put(None)
         return
@@ -939,6 +941,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
             error_msg = str(e)
 
         if error_msg:
+            log.warning("summarize failed (claude): %s", error_msg)   # 인증 401 등 원인 로그로 즉시 확인
             yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
             return
 
