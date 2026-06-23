@@ -210,7 +210,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}
 .ys-tldr-label{font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--highlight,#2563eb);margin-bottom:.55rem;}
 .ys-tldr ul{margin:0 !important;padding-left:1.15rem !important;}
-.ys-tldr li{font-size:.95em;line-height:1.75;margin-bottom:.3rem;}
+.ys-tldr li{margin-bottom:.3rem;}  /* font-size/line-height는 본문 .sum-md li 규칙을 물려받아 동일 크기(일반·몰입 모두) */
 .ys-tldr li::marker{color:var(--highlight,#2563eb);}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;z-index:99999;cursor:zoom-out;}
 .ys-lb.open{display:block;}
