@@ -208,6 +208,10 @@
               <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
                 <option value="">전체 업로더</option>
               </select>
+              <select id="hf-sort" class="hf-uploader hf-sort" onchange="setHistorySort(this.value)" title="정렬 순서">
+                <option value="desc">최신순</option>
+                <option value="asc">과거순</option>
+              </select>
               <div class="hf-title-wrap">
                 <input type="text" id="hf-title" class="hf-title" placeholder="제목 검색..." oninput="applyHistoryFilter()">
                 <button class="hf-clear-btn" id="hf-clear-btn" onclick="clearTitleSearch()" title="지우기">✕</button>
