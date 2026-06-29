@@ -86,6 +86,11 @@
       outline: none;
     }
     .search input:focus { border-color: var(--highlight); }
+    .sort-select {
+      flex-shrink: 0; height: 38px; box-sizing: border-box;
+      padding: 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--muted); font: inherit; font-size: 13px;
+    }
 
     /* PTR */
     .ptr {
@@ -278,6 +283,10 @@
 
   <div class="search">
     <input type="search" id="q" placeholder="제목/업로더 검색…" autocomplete="off" enterkeyhint="search">
+    <select class="sort-select" id="m-sort" onchange="setSort(this.value)" aria-label="정렬 순서">
+      <option value="desc">최신순</option>
+      <option value="asc">과거순</option>
+    </select>
     <button class="unread-filter-btn" id="unread-filter-btn" onclick="toggleUnreadFilter()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       미읽음만
@@ -317,6 +326,7 @@ const SVG = {
 
 const PAGE = 20;
 let ALL = [], FILTERED = [], shownCount = 0, _unreadOnly = false;
+let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
 
 const $ = id => document.getElementById(id);
 // 순수 헬퍼는 공유 모듈(common.js, YS)로 일원화 — 위임만.
@@ -353,6 +363,7 @@ async function loadHistory(force) {
     return;
   }
   btn.classList.remove('spin');
+  const ss = $('m-sort'); if (ss) ss.value = _sort;   // 저장된 정렬값 UI 동기화
   applyFilter();
 }
 
@@ -363,10 +374,22 @@ function applyFilter() {
     if (_unreadOnly && i.is_read) return false;
     return true;
   });
+  // 정렬: stem(앞부분 YYYYMMDDHHMM) 기준. desc=최신순, asc=과거순.
+  FILTERED.sort((a, b) => {
+    const ka = (a.date||'') + ' ' + (a.stem||''), kb = (b.date||'') + ' ' + (b.stem||'');
+    const c = ka < kb ? -1 : ka > kb ? 1 : 0;
+    return _sort === 'asc' ? c : -c;
+  });
   shownCount = 0;
   $('grid').innerHTML = '';
   appendPage();
   $('count').textContent = `${FILTERED.length}건`;
+}
+
+function setSort(v) {
+  _sort = (v === 'asc') ? 'asc' : 'desc';
+  localStorage.setItem('histSort', _sort);
+  applyFilter();
 }
 
 function toggleUnreadFilter() {
