@@ -64,4 +64,4 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 
 ## 의존성
 
-`requirements.txt` 참고(Flask, yt-dlp, python-dotenv 등). 외부 바이너리: **ffmpeg/ffprobe**, **whisper.cpp**, **claude CLI**.
+`requirements.txt` 참고(Flask, yt-dlp[default], python-dotenv 등). 외부 바이너리: **ffmpeg/ffprobe**, **whisper.cpp**, **claude CLI**, **deno**(yt-dlp의 YouTube JS 챌린지 해독용 — 없으면 포맷 누락·다운로드 실패 발생).
