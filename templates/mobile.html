@@ -17,8 +17,8 @@
       --border-strong: #c8c8cf;
       --highlight: #b07a25;
       --highlight-soft: rgba(176,122,37,.10);
-      --radius:    10px;
-      --radius-sm: 6px;
+      --radius:    2px;
+      --radius-sm: 2px;
       --row-sel:   rgba(176,122,37,.12);
       --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
@@ -130,7 +130,7 @@
       position: absolute; right: .45rem; bottom: .45rem;
       background: rgba(0,0,0,.78); color: #fff;
       font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
-      padding: .12rem .4rem; border-radius: 3px; letter-spacing: .02em;
+      padding: .12rem .4rem; border-radius: 2px; letter-spacing: .02em;
     }
     .hist-card-body { display: flex; flex-direction: column; gap: .5rem; padding: .8rem .9rem .85rem; flex: 1; }
     .hist-card-title {
@@ -232,7 +232,7 @@
     .read-progress {
       flex-shrink: 0; height: 3px; width: 0%;
       background: linear-gradient(90deg, var(--highlight), color-mix(in oklab, var(--highlight) 55%, var(--text)));
-      border-radius: 0 99px 99px 0; transition: width .1s linear; pointer-events: none;
+      border-radius: 0 2px 2px 0; transition: width .1s linear; pointer-events: none;
     }
     .modal-body {
       flex: 1; overflow-y: auto;
@@ -261,11 +261,11 @@
     .modal-body.markdown ul, .modal-body.markdown ol { padding-left: 1.3em; margin: .55em 0; }
     .modal-body.markdown li { margin: .25em 0; }
     .modal-body.markdown code {
-      background: var(--surface2); padding: .1em .35em; border-radius: 4px;
+      background: var(--surface2); padding: .1em .35em; border-radius: 2px;
       font-family: var(--font-mono); font-size: .92em;
     }
     .modal-body.markdown pre {
-      background: var(--surface2); padding: .8em; border-radius: 6px;
+      background: var(--surface2); padding: .8em; border-radius: 2px;
       overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px;
     }
     .modal-body.markdown blockquote {
