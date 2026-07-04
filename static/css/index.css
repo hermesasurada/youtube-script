@@ -1723,6 +1723,16 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-sync-btn:hover { color: var(--text); border-color: var(--border-strong); }
 .sum-sync-btn.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
 .sum-panel.immersive .sum-immersive-btn { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+/* ── 요약 본문 글자크기 −/+ ── */
+.sum-fs-ctrl { display: inline-flex; align-items: stretch; flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.sum-fs-btn {
+  background: var(--surface2); border: none; color: var(--muted);
+  font-size: 13px; font-weight: 700; line-height: 1; width: 26px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .15s, background .15s;
+}
+.sum-fs-btn:hover { color: var(--text); background: var(--surface); }
+.sum-fs-btn + .sum-fs-btn { border-left: 1px solid var(--border); }
 .sum-panel.immersive { max-width: 1500px; width: 96vw; height: 92vh; max-height: 92vh; }
 .sum-immersive-body { flex: 1 1 auto; min-height: 0; display: flex; }
 .sum-immersive-body[hidden] { display: none !important; }
@@ -1733,7 +1743,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.5rem 2rem 3rem; }
 .imm-text > * { max-width: 660px; }   /* 가독 칼럼 폭 제한 */
 /* 몰입형 우측 본문은 한 단계 작게 */
-.imm-text.sum-md p, .imm-text.sum-md li { font-size: .85rem; line-height: 1.68; }
+.imm-text.sum-md p, .imm-text.sum-md li { font-size: calc(.85rem * var(--reader-scale, 1)); line-height: 1.68; }
 .imm-text.sum-md h1 { font-size: 1.18rem; margin-bottom: .8rem; }
 .imm-text.sum-md h3 { font-size: .85rem; }
 .imm-text.sum-md td, .imm-text.sum-md th { font-size: .8rem; }
@@ -1755,13 +1765,13 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 }
 .sum-md h2::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .sum-md h3 { font-size: .9375rem; font-weight: 650; color: var(--text); }
-.sum-md p { margin-bottom: .75rem; line-height: 1.8; font-size: .9375rem; }
+.sum-md p { margin-bottom: .75rem; line-height: 1.8; font-size: calc(.9375rem * var(--reader-scale, 1)); }
 .sum-md hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .sum-md ul, .sum-md ol { padding-left: 1.35rem; margin-bottom: .85rem; }
-.sum-md li { line-height: 1.78; font-size: .9375rem; margin-bottom: .32rem; }
+.sum-md li { line-height: 1.78; font-size: calc(.9375rem * var(--reader-scale, 1)); margin-bottom: .32rem; }
 .sum-md li::marker { color: var(--highlight); }
 .sum-md li ul { margin: .25rem 0 .35rem; }
-.sum-md li li { font-size: .895rem; color: var(--muted); margin-bottom: .18rem; }
+.sum-md li li { font-size: calc(.895rem * var(--reader-scale, 1)); color: var(--muted); margin-bottom: .18rem; }
 .sum-md strong { font-weight: 700; color: color-mix(in oklab, var(--text) 88%, var(--highlight)); }
 /* 일반 요약 모달: 캡처를 키워 한 화면 폭에 2개가 꽉 차게(나머지는 가로 스크롤) */
 #sum-panel-body .kf-strip { gap: .55rem; padding-left: 0; padding-right: 0; }
