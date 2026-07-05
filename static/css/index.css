@@ -1737,28 +1737,42 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-fs-btn:hover { color: var(--text); background: var(--surface); }
 .sum-fs-btn + .sum-fs-btn { border-left: 1px solid var(--border); }
 
-/* ── 소제목 목차(한눈 요약 다음) ── */
+/* ── 소제목 목차(한눈 요약 다음) — 접기/펼치기, 기본 접힘 ── */
 .sum-toc {
-  margin: 0 0 1.7rem; padding: .8rem 1rem 1rem;
+  margin: 0 0 1.4rem;
   background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.sum-toc-hd { font-size: .68rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: .5rem; }
-.sum-toc-list { list-style: none; margin: 0; padding: 0; counter-reset: toc; display: grid; gap: .1rem; }
+.sum-toc-hd {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: .45rem;
+  padding: .42rem .6rem;
+  font-size: .66rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.sum-toc-hd::-webkit-details-marker { display: none; }
+.sum-toc-hd:hover { color: var(--text); }
+.sum-toc-chev { font-size: .6rem; line-height: 1; transition: transform .15s; }
+.sum-toc[open] .sum-toc-chev { transform: rotate(90deg); }
+.sum-toc-count { font-family: var(--font-mono); font-weight: 600; letter-spacing: 0; opacity: .6; }
+.sum-toc-list {
+  list-style: none; margin: 0; padding: 0 .5rem .45rem 1.7rem; counter-reset: toc;
+  display: none; gap: 0; border-top: 1px solid var(--border);   /* 닫힘 기본 숨김(UA 의존 X) */
+}
+.sum-toc[open] .sum-toc-list { display: grid; }
+.sum-toc-list li:first-child { margin-top: .35rem; }
 .sum-toc-list a {
-  display: flex; align-items: baseline; gap: .55rem;
-  text-decoration: none; color: var(--text); font-size: .9rem; line-height: 1.5;
-  padding: .3rem .4rem; border-radius: var(--radius-sm); border-left: 2px solid transparent;
-  word-break: keep-all; transition: background .12s, border-color .12s, color .12s;
+  display: flex; align-items: baseline; gap: .5rem;
+  text-decoration: none; color: var(--muted); font-size: .82rem; line-height: 1.45;
+  padding: .16rem .3rem; border-radius: var(--radius-sm);
+  word-break: keep-all; transition: background .12s, color .12s;
 }
 .sum-toc-list a::before {
-  counter-increment: toc; content: counter(toc);
-  flex-shrink: 0; width: 1.5em; text-align: right;
-  font-family: var(--font-mono); font-size: .72rem; color: var(--muted);
+  counter-increment: toc; content: counter(toc) ".";
+  flex-shrink: 0; min-width: 1.4em; text-align: right;
+  font-family: var(--font-mono); font-size: .68rem; opacity: .7;
 }
-.sum-toc-list a:hover { background: var(--surface); border-left-color: var(--highlight); color: var(--highlight); }
-.sum-toc-list a:hover::before { color: var(--highlight); }
+.sum-toc-list a:hover { background: var(--surface); color: var(--highlight); }
 .sum-toc-t { flex: 1; min-width: 0; }
-.sum-toc-time { flex-shrink: 0; font-family: var(--font-mono); font-size: .74rem; color: var(--muted); }
+.sum-toc-time { flex-shrink: 0; font-family: var(--font-mono); font-size: .7rem; opacity: .75; }
 .sum-panel.immersive { max-width: 1500px; width: 96vw; height: 92vh; max-height: 92vh; }
 .sum-immersive-body { flex: 1 1 auto; min-height: 0; display: flex; }
 .sum-immersive-body[hidden] { display: none !important; }
