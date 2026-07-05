@@ -1013,6 +1013,26 @@ def save_prompt():
     return _json({"ok": True})
 
 
+# ── 채널 자동 모니터링(로컬 전용 — 원격은 before_request에서 차단) ──────
+@app.route("/channels")
+def channels_list():
+    """모니터링 채널 목록 + 큐 요약(모달용)."""
+    try:
+        return _json({"channels": db.list_channels(), "queue": db.queue_counts()})
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+
+
+@app.route("/channels/<int:cid>", methods=["PATCH"])
+def channel_toggle(cid: int):
+    """채널 ON/OFF 토글."""
+    data = request.get_json(force=True) or {}
+    ok = db.set_channel_enabled(cid, bool(data.get("enabled")))
+    if not ok:
+        return _json({"error": "채널을 찾을 수 없습니다."}, 404)
+    return _json({"ok": True, "enabled": bool(data.get("enabled"))})
+
+
 @app.route("/history")
 def get_history():
     q = (request.args.get("q") or "").strip()

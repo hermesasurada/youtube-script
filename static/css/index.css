@@ -800,6 +800,38 @@ select option { background: var(--surface); color: var(--text); }
   gap: .5rem;
 }
 
+/* ── 채널 자동 모니터 모달 ── */
+#channels-panel { max-width: 460px; width: 92vw; height: auto; max-height: 82vh; }
+.channels-modal-body { display: flex; flex-direction: column; gap: .8rem; padding: 1.1rem 1.25rem 1.25rem; overflow-y: auto; }
+.channels-queue {
+  font-size: 11px; font-family: var(--font-mono); color: var(--muted);
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .4rem .6rem;
+}
+.channels-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.channels-empty { color: var(--muted); font-size: 13px; padding: .5rem .2rem; }
+.channel-row {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .6rem .7rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.channel-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+.channel-name { font-size: 13.5px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-sub  { font-size: 11px; font-family: var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-toggle {
+  flex-shrink: 0; width: 40px; height: 22px; padding: 0;
+  background: var(--surface2); border: 1px solid var(--border-strong); border-radius: 999px;
+  cursor: pointer; position: relative; transition: background .15s, border-color .15s;
+}
+.channel-toggle-knob {
+  position: absolute; top: 50%; left: 2px; transform: translateY(-50%);
+  width: 16px; height: 16px; border-radius: 50%; background: var(--muted);
+  transition: left .15s, background .15s;
+}
+.channel-toggle.on { background: var(--highlight-soft); border-color: var(--highlight); }
+.channel-toggle.on .channel-toggle-knob { left: 20px; background: var(--highlight); }
+.channel-toggle:disabled { opacity: .5; cursor: default; }
+
 /* Summary toolbar */
 .summary-toolbar {
   flex-shrink: 0;

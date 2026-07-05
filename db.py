@@ -85,6 +85,33 @@ CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
   INSERT INTO items_fts(rowid, title, uploader, transcript, summary)
   VALUES (new.rowid, new.title, new.uploader, new.transcript, new.summary);
 END;
+
+-- ── 채널 자동 모니터링(신규 영상 → 자동 전사/요약) ──────────────────
+-- 감지(폴러)와 처리(드레이너)가 공유. items(전사 이력)와는 별개 인덱스라 reindex 무관.
+CREATE TABLE IF NOT EXISTS channels (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    handle        TEXT,
+    channel_id    TEXT UNIQUE NOT NULL,   -- UC... (RSS 키)
+    title         TEXT,
+    url           TEXT,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    baseline_done INTEGER NOT NULL DEFAULT 0,  -- 최초 폴 시 현재 피드를 seen 처리(백필 방지)
+    last_checked  TEXT,
+    added_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS watch_queue (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    yt_id      TEXT UNIQUE NOT NULL,
+    url        TEXT,
+    title      TEXT,
+    channel_id TEXT,
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending/processing/done/failed/skipped
+    reason     TEXT,
+    added_at   TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wq_status ON watch_queue(status);
 """
 
 
@@ -285,6 +312,107 @@ def find_by_yt_id(yt_id: str) -> dict | None:
         (yt_id,),
     ).fetchone()
     return _row_to_item(r) if r else None
+
+
+def _now() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ── 채널 모니터링: channels ────────────────────────────────────────────
+def list_channels() -> list[dict]:
+    rows = _conn().execute(
+        "SELECT * FROM channels ORDER BY title COLLATE NOCASE, id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_channel(cid: int) -> dict | None:
+    r = _conn().execute("SELECT * FROM channels WHERE id = ?", (cid,)).fetchone()
+    return dict(r) if r else None
+
+
+def add_channel(channel_id: str, handle: str = "", title: str = "",
+                url: str = "", enabled: bool = True) -> int:
+    """채널 등록(이미 있으면 메타만 보강). id 반환."""
+    channel_id = (channel_id or "").strip()
+    if not channel_id:
+        raise ValueError("channel_id required")
+    with _lock:
+        c = _conn()
+        c.execute(
+            """INSERT INTO channels (handle, channel_id, title, url, enabled, added_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(channel_id) DO UPDATE SET
+                 handle=COALESCE(NULLIF(excluded.handle,''), handle),
+                 title =COALESCE(NULLIF(excluded.title ,''), title),
+                 url   =COALESCE(NULLIF(excluded.url   ,''), url)""",
+            (handle, channel_id, title, url, 1 if enabled else 0, _now()),
+        )
+        r = c.execute("SELECT id FROM channels WHERE channel_id = ?", (channel_id,)).fetchone()
+        return int(r["id"])
+
+
+def set_channel_enabled(cid: int, enabled: bool) -> bool:
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE channels SET enabled = ? WHERE id = ?", (1 if enabled else 0, cid)
+        )
+        return cur.rowcount > 0
+
+
+def set_channel_baseline(cid: int) -> None:
+    with _lock:
+        _conn().execute("UPDATE channels SET baseline_done = 1 WHERE id = ?", (cid,))
+
+
+def mark_channel_checked(cid: int) -> None:
+    with _lock:
+        _conn().execute("UPDATE channels SET last_checked = ? WHERE id = ?", (_now(), cid))
+
+
+# ── 채널 모니터링: watch_queue ─────────────────────────────────────────
+def in_queue(yt_id: str) -> bool:
+    r = _conn().execute("SELECT 1 FROM watch_queue WHERE yt_id = ?", (yt_id,)).fetchone()
+    return r is not None
+
+
+def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
+                  status: str = "pending", reason: str = "") -> bool:
+    """큐에 추가(yt_id UNIQUE라 중복이면 무시). 새로 넣었으면 True."""
+    yt_id = (yt_id or "").strip()
+    if not yt_id:
+        return False
+    with _lock:
+        cur = _conn().execute(
+            """INSERT OR IGNORE INTO watch_queue
+                 (yt_id, url, title, channel_id, status, reason, added_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (yt_id, url, title, channel_id, status, reason, _now(), _now()),
+        )
+        return cur.rowcount > 0
+
+
+def queue_next_pending() -> dict | None:
+    r = _conn().execute(
+        "SELECT * FROM watch_queue WHERE status = 'pending' ORDER BY id LIMIT 1"
+    ).fetchone()
+    return dict(r) if r else None
+
+
+def queue_set_status(qid: int, status: str, reason: str = "") -> None:
+    with _lock:
+        _conn().execute(
+            "UPDATE watch_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ?",
+            (status, reason, _now(), qid),
+        )
+
+
+def queue_counts() -> dict:
+    rows = _conn().execute(
+        "SELECT status, COUNT(*) n FROM watch_queue GROUP BY status"
+    ).fetchall()
+    return {r["status"]: r["n"] for r in rows}
 
 
 def close_conn() -> None:

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yhandhs.youtube-monitor</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/yhandhs/youtube-script/.venv/bin/python</string>
+        <string>channel_monitor.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/yhandhs/youtube-script</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/yhandhs</string>
+    </dict>
+    <!-- 20분 주기. KeepAlive 아님(1회 실행 후 종료). 단일 인스턴스는 스크립트 락파일이 보장. -->
+    <key>StartInterval</key>
+    <integer>1200</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/yhandhs/Library/Logs/hermes/youtube-monitor.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/yhandhs/Library/Logs/hermes/youtube-monitor.err.log</string>
+</dict>
+</plist>
