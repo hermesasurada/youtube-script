@@ -251,6 +251,25 @@
       line-height: 1; cursor: pointer; padding: 0;
     }
     .fs-btn:active { background: var(--surface2); }
+    /* ── 채널 자동 모니터(모달 내) ── */
+    .modal-body.channels { padding: 1rem; display: flex; flex-direction: column; gap: .6rem; }
+    .ch-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
+    .ch-queue { font-size: 11.5px; font-family: var(--font-mono); color: var(--muted);
+      background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: .45rem .6rem; }
+    .ch-empty, .ch-loading { color: var(--muted); font-size: 13.5px; padding: .5rem .2rem; }
+    .ch-row { display: flex; align-items: center; gap: .75rem; padding: .7rem .8rem;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .ch-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .15rem; }
+    .ch-name { font-size: 14.5px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ch-sub  { font-size: 11.5px; font-family: var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ch-toggle { flex-shrink: 0; width: 46px; height: 26px; padding: 0; position: relative; cursor: pointer;
+      background: var(--surface2); border: 1px solid var(--border-strong); border-radius: 999px;
+      transition: background .15s, border-color .15s; }
+    .ch-knob { position: absolute; top: 50%; left: 2px; transform: translateY(-50%);
+      width: 20px; height: 20px; border-radius: 50%; background: var(--muted); transition: left .15s, background .15s; }
+    .ch-toggle.on { background: var(--highlight-soft); border-color: var(--highlight); }
+    .ch-toggle.on .ch-knob { left: 22px; background: var(--highlight); }
+    .ch-toggle:disabled { opacity: .5; }
     .modal-body.markdown h1, .modal-body.markdown h2, .modal-body.markdown h3 {
       margin: 1.1em 0 .4em; line-height: 1.3;
     }
@@ -293,6 +312,9 @@
   <header class="topbar">
     <h1>이력조회</h1>
     <span class="count" id="count">—</span>
+    <button class="icon-btn" id="channels-btn" onclick="openChannels()" aria-label="채널 자동 모니터">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a10 10 0 0 0 10 10"/><path d="M22 12a10 10 0 0 0-10-10"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
     <button class="icon-btn" id="refresh-btn" onclick="loadHistory(true)" aria-label="새로고침">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     </button>
@@ -566,6 +588,60 @@ function closeModal() {
   if (_modalPushed) {
     _modalPushed = false;
     history.back(); // 열 때 push한 state를 다시 pop
+  }
+}
+
+/* ── 채널 자동 모니터(원격 관리) ── */
+async function openChannels() {
+  $('fs-ctrl').hidden = true;             // 글자크기 컨트롤은 요약 전용
+  openModal('채널 자동 모니터');
+  $('modal-body').className = 'modal-body channels';
+  await loadChannels();
+}
+async function loadChannels() {
+  const body = $('modal-body');
+  body.innerHTML = '<div class="ch-loading">불러오는 중…</div>';
+  try {
+    const d = await (await fetch('/channels', { cache: 'no-store' })).json();
+    if (d.error) throw new Error(d.error);
+    const q = d.queue || {}, parts = [];
+    if (q.pending)    parts.push(`대기 ${q.pending}`);
+    if (q.processing) parts.push(`처리중 ${q.processing}`);
+    if (q.done)       parts.push(`완료 ${q.done}`);
+    if (q.failed)     parts.push(`실패 ${q.failed}`);
+    const qline = parts.length ? '큐: ' + parts.join(' · ') : '큐 비어있음';
+    const chans = d.channels || [];
+    const rows = chans.length ? chans.map(c => {
+      const on = !!c.enabled;
+      const sub = (c.handle ? '@' + c.handle : c.channel_id) +
+                  (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
+      return `<div class="ch-row">
+        <div class="ch-meta"><span class="ch-name">${esc(c.title || c.handle || c.channel_id)}</span><span class="ch-sub">${esc(sub)}</span></div>
+        <button class="ch-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
+                onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)"><span class="ch-knob"></span></button>
+      </div>`;
+    }).join('') : '<div class="ch-empty">등록된 채널이 없습니다.</div>';
+    body.innerHTML = `<p class="ch-hint">등록 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다(20분 주기).</p>`
+      + `<div class="ch-queue">${esc(qline)}</div>${rows}`;
+  } catch (e) {
+    body.innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
+  }
+}
+async function toggleChannel(id, enable, btn) {
+  btn.disabled = true;
+  try {
+    const d = await (await fetch('/channels/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: enable }),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    btn.classList.toggle('on', d.enabled);
+    btn.setAttribute('aria-checked', String(d.enabled));
+    btn.setAttribute('onclick', `toggleChannel(${id}, ${d.enabled ? 'false' : 'true'}, this)`);
+  } catch (e) {
+    alert('토글 실패: ' + e.message);
+  } finally {
+    btn.disabled = false;
   }
 }
 

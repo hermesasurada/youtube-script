@@ -675,6 +675,7 @@ def _restrict_remote_access():
     p = request.path
     # 데이터/정적 엔드포인트는 그대로 허용 (/sframe = 요약 키프레임 이미지)
     if (p in _REMOTE_DATA_ALLOWED
+            or p.startswith("/channels")   # 채널 자동 모니터 조회/토글(모바일 원격 관리)
             or p.startswith("/m/")
             or p.startswith("/static/")
             or p.startswith("/sframe/")):
