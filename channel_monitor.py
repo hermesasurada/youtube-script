@@ -21,8 +21,12 @@
 from __future__ import annotations
 
 import argparse
+import glob as _glob
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import fcntl
@@ -70,6 +74,53 @@ TG_CHAT  = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 def log(msg: str) -> None:
     print(msg, flush=True)
+
+
+# ── Claude 가용성 가드 ─────────────────────────────────────────────────
+class ClaudeUnavailable(Exception):
+    """사용량 한도/인증/장애 등 Claude 자체 문제 — 큐 정지 후 다음 주기 재시도 대상."""
+
+
+# 사용량 한도·인증·서버장애 등 '재시도하면 나아질' systemic 신호 패턴
+_SYSTEMIC = re.compile(
+    r"usage limit|rate.?limit|too many requests|\b429\b|\b401\b|\b403\b|\b500\b|\b503\b|\b529\b"
+    r"|authenticat|unauthor|credit balance|quota|exceeded|overloaded|unavailable|api error"
+    r"|사용 한도|한도 초과|인증",
+    re.I,
+)
+
+
+def _is_systemic(msg: str) -> bool:
+    return bool(_SYSTEMIC.search(msg or ""))
+
+
+def _claude_bin() -> str:
+    """server(app.py)/keyframe와 동일한 claude CLI 경로 해석."""
+    env = os.environ.get("CLAUDE_BIN")
+    if env and os.path.exists(env):
+        return env
+    w = shutil.which("claude")
+    if w:
+        return w
+    cands = sorted(_glob.glob(os.path.expanduser(
+        "~/Library/Application Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude")))
+    return cands[-1] if cands else "claude"
+
+
+def claude_healthy() -> tuple[bool, str]:
+    """저가 프로브로 Claude CLI 가용성 확인. (정상?, 사유)."""
+    try:
+        r = subprocess.run([_claude_bin(), "-p", "--model", "haiku", "reply with: ok"],
+                           capture_output=True, text=True, timeout=90)
+    except subprocess.TimeoutExpired:
+        return False, "헬스체크 타임아웃(90s)"
+    except Exception as e:
+        return False, f"claude 실행 오류: {e}"
+    out = (r.stdout or "").strip()
+    blob = (out + " " + (r.stderr or "")).strip()
+    if r.returncode != 0 or not out or _is_systemic(blob):
+        return False, (blob or f"rc={r.returncode}")[:200]
+    return True, ""
 
 
 def notify(text: str) -> None:
@@ -217,26 +268,55 @@ def process_video(v: dict, prompt: str) -> str:
     if not txt_path:
         raise RuntimeError("전사 시간초과")
 
-    # 요약(SSE 스트림을 끝까지 소비 → 서버가 디스크에 저장)
+    # 요약(SSE 스트림 소비 → 서버가 성공 시에만 디스크에 저장, 실패 시 event:error 방출)
+    summary_err = None
+    await_err = False
     with requests.post(f"{BASE}/summarize", json={"txt_path": txt_path, "prompt": prompt},
                        stream=True, timeout=(30, SUMM_TIMEOUT)) as sr:
         sr.raise_for_status()
-        for _ in sr.iter_lines(decode_unicode=True):
-            pass
+        for raw in sr.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            raw = raw.strip()
+            if raw == "event: error":
+                await_err = True
+            elif await_err and raw.startswith("data:"):
+                payload = raw[5:].strip()
+                try:
+                    summary_err = json.loads(payload) if payload else "요약 실패"
+                except Exception:
+                    summary_err = payload or "요약 실패"
+                await_err = False
+    if summary_err:
+        # 요약 실패는 대부분 Claude 측(한도/장애/인증) → systemic이면 재시도 대상으로 올림
+        if _is_systemic(str(summary_err)):
+            raise ClaudeUnavailable(f"요약: {summary_err}")
+        raise RuntimeError(f"요약 실패: {summary_err}")
 
-    # 캡처(동기) — 실패해도 요약은 유지되므로 치명적 아님
+    # 캡처(동기) — 요약은 이미 저장됨. 실패해도 항목은 완료(요약이 본체), systemic 여부만 표시
+    kf_note, kf_systemic = "", False
     try:
         kf = requests.post(f"{BASE}/keyframes", json={"txt_path": txt_path, "url": url},
                            timeout=KF_TIMEOUT).json()
         if not kf.get("ok"):
-            log(f"[kf] 캡처 스킵/실패: {kf.get('reason')}")
+            kf_note = str(kf.get("reason") or "실패")
+            emsg = str(kf.get("error") or "")
+            kf_systemic = _is_systemic(kf_note) or _is_systemic(emsg)
+            log(f"[kf] 캡처 스킵/실패: {kf_note} {emsg[:120]}")
     except Exception as e:
+        kf_note = "오류"
         log(f"[kf] 캡처 오류(요약은 유지): {e}")
-    return txt_path
+    return {"txt_path": txt_path, "kf_note": kf_note, "kf_systemic": kf_systemic}
 
 
 def drain() -> None:
-    """큐의 pending을 FIFO로 한 건씩 처리."""
+    """큐의 pending을 FIFO로 한 건씩 처리. Claude 사용불가면 큐를 정지하고 다음 주기 재시도."""
+    if not db.queue_next_pending():
+        return
+    ok, reason = claude_healthy()          # 사전 헬스체크(작업 있을 때만 프로브)
+    if not ok:
+        notify(f"⛔ Claude 사용 불가 — 자동 요약 보류(다음 주기 재시도)\n사유: {reason}")
+        return
     prompt = _get_prompt()
     while True:
         v = db.queue_next_pending()
@@ -246,9 +326,18 @@ def drain() -> None:
         title = v["title"] or v["yt_id"]
         log(f"[drain] 처리 시작: {title}")
         try:
-            process_video(v, prompt)
+            res = process_video(v, prompt)
             db.queue_set_status(v["id"], "done")
-            notify(f"✅ 자동 요약 완료\n{title}\n{v['url']}")
+            suffix = "(캡처 실패)" if res.get("kf_note") else ""
+            notify(f"✅ 자동 요약 완료{suffix}\n{title}\n{v['url']}")
+            if res.get("kf_systemic"):       # 요약 후 Claude 한도 도달 → 다음 건 전사 낭비 방지
+                notify("⛔ Claude 사용 한도 감지(캡처 단계) — 큐 정지, 다음 주기 재시도")
+                break
+        except ClaudeUnavailable as e:
+            # Claude 측 문제 → 항목은 pending으로 되돌리고 큐 정지(다음 주기 재시도)
+            db.queue_set_status(v["id"], "pending", reason="claude 재시도 대기")
+            notify(f"⛔ Claude 사용 불가로 중단 — 큐 정지, 다음 주기 재시도\n{title}\n{e}")
+            break
         except Exception as e:
             db.queue_set_status(v["id"], "failed", reason=str(e)[:120])
             notify(f"⚠️ 자동 처리 실패\n{title}\n{e}\n{v['url']}")

@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 FFMPEG      = shutil.which("ffmpeg") or "ffmpeg"
@@ -43,6 +44,7 @@ SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
 VISION_MODEL    = os.environ.get("VISION_MODEL", "sonnet")
+_LAST_VISION_ERR = ""   # 마지막 비전 호출 실패 사유(usage limit/장애 분류에 노출)
 VIDEO_MAXH      = int(os.environ.get("VIDEO_MAXH", "1080"))   # 다운로드 최대 높이(해상도)
 FRAME_WIDTH     = int(os.environ.get("FRAME_WIDTH", "1708"))  # 프레임 가로폭(이전 854의 2배)
 # subprocess 타임아웃(초) — 멈춘 ffmpeg/ffprobe/claude가 키프레임 세마포어를 영구 점유하는 것 방지
@@ -205,32 +207,43 @@ JSON 배열로만 답하라(다른 설명 금지):
 이미지: {refs}"""
     log(f"[3] 비전 분류+정렬 ({len(frames)}장, 1회 호출)")
 
-    def _call() -> list | None:
+    def _call() -> tuple[list | None, str]:
+        """(파싱된 배열|None, 실패사유). 실패사유는 usage limit/장애 분류에 쓰인다."""
         try:
             r = subprocess.run([_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
                                capture_output=True, text=True, timeout=VISION_TIMEOUT)
         except subprocess.TimeoutExpired:
-            log(f"  비전 호출 {VISION_TIMEOUT}s 타임아웃")
-            return None
+            return None, f"타임아웃({VISION_TIMEOUT}s)"
         out = (r.stdout or "").strip()
+        err = (r.stderr or "").strip()
+        if r.returncode != 0:
+            return None, f"rc={r.returncode} {(err or out)[:160]}"
         # 코드펜스 제거
-        out = re.sub(r"^```(?:json)?\s*|\s*```$", "", out, flags=re.M).strip()
-        m = re.search(r"\[.*\]", out, re.S)
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", out, flags=re.M).strip()
+        m = re.search(r"\[.*\]", clean, re.S)
         if not m:
-            return None
+            return None, f"비JSON응답: {(out or err)[:160]}"
         try:
             data = json.loads(m.group(0))
-            return data if isinstance(data, list) else None
         except (json.JSONDecodeError, ValueError):
-            return None
+            return None, "JSON 파싱 실패"
+        return (data, "") if isinstance(data, list) else (None, "배열 아님")
 
-    data = _call()
-    if data is None:               # 1회 재시도(모델 형식 일탈/타임아웃 대비)
-        log("  비전 응답 실패 → 재시도")
-        data = _call()
+    # 최대 3회 시도(일시적 장애·형식 일탈·과부하 대비, 점증 백오프). 마지막 사유를 caller에 노출.
+    global _LAST_VISION_ERR
+    _LAST_VISION_ERR = ""
+    data = None
+    for attempt in range(3):
+        data, err = _call()
+        if data is not None:
+            break
+        _LAST_VISION_ERR = err
+        log(f"  비전 응답 실패({attempt + 1}/3): {err}")
+        if attempt < 2:
+            time.sleep(3 * (attempt + 1))
     if data is None:
-        # None = '비전 호출 자체 실패'(파싱/타임아웃). 빈 dict('자료 없음')과 구분해 호출측에 전파.
-        log("  비전 호출 실패(재시도 후) — vision_failed")
+        # None = '비전 호출 자체 실패'. 빈 dict('자료 없음')과 구분해 호출측에 전파.
+        log(f"  비전 호출 실패(3회) — vision_failed: {_LAST_VISION_ERR}")
         return None
     res = {d["name"]: d for d in data if isinstance(d, dict) and d.get("name")}
     kept = sum(1 for d in res.values() if d.get("keep"))
@@ -329,7 +342,8 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
             return {"ok": False, "reason": "no_frames"}    # ffmpeg 추출 실패/0장
         verdict = classify_and_assign(cands, meta["headings"])  # 중복은 비전이 keep=false로 표시
         if verdict is None:
-            return {"ok": False, "reason": "vision_failed"}  # 비전 호출 실패 — '자료 없음'과 구분
+            # 비전 호출 실패 — 실패 사유를 error로 전달(호출측이 usage limit/장애를 분류)
+            return {"ok": False, "reason": "vision_failed", "error": _LAST_VISION_ERR}
         for ts, path in cands:
             v = verdict.get(os.path.basename(path), {})
             if not v.get("keep"):
