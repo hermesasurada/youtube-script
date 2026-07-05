@@ -49,6 +49,7 @@ MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "9000"))  # 건당 전�
 SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
 KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
 LOCK_PATH  = os.environ.get("MONITOR_LOCK", os.path.expanduser("~/.hermes/youtube-monitor.lock"))
+OUTBOX     = os.environ.get("MONITOR_OUTBOX", os.path.expanduser("~/.hermes/youtube-monitor.outbox"))
 ENV_PATH   = os.path.expanduser("~/.hermes/youtube-monitor.env")
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
 
@@ -124,9 +125,21 @@ def claude_healthy() -> tuple[bool, str]:
 
 
 def notify(text: str) -> None:
-    """완료/실패 알림 — stdout(로그/hermes-cron 전달) + Telegram(자격증명 있을 때)."""
+    """알림 적재 — launchd 로그(stdout) + 아웃박스(hermes 크론 shim이 --announce로 stdout 배달).
+
+    무거운 폴/드레인은 launchd가, 알림 배달은 hermes 크론이 담당(중앙 텔레그램, 토큰 불필요).
+    자격증명이 직접 설정돼 있으면(youtube-monitor.env) 텔레그램 직발송도 병행(옵션).
+    """
     log(text)
-    if TG_TOKEN and TG_CHAT:
+    try:
+        os.makedirs(os.path.dirname(OUTBOX), exist_ok=True)
+        with open(OUTBOX, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(text.rstrip() + "\n\n")
+            fcntl.flock(f, fcntl.LOCK_UN)
+    except Exception as e:
+        log(f"[notify] 아웃박스 기록 실패: {e}")
+    if TG_TOKEN and TG_CHAT:   # 선택: 직접 발송(기본 경로는 hermes 크론)
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
@@ -135,6 +148,28 @@ def notify(text: str) -> None:
             )
         except Exception as e:
             log(f"[notify] telegram 실패: {e}")
+
+
+def announce() -> int:
+    """아웃박스에 쌓인 알림을 stdout으로 출력(→ hermes 크론이 텔레그램 배달) 후 비운다.
+
+    hermes 크론 shim에서 `--announce`로 호출. 새 알림이 없으면 무음(아무것도 출력 안 함).
+    launchd 드레이너의 append와 flock으로 경쟁 안전.
+    """
+    try:
+        f = open(OUTBOX, "a+", encoding="utf-8")
+    except OSError:
+        return 0
+    with f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        content = f.read().strip()
+        f.seek(0)
+        f.truncate()
+        fcntl.flock(f, fcntl.LOCK_UN)
+    if content:
+        print(content, flush=True)   # 이 stdout만 텔레그램으로 배달됨
+    return 1 if content else 0
 
 
 # ── YouTube 감지 ───────────────────────────────────────────────────────
@@ -361,7 +396,13 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="감지/필터만 출력(변경 없음)")
     ap.add_argument("--poll-only", action="store_true", help="감지·적재만")
     ap.add_argument("--drain-only", action="store_true", help="큐 처리만")
+    ap.add_argument("--announce", action="store_true",
+                    help="아웃박스의 알림만 stdout으로 배출(hermes 크론 shim 전용)")
     args = ap.parse_args()
+
+    if args.announce:                 # hermes 크론 경로: 순수 알림 배출(DB/락 불필요)
+        announce()
+        return 0
 
     db.init()
 
