@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 import fcntl
+import unicodedata
 import xml.etree.ElementTree as ET
 
 import requests
@@ -174,12 +175,19 @@ def announce() -> int:
 
 # ── YouTube 감지 ───────────────────────────────────────────────────────
 def resolve_channel_id(handle: str) -> str | None:
-    """@handle → 채널ID(UC...). 채널 페이지 HTML에서 추출(최초 1회용)."""
-    url = f"https://www.youtube.com/@{handle.lstrip('@')}"
+    """@handle → 채널ID(UC...). 페이지 '자신의' 채널을 canonical/og:url/externalId 순으로 추출.
+
+    주의: 채널 페이지 HTML엔 추천·featured 채널의 channelId가 먼저 등장할 수 있어,
+    단순 첫 channelId 매칭은 엉뚱한 채널을 잡는다. canonical 링크가 그 페이지의 채널이라 우선.
+    """
+    handle = "".join(c for c in handle.strip().lstrip("@")
+                     if unicodedata.category(c) != "Cf")  # 방향성/포맷 제어문자 제거
+    url = f"https://www.youtube.com/@{handle}"
     r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "en"}, timeout=20)
     r.raise_for_status()
-    for pat in (r'"(?:channelId|externalId)":"(UC[0-9A-Za-z_-]{22})"',
-                r'"browseId":"(UC[0-9A-Za-z_-]{22})"'):
+    for pat in (r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[0-9A-Za-z_-]{22})"',
+                r'<meta property="og:url" content="https://www\.youtube\.com/channel/(UC[0-9A-Za-z_-]{22})"',
+                r'"externalId":"(UC[0-9A-Za-z_-]{22})"'):
         m = re.search(pat, r.text)
         if m:
             return m.group(1)
