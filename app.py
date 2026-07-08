@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -124,6 +125,12 @@ def _resolve_claude_bin() -> str:
 
 CLAUDE_BIN   = _resolve_claude_bin()
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
+
+# 요약 폴백: Claude 실패(한도/장애/오류) 시 Grok CLI로 재시도.
+GROK_BIN      = os.environ.get("GROK_BIN") or shutil.which("grok") or os.path.expanduser("~/.grok/bin/grok")
+GROK_MODEL    = os.environ.get("GROK_MODEL", "")   # 빈값이면 grok 기본 모델(grok-composer-2.5-fast)
+GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"   # 폴백 활성(기본 ON)
+GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
 
 # 전사(whisper)는 무거우므로 동시 실행을 제한해 스래싱 방지.
 _transcribe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_TRANSCRIBE", "1")))
@@ -886,8 +893,41 @@ _SUMMARY_SYS = ("요청된 마크다운 요약 결과 본문만 그대로 출력
                 "언급하거나 묻지 말 것. 메타 코멘트 없이 결과만 출력한다.")
 
 
+def _summarize_with_grok(prompt: str) -> tuple[str, str]:
+    """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
+
+    긴 전사 프롬프트는 argv 대신 --prompt-file(임시파일)로 전달(ARG_MAX 회피).
+    """
+    if not (GROK_BIN and os.path.exists(GROK_BIN)):
+        return "", "grok 실행파일 없음"
+    tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+    try:
+        tf.write(prompt)
+        tf.close()
+        cmd = [GROK_BIN, "--prompt-file", tf.name]
+        if GROK_MODEL:
+            cmd += ["-m", GROK_MODEL]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=GROK_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "", f"grok 타임아웃({GROK_TIMEOUT}s)"
+    except Exception as e:
+        return "", f"grok 실행 오류: {e}"
+    finally:
+        try:
+            os.remove(tf.name)
+        except OSError:
+            pass
+    if r.returncode != 0:
+        return "", (r.stderr or f"grok rc={r.returncode}").strip()[:200]
+    out = _clean_summary(r.stdout or "")
+    if not out.strip():
+        return "", "grok 빈 응답"
+    return out, ""
+
+
 def _summarize_with_claude(prompt: str, save_path: str | None):
     """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장.
+    Claude 실패 시 Grok CLI로 폴백(GROK_FALLBACK).
 
     프롬프트는 argv가 아니라 stdin으로 전달한다(긴 전사로 인한 ARG_MAX 초과 회피).
     """
@@ -943,6 +983,25 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
 
         if error_msg:
             log.warning("summarize failed (claude): %s", error_msg)   # 인증 401 등 원인 로그로 즉시 확인
+            if GROK_FALLBACK:
+                log.warning("summarize → Grok CLI 폴백 시도")
+                gtext, gerr = _summarize_with_grok(prompt)
+                if gtext:
+                    log.info("summarize grok 폴백 성공 (%d자)", len(gtext))
+                    full = gtext + "\n\n---\n\n*⚠️ Claude 사용 불가로 이 요약은 Grok으로 생성되었습니다.*"
+                    yield f"data: {json.dumps(full)}\n\n"
+                    if save_path:
+                        try:
+                            with open(save_path, "w", encoding="utf-8") as f:
+                                f.write(full)
+                        except Exception as e:
+                            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+                            return
+                        _reindex_summary(save_path)
+                    yield "event: done\ndata: \n\n"
+                    return
+                log.warning("summarize grok 폴백도 실패: %s", gerr)
+                error_msg = f"{error_msg} / Grok 폴백 실패: {gerr}"
             yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
             return
 
