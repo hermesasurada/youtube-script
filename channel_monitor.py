@@ -214,8 +214,11 @@ def rss_recent(channel_id: str) -> list[dict]:
     return out
 
 
-def filter_verdict(url: str) -> tuple[bool, str]:
-    """메타 확인 후 (처리해도 되는가, 사유). yt-dlp로 길이/라이브 판별."""
+def filter_verdict(url: str, min_dur: int = MIN_DUR) -> tuple[bool, str]:
+    """메타 확인 후 (처리해도 되는가, 사유). yt-dlp로 길이/라이브 판별.
+
+    min_dur: 이 채널의 최소 길이(초). 0이면 길이 제한 면제.
+    """
     if "/shorts/" in url:
         return False, "shorts"
     if yt_dlp is None:
@@ -229,8 +232,8 @@ def filter_verdict(url: str) -> tuple[bool, str]:
     if live in ("is_live", "is_upcoming"):
         return False, f"live:{live}"           # 진행/예정 라이브 제외(끝난 다시보기는 처리)
     dur = float(info.get("duration") or 0)
-    if dur and dur <= MIN_DUR:
-        return False, f"short:{int(dur)}s"      # 5분 이하 제외(Shorts 포함)
+    if min_dur and dur and dur <= min_dur:
+        return False, f"short:{int(dur)}s"      # 최소 길이 이하 제외(min_dur=0이면 면제)
     return True, ""
 
 
@@ -264,7 +267,8 @@ def poll_channels(dry: bool = False) -> int:
         for v in vids:
             if db.find_by_yt_id(v["yt_id"]) or db.in_queue(v["yt_id"]):
                 continue                          # 이미 전사됨 / 이미 큐에 있음
-            ok, reason = filter_verdict(v["url"])
+            cmin = ch["min_duration"] if ch["min_duration"] is not None else MIN_DUR
+            ok, reason = filter_verdict(v["url"], cmin)
             if not ok:
                 log(f"[poll] {title}: 제외 [{reason}] {v['title'][:40]}")
                 if not dry:

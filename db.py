@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS channels (
     enabled       INTEGER NOT NULL DEFAULT 1,
     baseline_done INTEGER NOT NULL DEFAULT 0,  -- 최초 폴 시 현재 피드를 seen 처리(백필 방지)
     last_checked  TEXT,
-    added_at      TEXT
+    added_at      TEXT,
+    min_duration  INTEGER   -- 채널별 최소 길이(초) 오버라이드. NULL=전역 기본(MONITOR_MIN_DURATION)
 );
 
 CREATE TABLE IF NOT EXISTS watch_queue (
@@ -132,6 +133,12 @@ def init() -> None:
                 c.execute("ALTER TABLE items ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0")
                 c.execute("UPDATE items SET is_read = 1 WHERE date <= '20260517'")
             c.execute("PRAGMA user_version = 1")
+        if ver < 2:
+            # v2: 채널별 최소 길이 오버라이드 컬럼(기존 channels 테이블 보강)
+            ccols = {r[1] for r in c.execute("PRAGMA table_info(channels)").fetchall()}
+            if "min_duration" not in ccols:
+                c.execute("ALTER TABLE channels ADD COLUMN min_duration INTEGER")
+            c.execute("PRAGMA user_version = 2")
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
@@ -364,6 +371,14 @@ def set_channel_enabled(cid: int, enabled: bool) -> bool:
 def set_channel_baseline(cid: int) -> None:
     with _lock:
         _conn().execute("UPDATE channels SET baseline_done = 1 WHERE id = ?", (cid,))
+
+
+def set_channel_min_duration(cid: int, seconds: int | None) -> bool:
+    """채널별 최소 길이(초) 오버라이드. None이면 전역 기본으로 되돌림. 0이면 길이 제한 없음."""
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE channels SET min_duration = ? WHERE id = ?", (seconds, cid))
+        return cur.rowcount > 0
 
 
 def mark_channel_checked(cid: int) -> None:
