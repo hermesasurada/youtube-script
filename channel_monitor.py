@@ -85,9 +85,10 @@ class ClaudeUnavailable(Exception):
 
 # 사용량 한도·인증·서버장애 등 '재시도하면 나아질' systemic 신호 패턴
 _SYSTEMIC = re.compile(
-    r"usage limit|rate.?limit|too many requests|\b429\b|\b401\b|\b403\b|\b500\b|\b503\b|\b529\b"
-    r"|authenticat|unauthor|credit balance|quota|exceeded|overloaded|unavailable|api error"
-    r"|사용 한도|한도 초과|인증",
+    # 주의: 403/500/503은 yt-dlp/ffmpeg의 HTTP 오류(봇차단 등)와 겹쳐 오판하므로 제외.
+    r"usage limit|session limit|rate.?limit|too many requests|\b429\b|\b401\b|\b529\b"
+    r"|authenticat|unauthor|credit balance|quota|exceeded|overloaded|api error"
+    r"|사용 한도|세션 한도|한도 초과|인증",
     re.I,
 )
 
@@ -348,7 +349,8 @@ def process_video(v: dict, prompt: str) -> str:
         if not kf.get("ok"):
             kf_note = str(kf.get("reason") or "실패")
             emsg = str(kf.get("error") or "")
-            kf_systemic = _is_systemic(kf_note) or _is_systemic(emsg)
+            # 비전(Claude) 호출 실패일 때만 systemic 판정 — 영상 다운로드 403 등은 제외(오판 방지)
+            kf_systemic = kf_note == "vision_failed" and _is_systemic(emsg)
             log(f"[kf] 캡처 스킵/실패: {kf_note} {emsg[:120]}")
     except Exception as e:
         kf_note = "오류"
