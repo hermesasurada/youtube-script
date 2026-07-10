@@ -903,10 +903,10 @@ def _model_label(model_id: str) -> str:
     return mid or "Claude"
 
 
-def _summary_footer(label: str, note: str = "") -> str:
-    """요약 하단에 붙일 '요약 모델' 표기(마크다운)."""
+def _model_line(label: str, note: str = "") -> str:
+    """요약 최상단에 붙일 '요약 모델' 표기(마크다운, 제목 위)."""
     tail = f" — {note}" if note else ""
-    return f"\n\n---\n\n*🧠 요약 모델: {label}{tail}*"
+    return f"*🧠 요약 모델: {label}{tail}*\n\n"
 
 
 def _summarize_with_grok(prompt: str) -> tuple[str, str]:
@@ -980,8 +980,9 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
                 except json.JSONDecodeError:
                     continue
                 t = ev.get("type")
-                if t == "system" and ev.get("model"):
+                if t == "system" and ev.get("model") and not used_model:
                     used_model = ev.get("model")   # init 이벤트: 실제 사용 모델 ID(claude-opus-4-8 등)
+                    yield f"data: {json.dumps(_model_line(_model_label(used_model)))}\n\n"  # 최상단에 모델 표기(본문보다 먼저)
                 if t == "stream_event":
                     sub = ev.get("event") or {}
                     if sub.get("type") == "content_block_delta":
@@ -1008,7 +1009,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
                 if gtext:
                     log.info("summarize grok 폴백 성공 (%d자)", len(gtext))
                     grok_label = "Grok (" + (GROK_MODEL or "grok-composer-2.5-fast") + ")"
-                    full = gtext + _summary_footer(grok_label, note="Claude 사용 불가 폴백")
+                    full = _model_line(grok_label, note="Claude 사용 불가 폴백") + gtext
                     yield f"data: {json.dumps(full)}\n\n"
                     if save_path:
                         try:
@@ -1027,9 +1028,8 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
 
         full = _clean_summary(final if final is not None else "".join(chunks))
         if full:
-            footer = _summary_footer(_model_label(used_model or CLAUDE_MODEL))
-            full += footer
-            yield f"data: {json.dumps(footer)}\n\n"   # 라이브 뷰에도 모델 표기 반영
+            # 최상단에 모델 표기(라이브엔 init에서 이미 스트림됨 → 저장분에만 prepend)
+            full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + full
             if save_path:
                 try:
                     with open(save_path, "w", encoding="utf-8") as f:

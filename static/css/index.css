@@ -1945,6 +1945,13 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   transition: border-color .15s;
 }
 .hf-uploader:focus { border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft); }
+.hf-sort-toggle {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-family: inherit; font-size: 12px; padding: .35rem .6rem;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.hf-sort-toggle:hover { border-color: var(--border-strong); background: var(--surface2); }
 .hf-title-wrap { flex: 1; min-width: 100px; position: relative; display: flex; }
 .hf-title {
   flex: 1;

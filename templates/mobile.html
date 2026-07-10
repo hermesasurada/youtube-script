@@ -91,6 +91,12 @@
       padding: 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
       background: var(--surface); color: var(--muted); font: inherit; font-size: 13px;
     }
+    .sort-toggle {
+      flex-shrink: 0; height: 38px; box-sizing: border-box; white-space: nowrap;
+      padding: 0 .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+    }
+    .sort-toggle:active { background: var(--surface2); }
 
     /* PTR */
     .ptr {
@@ -322,10 +328,7 @@
 
   <div class="search">
     <input type="search" id="q" placeholder="제목/업로더 검색…" autocomplete="off" enterkeyhint="search">
-    <select class="sort-select" id="m-sort" onchange="setSort(this.value)" aria-label="정렬 순서">
-      <option value="desc">최신순</option>
-      <option value="asc">과거순</option>
-    </select>
+    <button class="sort-toggle" id="m-sort-btn" type="button" onclick="toggleSort()" aria-label="정렬 순서 전환">최신순 ↓</button>
     <button class="unread-filter-btn" id="unread-filter-btn" onclick="toggleUnreadFilter()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       미읽음만
@@ -407,7 +410,7 @@ async function loadHistory(force) {
     return;
   }
   btn.classList.remove('spin');
-  const ss = $('m-sort'); if (ss) ss.value = _sort;   // 저장된 정렬값 UI 동기화
+  _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
   applyFilter();
 }
 
@@ -430,9 +433,14 @@ function applyFilter() {
   $('count').textContent = `${FILTERED.length}건`;
 }
 
-function setSort(v) {
-  _sort = (v === 'asc') ? 'asc' : 'desc';
+function _updateSortBtn() {
+  const b = $('m-sort-btn');
+  if (b) b.textContent = _sort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+}
+function toggleSort() {
+  _sort = (_sort === 'asc') ? 'desc' : 'asc';
   localStorage.setItem('histSort', _sort);
+  _updateSortBtn();
   applyFilter();
 }
 

@@ -194,8 +194,7 @@ async function loadHistory() {
     _historyItems = [];
   }
   _populateUploaderOptions();
-  const sortSel = document.getElementById('hf-sort');
-  if (sortSel) sortSel.value = _histSort;   // 저장된 정렬값 UI에 반영
+  _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
   applyHistoryFilter();
 }
 
@@ -248,9 +247,14 @@ function applyHistoryFilter(keepPage = false) {
   _renderHistoryList();
 }
 
-function setHistorySort(v) {
-  _histSort = (v === 'asc') ? 'asc' : 'desc';
+function _updateSortBtn() {
+  const b = document.getElementById('hf-sort-btn');
+  if (b) b.textContent = _histSort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+}
+function toggleHistorySort() {
+  _histSort = (_histSort === 'asc') ? 'desc' : 'asc';
   localStorage.setItem('histSort', _histSort);
+  _updateSortBtn();
   applyHistoryFilter();   // 정렬 변경은 1페이지부터
 }
 
