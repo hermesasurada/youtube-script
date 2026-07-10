@@ -109,9 +109,13 @@
   /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목·요약 꾸미기. */
   function renderMarkdown(src) {
     src = String(src || '').replace(/^---\n[\s\S]*?\n---\n?/, '');
-    // 요약 모델 마커(HTML 주석) 추출 → 메타 칩으로 이동(YouTube 보기 옆). 본문에선 제거.
+    // 요약 모델 표기 → 메타 칩(YouTube 보기 옆)으로 이동, 본문에선 제거.
     let model = '';
+    // (신) HTML 주석 마커
     src = src.replace(/<!--\s*SUMMARY_MODEL:([\s\S]*?)-->\s*/, (_, m) => { model = m.trim(); return ''; });
+    // (구) 화면에 보이던 '*🧠 요약 모델: ...*' 라인(상단 또는 하단 --- 구분선과 함께)도 흡수
+    src = src.replace(/(?:\n*---[ \t]*\n*)?\*\s*🧠\s*요약\s*모델:\s*([^*\n]+?)\s*\*[ \t]*/g,
+      (_, m) => { if (!model) model = m.trim(); return ''; });
     src = _fixCjkEmphasis(src);
     if (global.marked && typeof global.marked.parse === 'function') {
       return _decorateSummary(_decorateHeadings(global.marked.parse(src)), model);
