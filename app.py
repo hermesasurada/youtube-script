@@ -893,6 +893,22 @@ _SUMMARY_SYS = ("요청된 마크다운 요약 결과 본문만 그대로 출력
                 "언급하거나 묻지 말 것. 메타 코멘트 없이 결과만 출력한다.")
 
 
+def _model_label(model_id: str) -> str:
+    """모델 ID → 사람이 읽는 라벨. 예: claude-opus-4-8 → Claude Opus 4.8."""
+    mid = (model_id or "").strip()
+    m = re.match(r"claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)", mid, re.I)
+    if m:
+        ver = f"{m.group(2)}.{m.group(3)}"
+        return f"Claude {m.group(1).capitalize()} {ver}"
+    return mid or "Claude"
+
+
+def _summary_footer(label: str, note: str = "") -> str:
+    """요약 하단에 붙일 '요약 모델' 표기(마크다운)."""
+    tail = f" — {note}" if note else ""
+    return f"\n\n---\n\n*🧠 요약 모델: {label}{tail}*"
+
+
 def _summarize_with_grok(prompt: str) -> tuple[str, str]:
     """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
 
@@ -953,6 +969,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
         chunks: list[str] = []
         final: str | None = None
         error_msg: str | None = None
+        used_model: str | None = None
         try:
             for line in proc.stdout:
                 line = line.strip()
@@ -963,6 +980,8 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
                 except json.JSONDecodeError:
                     continue
                 t = ev.get("type")
+                if t == "system" and ev.get("model"):
+                    used_model = ev.get("model")   # init 이벤트: 실제 사용 모델 ID(claude-opus-4-8 등)
                 if t == "stream_event":
                     sub = ev.get("event") or {}
                     if sub.get("type") == "content_block_delta":
@@ -988,7 +1007,8 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
                 gtext, gerr = _summarize_with_grok(prompt)
                 if gtext:
                     log.info("summarize grok 폴백 성공 (%d자)", len(gtext))
-                    full = gtext + "\n\n---\n\n*⚠️ Claude 사용 불가로 이 요약은 Grok으로 생성되었습니다.*"
+                    grok_label = "Grok (" + (GROK_MODEL or "grok-composer-2.5-fast") + ")"
+                    full = gtext + _summary_footer(grok_label, note="Claude 사용 불가 폴백")
                     yield f"data: {json.dumps(full)}\n\n"
                     if save_path:
                         try:
@@ -1006,14 +1026,18 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
             return
 
         full = _clean_summary(final if final is not None else "".join(chunks))
-        if full and save_path:
-            try:
-                with open(save_path, "w", encoding="utf-8") as f:
-                    f.write(full)
-            except Exception as e:
-                yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
-                return
-            _reindex_summary(save_path)
+        if full:
+            footer = _summary_footer(_model_label(used_model or CLAUDE_MODEL))
+            full += footer
+            yield f"data: {json.dumps(footer)}\n\n"   # 라이브 뷰에도 모델 표기 반영
+            if save_path:
+                try:
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(full)
+                except Exception as e:
+                    yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+                    return
+                _reindex_summary(save_path)
         yield "event: done\ndata: \n\n"
     finally:
         # 정상 종료/에러/클라이언트 조기 종료(GeneratorExit) 어느 경우든 claude 프로세스가
