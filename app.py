@@ -699,6 +699,14 @@ def _restrict_remote_access():
     return redirect("/m" if is_mobile else "/", 302)
 
 
+@app.after_request
+def _no_store_html(resp):
+    # 렌더된 HTML 페이지(/, /m)는 캐시 금지 → 템플릿 변경이 새로고침만으로 반영(모바일 캐시 방지).
+    if resp.headers.get("Content-Type", "").startswith("text/html"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 # ── Routes ────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -904,9 +912,10 @@ def _model_label(model_id: str) -> str:
 
 
 def _model_line(label: str, note: str = "") -> str:
-    """요약 최상단에 붙일 '요약 모델' 표기(마크다운, 제목 위)."""
-    tail = f" — {note}" if note else ""
-    return f"*🧠 요약 모델: {label}{tail}*\n\n"
+    """요약에 심는 '요약 모델' 마커(HTML 주석). common.js가 추출해 메타 칩(YouTube 보기 옆)으로
+    렌더한다. 렌더 안 되는 환경에선 주석이라 화면에 안 보임(graceful)."""
+    tail = f" · {note}" if note else ""
+    return f"<!--SUMMARY_MODEL:{label}{tail}-->\n\n"
 
 
 def _summarize_with_grok(prompt: str) -> tuple[str, str]:
