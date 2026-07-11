@@ -185,7 +185,14 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
 
 # ── 비전: 자료성 판별 + 섹션 정렬 (단일 호출) ─────────────────────────
 
-def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict]) -> dict:
+def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict],
+                        *, skip_claude: bool = False) -> dict | None:
+    global _LAST_VISION_ERR
+    if skip_claude:
+        # 게이트가 Claude 불가로 판정 → 비전 폴백이 없으므로 캡처 생략(요약은 유지, 비치명적)
+        _LAST_VISION_ERR = "claude skipped (게이트 판정) — 비전 폴백 없음, 캡처 생략"
+        log("  비전 스킵 (skip_claude=True) — 캡처 없이 진행")
+        return None
     names = [os.path.basename(p) for _, p in frames]
     hlist = "\n".join(f'{h["idx"]}: {h["text"]}' for h in headings)
     refs  = " ".join("@" + p for _, p in frames)
@@ -230,7 +237,6 @@ JSON 배열로만 답하라(다른 설명 금지):
         return (data, "") if isinstance(data, list) else (None, "배열 아님")
 
     # 최대 3회 시도(일시적 장애·형식 일탈·과부하 대비, 점증 백오프). 마지막 사유를 caller에 노출.
-    global _LAST_VISION_ERR
     _LAST_VISION_ERR = ""
     data = None
     for attempt in range(3):
@@ -320,7 +326,8 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
     open(md_path, "w", encoding="utf-8").write("\n".join(out))
 
 
-def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_base: str) -> dict:
+def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_base: str,
+                       *, skip_claude: bool = False) -> dict:
     """서버 진입점: 영상→키프레임→비전 분류·정렬→프레임 저장→요약 md 주입.
 
     반환: {"ok":bool, "n_frames":int, "reason":str?}
@@ -340,7 +347,7 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
         cands = extract_candidates(video, os.path.join(tmp, "f"))
         if not cands:
             return {"ok": False, "reason": "no_frames"}    # ffmpeg 추출 실패/0장
-        verdict = classify_and_assign(cands, meta["headings"])  # 중복은 비전이 keep=false로 표시
+        verdict = classify_and_assign(cands, meta["headings"], skip_claude=skip_claude)  # 중복은 비전이 keep=false로
         if verdict is None:
             # 비전 호출 실패 — 실패 사유를 error로 전달(호출측이 usage limit/장애를 분류)
             return {"ok": False, "reason": "vision_failed", "error": _LAST_VISION_ERR}

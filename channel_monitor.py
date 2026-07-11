@@ -9,7 +9,8 @@
   1) 활성 채널마다 RSS(feeds/videos.xml)로 최근 업로드 목록 수집
   2) 최초 폴이면 현재 피드를 baseline(seen)로 기록만 하고 처리 안 함(백필 방지)
   3) 이후엔 이력(items)·큐에 없는 신규만 메타 확인 → 필터(≤5분·라이브·Shorts 제외) → 큐 적재
-  4) 큐를 FIFO로 한 건씩 처리: /start→/result 폴링→/summarize(드레인)→/keyframes
+  4) 큐 drain 게이트: Claude OK 또는 Grok 폴백 준비 시 진행
+     → /start→/result→/summarize(Claude→Grok)→/keyframes(Claude 비전)
   5) 건별 완료/실패 알림(Telegram, 자격증명 있을 때)
 
 사용:
@@ -78,9 +79,12 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-# ── Claude 가용성 가드 ─────────────────────────────────────────────────
+# ── 요약 경로 가용성 가드 ───────────────────────────────────────────────
+# 서버(app.py) 요약: Claude primary → Grok 폴백(GROK_FALLBACK).
+# 예전에는 Claude 헬스만 보고 큐 전체를 막아 Grok 폴백이 의미 없었음.
+# 게이트는 "요약 가능한 경로가 하나라도 있으면 진행"으로 본다.
 class ClaudeUnavailable(Exception):
-    """사용량 한도/인증/장애 등 Claude 자체 문제 — 큐 정지 후 다음 주기 재시도 대상."""
+    """사용량 한도/인증/장애 등 LLM 요약 경로 전부 실패 — 큐 정지 후 다음 주기 재시도 대상."""
 
 
 # 사용량 한도·인증·서버장애 등 '재시도하면 나아질' systemic 신호 패턴
@@ -91,6 +95,9 @@ _SYSTEMIC = re.compile(
     r"|사용 한도|세션 한도|한도 초과|인증",
     re.I,
 )
+
+# app.py 와 동일 기본값 (env로 맞춤)
+GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"
 
 
 def _is_systemic(msg: str) -> bool:
@@ -110,20 +117,65 @@ def _claude_bin() -> str:
     return cands[-1] if cands else "claude"
 
 
+def _grok_bin() -> str:
+    env = os.environ.get("GROK_BIN")
+    if env and os.path.exists(env):
+        return env
+    w = shutil.which("grok")
+    if w:
+        return w
+    p = os.path.expanduser("~/.grok/bin/grok")
+    return p if os.path.exists(p) else (env or "grok")
+
+
 def claude_healthy() -> tuple[bool, str]:
     """저가 프로브로 Claude CLI 가용성 확인. (정상?, 사유)."""
     try:
-        r = subprocess.run([_claude_bin(), "-p", "--model", "haiku", "reply with: ok"],
-                           capture_output=True, text=True, timeout=90)
+        r = subprocess.run(
+            [_claude_bin(), "-p", "--model", "haiku", "reply with: ok"],
+            capture_output=True, text=True, timeout=90,
+            stdin=subprocess.DEVNULL,  # "no stdin data" 경고·대기가 사유에 섞이지 않게
+        )
     except subprocess.TimeoutExpired:
         return False, "헬스체크 타임아웃(90s)"
     except Exception as e:
         return False, f"claude 실행 오류: {e}"
     out = (r.stdout or "").strip()
-    blob = (out + " " + (r.stderr or "")).strip()
+    err = (r.stderr or "").strip()
+    # stdin 경고 등은 노이즈
+    err = re.sub(r"Warning: no stdin data received.*?(?:\n|$)", "", err, flags=re.I).strip()
+    blob = (out + " " + err).strip()
     if r.returncode != 0 or not out or _is_systemic(blob):
         return False, (blob or f"rc={r.returncode}")[:200]
     return True, ""
+
+
+def grok_fallback_ready() -> tuple[bool, str]:
+    """app.py 요약 Grok 폴백을 시도할 수 있는지(바이너리 존재 + 플래그). 실제 호출은 안 함."""
+    if not GROK_FALLBACK:
+        return False, "GROK_FALLBACK=0"
+    b = _grok_bin()
+    if not os.path.exists(b):
+        return False, f"grok 없음 ({b})"
+    return True, b
+
+
+def summarizer_gate() -> tuple[bool, str, str]:
+    """큐 drain 진입 게이트.
+
+    Returns:
+        (proceed, mode, detail)
+        mode: "claude" | "grok" | "none"
+    Claude가 살아 있으면 claude. 아니면 Grok 폴백 준비됐을 때만 진행.
+    둘 다 안 되면 큐를 막는다(의미 없는 전사 방지).
+    """
+    ok, reason = claude_healthy()
+    if ok:
+        return True, "claude", ""
+    g_ok, g_detail = grok_fallback_ready()
+    if g_ok:
+        return True, "grok", f"Claude 불가: {reason}; Grok 폴백({g_detail})으로 진행"
+    return False, "none", f"Claude 불가: {reason}; Grok 폴백 불가({g_detail})"
 
 
 def notify(text: str) -> None:
@@ -294,8 +346,12 @@ def _get_prompt() -> str:
         return ""
 
 
-def process_video(v: dict, prompt: str) -> str:
-    """전사→요약→캡처를 서버 엔드포인트로 순차 수행. 완료 요약 파일 경로 반환."""
+def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
+    """전사→요약→캡처를 서버 엔드포인트로 순차 수행. 완료 요약 파일 경로 반환.
+
+    skip_claude: 게이트에서 Claude 불가로 판정된 경우. 요약/키프레임 모두 Claude 스킵
+    → Grok 요약. 캡처(비전)는 Claude 스킵 시 생략(비치명적).
+    """
     url = v["url"]
     r = requests.post(f"{BASE}/start", json={"source": "url", "url": url}, timeout=30).json()
     job_id = r.get("job_id")
@@ -319,7 +375,11 @@ def process_video(v: dict, prompt: str) -> str:
     # 요약(SSE 스트림 소비 → 서버가 성공 시에만 디스크에 저장, 실패 시 event:error 방출)
     summary_err = None
     await_err = False
-    with requests.post(f"{BASE}/summarize", json={"txt_path": txt_path, "prompt": prompt},
+    sum_body = {"txt_path": txt_path, "prompt": prompt}
+    if skip_claude:
+        sum_body["skip_claude"] = True
+        sum_body["mode"] = "grok"
+    with requests.post(f"{BASE}/summarize", json=sum_body,
                        stream=True, timeout=(30, SUMM_TIMEOUT)) as sr:
         sr.raise_for_status()
         for raw in sr.iter_lines(decode_unicode=True):
@@ -344,12 +404,15 @@ def process_video(v: dict, prompt: str) -> str:
     # 캡처(동기) — 요약은 이미 저장됨. 실패해도 항목은 완료(요약이 본체), systemic 여부만 표시
     kf_note, kf_systemic = "", False
     try:
-        kf = requests.post(f"{BASE}/keyframes", json={"txt_path": txt_path, "url": url},
-                           timeout=KF_TIMEOUT).json()
+        kf_body = {"txt_path": txt_path, "url": url}
+        if skip_claude:
+            kf_body["skip_claude"] = True
+            kf_body["mode"] = "grok"
+        kf = requests.post(f"{BASE}/keyframes", json=kf_body, timeout=KF_TIMEOUT).json()
         if not kf.get("ok"):
             kf_note = str(kf.get("reason") or "실패")
             emsg = str(kf.get("error") or "")
-            # 비전(Claude) 호출 실패일 때만 systemic 판정 — 영상 다운로드 403 등은 제외(오판 방지)
+            # 비전 호출 실패 + 한도 신호일 때만 systemic (다운로드 403 등과 구분)
             kf_systemic = kf_note == "vision_failed" and _is_systemic(emsg)
             log(f"[kf] 캡처 스킵/실패: {kf_note} {emsg[:120]}")
     except Exception as e:
@@ -359,13 +422,26 @@ def process_video(v: dict, prompt: str) -> str:
 
 
 def drain() -> None:
-    """큐의 pending을 FIFO로 한 건씩 처리. Claude 사용불가면 큐를 정지하고 다음 주기 재시도."""
+    """큐 pending을 FIFO 처리.
+
+    게이트: Claude OK → 정상. Claude 다운이어도 Grok 폴백 준비되면 진행.
+    (예전: Claude 헬스만 보고 막아 Grok 요약 폴백이 호출조차 못 함.)
+    """
     if not db.queue_next_pending():
         return
-    ok, reason = claude_healthy()          # 사전 헬스체크(작업 있을 때만 프로브)
-    if not ok:
-        notify(f"⛔ Claude 사용 불가 — 자동 요약 보류(다음 주기 재시도)\n사유: {reason}")
+    proceed, mode, detail = summarizer_gate()
+    if not proceed:
+        notify(
+            "⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
+            f"사유: {detail}"
+        )
         return
+    if mode == "grok":
+        notify(
+            "⚠️ Claude 사용 불가 — **Grok 폴백 모드**로 큐 처리 시작\n"
+            f"{detail}"
+        )
+        log(f"[drain] Grok 폴백 모드: {detail}")
     prompt = _get_prompt()
     while True:
         v = db.queue_next_pending()
@@ -373,19 +449,30 @@ def drain() -> None:
             break
         db.queue_set_status(v["id"], "processing")
         title = v["title"] or v["yt_id"]
-        log(f"[drain] 처리 시작: {title}")
+        log(f"[drain] 처리 시작: {title} (mode={mode})")
         try:
-            res = process_video(v, prompt)
+            res = process_video(v, prompt, skip_claude=(mode == "grok"))
             db.queue_set_status(v["id"], "done")
             suffix = "(캡처 실패)" if res.get("kf_note") else ""
             notify(f"✅ 자동 요약 완료{suffix}\n{title}\n{v['url']}")
-            if res.get("kf_systemic"):       # 요약 후 Claude 한도 도달 → 다음 건 전사 낭비 방지
-                notify("⛔ Claude 사용 한도 감지(캡처 단계) — 큐 정지, 다음 주기 재시도")
-                break
+            # 캡처 단계 Claude 한도: 요약 폴백(Grok)이 있으면 다음 건 계속(캡처는 비치명적).
+            if res.get("kf_systemic"):
+                g_ok, _ = grok_fallback_ready()
+                if g_ok:
+                    log("[drain] 캡처 systemic이지만 요약 Grok 폴백 있음 → 큐 계속")
+                else:
+                    notify(
+                        "⛔ Claude 사용 한도 감지(캡처) — 요약 폴백도 없어 큐 정지, "
+                        "다음 주기 재시도"
+                    )
+                    break
         except ClaudeUnavailable as e:
-            # Claude 측 문제 → 항목은 pending으로 되돌리고 큐 정지(다음 주기 재시도)
-            db.queue_set_status(v["id"], "pending", reason="claude 재시도 대기")
-            notify(f"⛔ Claude 사용 불가로 중단 — 큐 정지, 다음 주기 재시도\n{title}\n{e}")
+            # summarize가 Claude+Grok 모두 실패한 경우(폴백까지 소진)
+            db.queue_set_status(v["id"], "pending", reason="요약 경로 재시도 대기")
+            notify(
+                f"⛔ 요약 실패(Claude·폴백 소진) — 큐 정지, 다음 주기 재시도\n"
+                f"{title}\n{e}"
+            )
             break
         except Exception as e:
             db.queue_set_status(v["id"], "failed", reason=str(e)[:120])

@@ -48,7 +48,7 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 | `MAX_CONCURRENT_TRANSCRIBE` | 1 | 동시 전사 수 |
 | `MAX_CONCURRENT_KEYFRAMES` | 1 | 동시 키프레임 처리 수(세마포어 직렬화) |
 | `CLAUDE_BIN` | (자동탐색) | claude CLI 경로(미설정 시 호출 때마다 최신 설치본 탐색) |
-| `VISION_MODEL` | sonnet | 키프레임 분류 모델 |
+| `VISION_MODEL` | sonnet | 키프레임 분류 모델 (Claude) |
 | `VIDEO_MAXH` / `FRAME_WIDTH` | 1080 / 1708 | 다운로드 최대 높이 / 프레임 가로폭 |
 | `SCENE_THRESHOLD` | 0.3 | ffmpeg 장면전환 임계값([0,1] clamp) |
 | `MAX_CANDIDATES` / `MIN_GAP` | 40 / 6 | 후보 프레임 상한 / 근접 중복 제거 간격(초) |
@@ -59,9 +59,9 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 1. yt-dlp로 저해상도 영상 다운로드(임시 디렉터리).
 2. **하이브리드 후보 추출** — 균등 간격(`fps=1/N`, 전 구간 커버) + 장면전환(`select='gt(scene,…)'`).
 3. **근접 중복 제거**(6초) — 장면전환 프레임은 보존, 인접 균등 프레임만 솎음. 상한 40.
-4. **Claude 비전 1회 호출** — 자료성(슬라이드·차트·시연 등) 판별 + 소제목 정렬 + 캡션. 실패 시 `vision_failed`로 구분 반환.
+4. **비전 분류** — Claude CLI(최대 3회, 한도/인증 systemic이면 조기 중단). 실패 시 `vision_failed`(캡처만 생략, 요약은 유지).
 5. 살아남은 프레임을 시간 라벨(`[mm:ss]`) 기준 섹션에 배정해 요약 md 소제목 직후에 가로 스크롤 스트립으로 주입.
 
 ## 의존성
 
-`requirements.txt` 참고(Flask, yt-dlp[default], python-dotenv 등). 외부 바이너리: **ffmpeg/ffprobe**, **whisper.cpp**, **claude CLI**, **deno**(yt-dlp의 YouTube JS 챌린지 해독용 — 없으면 포맷 누락·다운로드 실패 발생).
+`requirements.txt` 참고(Flask, yt-dlp[default], python-dotenv 등). 외부 바이너리: **ffmpeg/ffprobe**, **whisper.cpp**, **claude CLI**, **grok CLI**(요약 폴백), **deno**(yt-dlp의 YouTube JS 챌린지 해독용 — 없으면 포맷 누락·다운로드 실패 발생).

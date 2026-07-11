@@ -980,7 +980,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         if gtext:
             log.info("summarize grok 성공 (%d자)", len(gtext))
             grok_label = _model_label(GROK_MODEL or "grok-4.5")
-            full = (_model_line(grok_label, note="Claude 사용 불가 폴백")
+            full = (_model_line(grok_label)
                     + _compress_line(gtext, transcript_chars) + gtext)
             yield f"data: {json.dumps(full)}\n\n"
             if save_path:
