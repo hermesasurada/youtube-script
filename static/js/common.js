@@ -35,7 +35,7 @@
     // 취소선으로 오인돼 두 범위 사이가 통째로 <del> 되는 것 방지. 엔티티라 화면엔 '~'로 표시.
     // (코드 스팬은 위에서 stash로 보호됨)
     src = src.replace(/~/g, '&#126;');
-    src = src.replace(/\*\*([^\s][^\n]*?[^\s]|\S)\*\*/g, (_, t) => '<strong>' + t + '</strong>');
+    src = src.replace(/\*\*([^\s*][^\n*]*?[^\s*]|[^\s*])\*\*/g, (_, t) => '<strong>' + t + '</strong>');
     src = src.replace(/(^|[^*])\*([^\s*][^\n*]*?[^\s*]|[^\s*])\*(?!\*)/g,
                       (_, p, t) => p + '<em>' + t + '</em>');
     src = src.replace(/\x01C(\d+)\x01/g, (_, i) => stash[+i]);
