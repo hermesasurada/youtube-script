@@ -63,7 +63,7 @@
    *  1) `## 메타정보` + 표  → 칩 헤더(.ys-meta): 업로더·날짜·길이·YouTube 링크
    *  2) `## 한눈 요약` + ul → 강조 callout 카드(.ys-tldr)
    */
-  function _decorateSummary(html, model) {
+  function _decorateSummary(html, model, compress) {
     if (typeof document === 'undefined') return html;
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
@@ -84,6 +84,7 @@
       const urlA = kv['URL'] && kv['URL'].querySelector('a');
       if (urlA) chips.push(`<a class="ys-chip ys-chip-link" href="${urlA.href}" target="_blank" rel="noopener noreferrer">YouTube에서 보기 ↗</a>`);
       if (model) chips.push(`<span class="ys-chip ys-chip-model" title="이 요약을 생성한 LLM 모델">🧠 ${escapeHtml(model)}</span>`);
+      if (compress) chips.push(`<span class="ys-chip ys-chip-compress" title="요약본 글자수 / 전사 원문 글자수">🗜 원문 대비 ${escapeHtml(compress)}%</span>`);
       if (chips.length) {
         const bar = document.createElement('div');
         bar.className = 'ys-meta';
@@ -116,9 +117,12 @@
     // (구) 화면에 보이던 '*🧠 요약 모델: ...*' 라인(상단 또는 하단 --- 구분선과 함께)도 흡수
     src = src.replace(/(?:\n*---[ \t]*\n*)?\*\s*🧠\s*요약\s*모델:\s*([^*\n]+?)\s*\*[ \t]*/g,
       (_, m) => { if (!model) model = m.trim(); return ''; });
+    // 압축률 마커 → '원문 대비 N%' 칩
+    let compress = '';
+    src = src.replace(/<!--\s*SUMMARY_COMPRESS:(\d+)\s*-->\s*/, (_, p) => { compress = p; return ''; });
     src = _fixCjkEmphasis(src);
     if (global.marked && typeof global.marked.parse === 'function') {
-      return _decorateSummary(_decorateHeadings(global.marked.parse(src)), model);
+      return _decorateSummary(_decorateHeadings(global.marked.parse(src)), model, compress);
     }
     // marked 미로딩 시 최소 폴백(이스케이프된 평문)
     return '<pre>' + escapeHtml(src) + '</pre>';
@@ -214,6 +218,7 @@
 a.ys-chip-link{color:var(--highlight,#2563eb);border-color:color-mix(in oklab,var(--highlight,#2563eb) 38%,transparent);background:var(--highlight-soft,rgba(99,102,241,.08));text-decoration:none;font-weight:600;transition:filter .15s;}
 a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-chip-model{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.01em;}
+.ys-chip-compress{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.01em;}
 /* ── 한눈 요약 callout ── */
 .ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:1rem 1.25rem 1.05rem 1.35rem;background:linear-gradient(135deg,var(--highlight-soft,rgba(99,102,241,.08)),transparent 78%),var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;}
 .ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}

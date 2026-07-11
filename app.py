@@ -128,7 +128,7 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 
 # 요약 폴백: Claude 실패(한도/장애/오류) 시 Grok CLI로 재시도.
 GROK_BIN      = os.environ.get("GROK_BIN") or shutil.which("grok") or os.path.expanduser("~/.grok/bin/grok")
-GROK_MODEL    = os.environ.get("GROK_MODEL", "")   # 빈값이면 grok 기본 모델(grok-composer-2.5-fast)
+GROK_MODEL    = os.environ.get("GROK_MODEL", "grok-4.5")   # 요약엔 코딩용 composer보다 범용 grok-4.5
 GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"   # 폴백 활성(기본 ON)
 GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
 
@@ -902,13 +902,18 @@ _SUMMARY_SYS = ("요청된 마크다운 요약 결과 본문만 그대로 출력
 
 
 def _model_label(model_id: str) -> str:
-    """모델 ID → 사람이 읽는 라벨. 예: claude-opus-4-8 → Claude Opus 4.8."""
+    """모델 ID → 사람이 읽는 라벨. Claude는 접두어 없이 tier만(예: claude-opus-4-8 → Opus 4.8),
+    Grok은 브랜드 유지(grok-4.5 → Grok 4.5, grok-composer-2.5-fast → Grok Composer 2.5)."""
     mid = (model_id or "").strip()
     m = re.match(r"claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)", mid, re.I)
     if m:
-        ver = f"{m.group(2)}.{m.group(3)}"
-        return f"Claude {m.group(1).capitalize()} {ver}"
-    return mid or "Claude"
+        return f"{m.group(1).capitalize()} {m.group(2)}.{m.group(3)}"   # 'Opus 4.8'
+    low = mid.lower()
+    if low.startswith("grok"):
+        v = re.search(r"(\d+)\.(\d+)", mid)
+        ver = f" {v.group(0)}" if v else ""
+        return ("Grok Composer" if "composer" in low else "Grok") + ver
+    return mid or "?"
 
 
 def _model_line(label: str, note: str = "") -> str:
@@ -916,6 +921,14 @@ def _model_line(label: str, note: str = "") -> str:
     렌더한다. 렌더 안 되는 환경에선 주석이라 화면에 안 보임(graceful)."""
     tail = f" · {note}" if note else ""
     return f"<!--SUMMARY_MODEL:{label}{tail}-->\n\n"
+
+
+def _compress_line(summary_body: str, transcript_chars: int) -> str:
+    """요약/전사 압축률 마커. common.js가 '🗜 원문 대비 N%' 칩으로 렌더."""
+    if not transcript_chars or not summary_body:
+        return ""
+    pct = max(1, round(len(summary_body) / transcript_chars * 100))
+    return f"<!--SUMMARY_COMPRESS:{pct}-->\n\n"
 
 
 def _summarize_with_grok(prompt: str) -> tuple[str, str]:
@@ -950,12 +963,45 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
     return out, ""
 
 
-def _summarize_with_claude(prompt: str, save_path: str | None):
+def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: bool = False,
+                           transcript_chars: int = 0):
     """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장.
     Claude 실패 시 Grok CLI로 폴백(GROK_FALLBACK).
+    skip_claude=True 이면 Claude 호출 없이 Grok만 시도(게이트가 Claude 불가로 판정한 경우).
 
     프롬프트는 argv가 아니라 stdin으로 전달한다(긴 전사로 인한 ARG_MAX 초과 회피).
     """
+    def _yield_grok(err_prefix: str = ""):
+        if not GROK_FALLBACK:
+            yield f"event: error\ndata: {json.dumps((err_prefix or 'Claude 스킵') + ' / Grok 폴백 비활성')}\n\n"
+            return
+        log.warning("summarize → Grok CLI%s", " (skip_claude)" if skip_claude else " 폴백 시도")
+        gtext, gerr = _summarize_with_grok(prompt)
+        if gtext:
+            log.info("summarize grok 성공 (%d자)", len(gtext))
+            grok_label = _model_label(GROK_MODEL or "grok-4.5")
+            full = (_model_line(grok_label, note="Claude 사용 불가 폴백")
+                    + _compress_line(gtext, transcript_chars) + gtext)
+            yield f"data: {json.dumps(full)}\n\n"
+            if save_path:
+                try:
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(full)
+                except Exception as e:
+                    yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+                    return
+                _reindex_summary(save_path)
+            yield "event: done\ndata: \n\n"
+            return
+        log.warning("summarize grok 실패: %s", gerr)
+        msg = (err_prefix + " / " if err_prefix else "") + f"Grok 폴백 실패: {gerr}"
+        yield f"event: error\ndata: {json.dumps(msg)}\n\n"
+
+    if skip_claude:
+        yield from _yield_grok("Claude 스킵(게이트 판정)")
+        return
+
+    proc = None
     proc = subprocess.Popen(
         [_resolve_claude_bin(), "-p",   # 호출 시마다 재해석(Claude 자동업데이트로 경로 변동 대비)
          "--output-format", "stream-json",
@@ -1012,33 +1058,16 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
 
         if error_msg:
             log.warning("summarize failed (claude): %s", error_msg)   # 인증 401 등 원인 로그로 즉시 확인
-            if GROK_FALLBACK:
-                log.warning("summarize → Grok CLI 폴백 시도")
-                gtext, gerr = _summarize_with_grok(prompt)
-                if gtext:
-                    log.info("summarize grok 폴백 성공 (%d자)", len(gtext))
-                    grok_label = "Grok (" + (GROK_MODEL or "grok-composer-2.5-fast") + ")"
-                    full = _model_line(grok_label, note="Claude 사용 불가 폴백") + gtext
-                    yield f"data: {json.dumps(full)}\n\n"
-                    if save_path:
-                        try:
-                            with open(save_path, "w", encoding="utf-8") as f:
-                                f.write(full)
-                        except Exception as e:
-                            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
-                            return
-                        _reindex_summary(save_path)
-                    yield "event: done\ndata: \n\n"
-                    return
-                log.warning("summarize grok 폴백도 실패: %s", gerr)
-                error_msg = f"{error_msg} / Grok 폴백 실패: {gerr}"
-            yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
+            yield from _yield_grok(error_msg)
             return
 
-        full = _clean_summary(final if final is not None else "".join(chunks))
-        if full:
-            # 최상단에 모델 표기(라이브엔 init에서 이미 스트림됨 → 저장분에만 prepend)
-            full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + full
+        body = _clean_summary(final if final is not None else "".join(chunks))
+        if body:
+            cline = _compress_line(body, transcript_chars)   # 압축률 마커
+            if cline:
+                yield f"data: {json.dumps(cline)}\n\n"        # 라이브 뷰에도 반영(본문 뒤)
+            # 최상단에 모델·압축률 표기(모델은 init에서 이미 스트림됨 → 저장분에 prepend)
+            full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + cline + body
             if save_path:
                 try:
                     with open(save_path, "w", encoding="utf-8") as f:
@@ -1051,7 +1080,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None):
     finally:
         # 정상 종료/에러/클라이언트 조기 종료(GeneratorExit) 어느 경우든 claude 프로세스가
         # 고아로 남아 계속 돌지 않도록 정리. 정상 완료 시엔 이미 죽어 no-op.
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             try:
                 proc.terminate(); proc.wait(timeout=3)
             except Exception:
@@ -1079,9 +1108,18 @@ def summarize():
 
     prompt = (data.get("prompt") or DEFAULT_PROMPT).replace("{transcript}", transcript_blob)
     save_path = _summary_path_for_md(abs_path)
-    log.info("summarize start: %s", os.path.basename(abs_path))
+    skip_claude = bool(
+        data.get("skip_claude")
+        or str(data.get("mode") or "").lower() == "grok"
+    )
+    log.info(
+        "summarize start: %s%s",
+        os.path.basename(abs_path),
+        " (skip_claude→grok)" if skip_claude else "",
+    )
 
-    gen = _summarize_with_claude(prompt, save_path)
+    gen = _summarize_with_claude(prompt, save_path, skip_claude=skip_claude,
+                                 transcript_chars=len(transcript_blob))
     return Response(gen, mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -1326,8 +1364,15 @@ def keyframes():
     try:
         with _keyframe_sem:   # 동시 키프레임 처리 직렬화(자원 경쟁 방지)
             _kf_set(kid, "processing")
+            skip_claude = bool(
+                data.get("skip_claude")
+                or data.get("skip_claude_vision")
+                or str(data.get("mode") or "").lower() == "grok"
+            )
             res = keyframe_report.generate_keyframes(
-                summary_path, (data.get("url") or "").strip(), frames_dir, url_base)
+                summary_path, (data.get("url") or "").strip(), frames_dir, url_base,
+                skip_claude=skip_claude,
+            )
     except Exception as e:
         log.warning("keyframes error: %s", e)
         return _json({"ok": False, "reason": "error", "error": str(e)})
