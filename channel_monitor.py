@@ -421,21 +421,38 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
     return {"txt_path": txt_path, "kf_note": kf_note, "kf_systemic": kf_systemic}
 
 
+def process_capture_only(txt_path: str, url: str) -> dict:
+    """요약이 이미 끝난 항목의 캡처(키프레임)만 재생성. 전사·요약은 스킵.
+
+    반환: /keyframes 원 응답 dict — {"ok":True,"n_frames":N} 또는 {"ok":False,"reason","error"}.
+    """
+    return requests.post(
+        f"{BASE}/keyframes", json={"txt_path": txt_path, "url": url}, timeout=KF_TIMEOUT
+    ).json()
+
+
 def drain() -> None:
-    """큐 pending을 FIFO 처리.
+    """큐 pending을 FIFO 처리 + 이전 주기에 예약된 캡처 재시도 처리.
 
     게이트: Claude OK → 정상. Claude 다운이어도 Grok 폴백 준비되면 진행.
     (예전: Claude 헬스만 보고 막아 Grok 요약 폴백이 호출조차 못 함.)
+
+    캡처 재시도: 요약 성공/캡처만 일시 실패(다운로드 끊김 등, systemic 아님)한 항목은
+    'done' 대신 'kf_retry'로 예약 → 다음 주기에 캡처만 1회 재생성(전사·요약 스킵).
+    이번 주기의 pending 처리 중 새로 예약된 건은 스냅샷에서 빠져 다음 주기로 미뤄진다.
     """
-    if not db.queue_next_pending():
+    # 이번 주기 시작 시점의 재시도 대상 스냅샷(pending 루프에서 새로 예약될 건과 분리 → '다음 주기' 보장)
+    retry_batch = db.queue_kf_retry_list()
+    if not db.queue_next_pending() and not retry_batch:
         return
     proceed, mode, detail = summarizer_gate()
     if not proceed:
-        notify(
-            "⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
-            f"사유: {detail}"
-        )
-        return
+        if db.queue_next_pending():
+            notify(
+                "⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
+                f"사유: {detail}"
+            )
+        return   # 요약 경로가 없으면 캡처 재시도(비전=Claude)도 무의미 → 스냅샷 유지, 다음 주기
     if mode == "grok":
         notify(
             "⚠️ Claude 사용 불가 — **Grok 폴백 모드**로 큐 처리 시작\n"
@@ -452,9 +469,17 @@ def drain() -> None:
         log(f"[drain] 처리 시작: {title} (mode={mode})")
         try:
             res = process_video(v, prompt, skip_claude=(mode == "grok"))
-            db.queue_set_status(v["id"], "done")
-            suffix = "(캡처 실패)" if res.get("kf_note") else ""
-            notify(f"✅ 자동 요약 완료{suffix}\n{title}\n{v['url']}")
+            kf_note = res.get("kf_note")
+            # 캡처만 일시 실패(systemic·Grok스킵 아님) → 다음 주기 1회 재시도 예약(전사경로 보관)
+            retryable = bool(kf_note) and not res.get("kf_systemic") and mode == "claude"
+            if retryable and res.get("txt_path"):
+                db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
+                notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{title}\n{v['url']}")
+                log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
+            else:
+                db.queue_set_status(v["id"], "done")
+                suffix = "(캡처 실패)" if kf_note else ""
+                notify(f"✅ 자동 요약 완료{suffix}\n{title}\n{v['url']}")
             # 캡처 단계 Claude 한도: 요약 폴백(Grok)이 있으면 다음 건 계속(캡처는 비치명적).
             if res.get("kf_systemic"):
                 g_ok, _ = grok_fallback_ready()
@@ -476,6 +501,31 @@ def drain() -> None:
             break
         except Exception as e:
             db.queue_set_status(v["id"], "failed", reason=str(e)[:120])
+
+    # ── 캡처 재시도 pass (비전=Claude 필요 → Claude 정상 모드에서만) ──────────────
+    # 스냅샷(retry_batch)만 처리 = 이전 주기 예약분. 성공·실패 무관하게 done으로 종료(정확히 1회).
+    if mode == "claude" and retry_batch:
+        for v in retry_batch:
+            title = v["title"] or v["yt_id"]
+            txt_path = v.get("txt_path")
+            if not txt_path:
+                db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
+                continue
+            db.queue_set_status(v["id"], "processing")   # 잠금(재선택 방지)
+            log(f"[kf-retry] 캡처 재시도: {title}")
+            try:
+                kf = process_capture_only(txt_path, v["url"])
+                if kf.get("ok"):
+                    db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
+                    notify(f"📸 캡처 재시도 성공\n{title}\n{v['url']}")
+                    log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
+                else:
+                    rz = str(kf.get("reason") or "실패")
+                    db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
+                    log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {str(kf.get('error'))[:120]}")
+            except Exception as e:
+                db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
+                log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")
             notify(f"⚠️ 자동 처리 실패\n{title}\n{e}\n{v['url']}")
 
 

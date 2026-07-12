@@ -617,6 +617,7 @@ async function loadChannels() {
     const q = d.queue || {}, parts = [];
     if (q.pending)    parts.push(`대기 ${q.pending}`);
     if (q.processing) parts.push(`처리중 ${q.processing}`);
+    if (q.kf_retry)   parts.push(`캡처재시도 ${q.kf_retry}`);
     if (q.done)       parts.push(`완료 ${q.done}`);
     if (q.failed)     parts.push(`실패 ${q.failed}`);
     const qline = parts.length ? '큐: ' + parts.join(' · ') : '큐 비어있음';

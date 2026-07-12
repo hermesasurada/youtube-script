@@ -102,15 +102,17 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 
 CREATE TABLE IF NOT EXISTS watch_queue (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    yt_id      TEXT UNIQUE NOT NULL,
-    url        TEXT,
-    title      TEXT,
-    channel_id TEXT,
-    status     TEXT NOT NULL DEFAULT 'pending',  -- pending/processing/done/failed/skipped
-    reason     TEXT,
-    added_at   TEXT,
-    updated_at TEXT
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    yt_id       TEXT UNIQUE NOT NULL,
+    url         TEXT,
+    title       TEXT,
+    channel_id  TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',  -- pending/processing/done/failed/skipped/kf_retry
+    reason      TEXT,
+    added_at    TEXT,
+    updated_at  TEXT,
+    txt_path    TEXT,                             -- 캡처 재시도용 전사 md 경로(요약 성공 시 기록)
+    kf_attempts INTEGER NOT NULL DEFAULT 0        -- 캡처 재시도 횟수(1회로 제한)
 );
 CREATE INDEX IF NOT EXISTS idx_wq_status ON watch_queue(status);
 """
@@ -139,6 +141,14 @@ def init() -> None:
             if "min_duration" not in ccols:
                 c.execute("ALTER TABLE channels ADD COLUMN min_duration INTEGER")
             c.execute("PRAGMA user_version = 2")
+        if ver < 3:
+            # v3: 캡처 재시도용 컬럼(watch_queue 보강) — 요약 성공/캡처 실패 시 다음 주기 1회 재시도
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            if "txt_path" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN txt_path TEXT")
+            if "kf_attempts" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN kf_attempts INTEGER NOT NULL DEFAULT 0")
+            c.execute("PRAGMA user_version = 3")
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
@@ -421,6 +431,24 @@ def queue_set_status(qid: int, status: str, reason: str = "") -> None:
             "UPDATE watch_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ?",
             (status, reason, _now(), qid),
         )
+
+
+def queue_mark_kf_retry(qid: int, txt_path: str, reason: str = "") -> None:
+    """요약은 완료됐으나 캡처만 실패 → 다음 주기 캡처 재시도 예약(전사경로 보관, 시도횟수 +1)."""
+    with _lock:
+        _conn().execute(
+            "UPDATE watch_queue SET status = 'kf_retry', txt_path = ?, "
+            "kf_attempts = kf_attempts + 1, reason = ?, updated_at = ? WHERE id = ?",
+            (txt_path, reason, _now(), qid),
+        )
+
+
+def queue_kf_retry_list() -> list[dict]:
+    """캡처 재시도 대기(status='kf_retry') 항목 전체(id 순). drain 시작 시 스냅샷 용도."""
+    rows = _conn().execute(
+        "SELECT * FROM watch_queue WHERE status = 'kf_retry' ORDER BY id"
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def queue_counts() -> dict:
