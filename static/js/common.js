@@ -124,12 +124,33 @@
     // 압축률 마커 → '원문 대비 N%' 칩
     let compress = '';
     src = src.replace(/<!--\s*SUMMARY_COMPRESS:(\d+)\s*-->\s*/, (_, p) => { compress = p; return ''; });
+    // LaTeX 수식 stash: marked·강조보정이 \_ \* \\ 등을 훼손하므로 먼저 빼둔다.
+    // 디스플레이 \[...\] → \(...\) → $$...$$ 순. 복원은 marked·꾸미기 이후 KaTeX로.
+    const math = [];
+    const _stashMath = (tex, display) => { math.push({ tex, display }); return '\x01K' + (math.length - 1) + '\x01'; };
+    src = src.replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => _stashMath(t, true));
+    src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => _stashMath(t, true));
+    src = src.replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => _stashMath(t, false));
     src = _fixCjkEmphasis(src);
+    let html;
     if (global.marked && typeof global.marked.parse === 'function') {
-      return _decorateSummary(_decorateHeadings(global.marked.parse(src)), model, compress);
+      html = _decorateSummary(_decorateHeadings(global.marked.parse(src)), model, compress);
+    } else {
+      html = '<pre>' + escapeHtml(src) + '</pre>';    // marked 미로딩 시 최소 폴백
     }
-    // marked 미로딩 시 최소 폴백(이스케이프된 평문)
-    return '<pre>' + escapeHtml(src) + '</pre>';
+    if (math.length) html = html.replace(/\x01K(\d+)\x01/g, (_, i) => _renderMath(math[+i]));
+    return html;
+  }
+
+  /** LaTeX 조각 → KaTeX HTML. KaTeX 미로딩/파싱 실패 시 원문을 코드로 노출(가독 유지). */
+  function _renderMath(m) {
+    if (global.katex && typeof global.katex.renderToString === 'function') {
+      try {
+        return global.katex.renderToString(m.tex, { displayMode: m.display, throwOnError: false, output: 'html' });
+      } catch (_) { /* 폴백으로 */ }
+    }
+    const t = escapeHtml(m.tex);
+    return m.display ? '<pre class="ys-math-raw">' + t + '</pre>' : '<code class="ys-math-raw">' + t + '</code>';
   }
 
   function escapeHtml(s) {
