@@ -178,6 +178,12 @@ def summarizer_gate() -> tuple[bool, str, str]:
     return False, "none", f"Claude 불가: {reason}; Grok 폴백 불가({g_detail})"
 
 
+def _notify_head(v: dict, title: str) -> str:
+    """알림 상단 블록: 채널명이 있으면 '📺 채널명\\n제목', 없으면 제목만."""
+    chan = db.channel_name_by_cid(v.get("channel_id"))
+    return f"📺 {chan}\n{title}" if chan else title
+
+
 def notify(text: str) -> None:
     """알림 적재 — launchd 로그(stdout) + 아웃박스(hermes 크론 shim이 --announce로 stdout 배달).
 
@@ -466,6 +472,7 @@ def drain() -> None:
             break
         db.queue_set_status(v["id"], "processing")
         title = v["title"] or v["yt_id"]
+        head = _notify_head(v, title)   # 채널명 + 제목 블록
         log(f"[drain] 처리 시작: {title} (mode={mode})")
         try:
             res = process_video(v, prompt, skip_claude=(mode == "grok"))
@@ -474,12 +481,12 @@ def drain() -> None:
             retryable = bool(kf_note) and not res.get("kf_systemic") and mode == "claude"
             if retryable and res.get("txt_path"):
                 db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
-                notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{title}\n{v['url']}")
+                notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
                 log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
             else:
                 db.queue_set_status(v["id"], "done")
                 suffix = "(캡처 실패)" if kf_note else ""
-                notify(f"✅ 자동 요약 완료{suffix}\n{title}\n{v['url']}")
+                notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
             # 캡처 단계 Claude 한도: 요약 폴백(Grok)이 있으면 다음 건 계속(캡처는 비치명적).
             if res.get("kf_systemic"):
                 g_ok, _ = grok_fallback_ready()
@@ -496,7 +503,7 @@ def drain() -> None:
             db.queue_set_status(v["id"], "pending", reason="요약 경로 재시도 대기")
             notify(
                 f"⛔ 요약 실패(Claude·폴백 소진) — 큐 정지, 다음 주기 재시도\n"
-                f"{title}\n{e}"
+                f"{head}\n{e}"
             )
             break
         except Exception as e:
@@ -507,6 +514,7 @@ def drain() -> None:
     if mode == "claude" and retry_batch:
         for v in retry_batch:
             title = v["title"] or v["yt_id"]
+            head = _notify_head(v, title)
             txt_path = v.get("txt_path")
             if not txt_path:
                 db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
@@ -517,7 +525,7 @@ def drain() -> None:
                 kf = process_capture_only(txt_path, v["url"])
                 if kf.get("ok"):
                     db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
-                    notify(f"📸 캡처 재시도 성공\n{title}\n{v['url']}")
+                    notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
                     log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
                 else:
                     rz = str(kf.get("reason") or "실패")

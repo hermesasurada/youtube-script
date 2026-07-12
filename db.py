@@ -349,6 +349,19 @@ def get_channel(cid: int) -> dict | None:
     return dict(r) if r else None
 
 
+def channel_name_by_cid(channel_id: str) -> str:
+    """channel_id(UC…) 문자열 → 표시용 채널명. title > @handle > 원본 순. 없으면 ''."""
+    channel_id = (channel_id or "").strip()
+    if not channel_id:
+        return ""
+    r = _conn().execute(
+        "SELECT title, handle FROM channels WHERE channel_id = ?", (channel_id,)
+    ).fetchone()
+    if not r:
+        return ""
+    return (r["title"] or "").strip() or (("@" + r["handle"]) if r["handle"] else "")
+
+
 def add_channel(channel_id: str, handle: str = "", title: str = "",
                 url: str = "", enabled: bool = True) -> int:
     """채널 등록(이미 있으면 메타만 보강). id 반환."""
