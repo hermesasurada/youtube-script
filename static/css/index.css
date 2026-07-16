@@ -817,6 +817,11 @@ select option { background: var(--surface); color: var(--text); }
 }
 .channel-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
 .channel-name { font-size: 13.5px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 길이제한 면제(min_duration=0) 뱃지 */
+.channel-nolimit { display: inline-block; margin-left: 2px; padding: 0 5px; border-radius: 8px;
+  font-size: 11px; font-weight: 700; line-height: 15px; vertical-align: 1px;
+  color: #b0413e; background: color-mix(in srgb, #b0413e 12%, transparent);
+  cursor: help; }
 .channel-sub  { font-size: 11px; font-family: var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-toggle {
   flex-shrink: 0; width: 40px; height: 22px; padding: 0;
@@ -1748,15 +1753,6 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   transition: color .15s, background .15s, border-color .15s;
 }
 .sum-immersive-btn:hover { color: var(--text); border-color: var(--border-strong); }
-.sum-sync-btn {
-  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
-  color: var(--muted); font-size: 12px; padding: 0 .7rem; cursor: pointer;
-  height: var(--sum-ctrl-h); display: inline-flex; align-items: center;
-  flex-shrink: 0; white-space: nowrap; line-height: 1;
-  transition: color .15s, background .15s, border-color .15s;
-}
-.sum-sync-btn:hover { color: var(--text); border-color: var(--border-strong); }
-.sum-sync-btn.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
 .sum-panel.immersive .sum-immersive-btn { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
 /* ── 요약 본문 글자크기 −/+ ── */
 .sum-fs-ctrl { display: inline-flex; align-items: stretch; flex-shrink: 0; height: var(--sum-ctrl-h); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
@@ -1768,6 +1764,66 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 }
 .sum-fs-btn:hover { color: var(--text); background: var(--surface); }
 .sum-fs-btn + .sum-fs-btn { border-left: 1px solid var(--border); }
+
+/* ── 요약 본문 글꼴 선택 ── */
+.sum-font-ctrl {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  height: var(--sum-ctrl-h); padding: 0 .35rem 0 .5rem;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2);
+}
+.sum-font-ctrl select {
+  appearance: none; -webkit-appearance: none;
+  border: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 12px; font-weight: 500;
+  height: 100%; padding: 0 1rem 0 .1rem; cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat; background-position: right .1rem center;
+  min-width: 6.2rem;
+}
+.sum-font-ctrl select:focus { outline: none; }
+/* data-reader-font on .sum-panel → body text family (headings inherit) */
+.sum-panel[data-reader-font="sans"] .sum-md {
+  font-family: "Noto Sans KR", var(--font-sans);
+}
+.sum-panel[data-reader-font="serif"] .sum-md {
+  font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
+}
+/* 고운바탕 — 신문·사설 본문 느낌 (조선일보명조 대체) */
+.sum-panel[data-reader-font="gowun"] .sum-md {
+  font-family: "Gowun Batang", "Nanum Myeongjo", "Song Myung", "Noto Serif KR", serif;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.sum-panel[data-reader-font="gowun"] .sum-md p,
+.sum-panel[data-reader-font="gowun"] .sum-md li { line-height: 1.82; }
+/* 나눔명조 */
+.sum-panel[data-reader-font="nanum"] .sum-md {
+  font-family: "Nanum Myeongjo", "Gowun Batang", "Noto Serif KR", serif;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.sum-panel[data-reader-font="nanum"] .sum-md p,
+.sum-panel[data-reader-font="nanum"] .sum-md li { line-height: 1.8; }
+/* 송명 (Song Myung) */
+.sum-panel[data-reader-font="song"] .sum-md {
+  font-family: "Song Myung", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.sum-panel[data-reader-font="song"] .sum-md p,
+.sum-panel[data-reader-font="song"] .sum-md li { line-height: 1.8; }
+.sum-panel[data-reader-font="system"] .sum-md {
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+}
+.sum-panel[data-reader-font="mono"] .sum-md {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+/* code blocks keep mono even in serif mode */
+.sum-panel .sum-md code,
+.sum-panel .sum-md pre {
+  font-family: var(--font-mono) !important;
+}
 
 /* ── 소제목 목차(한눈 요약 다음) — 접기/펼치기, 기본 접힘 ── */
 .sum-toc {

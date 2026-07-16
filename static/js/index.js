@@ -72,9 +72,12 @@ async function loadChannels() {
       const on = !!c.enabled;
       const sub = (c.handle ? '@' + c.handle : c.channel_id) +
                   (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
+      // min_duration=0 → 길이제한 면제(5분 이하도 수집; Shorts·라이브 제외는 유지)
+      const noLimit = c.min_duration === 0
+        ? ' <span class="channel-nolimit" title="길이제한 면제 — 5분 이하 영상도 수집">∞</span>' : '';
       return `<li class="channel-row">
         <div class="channel-meta">
-          <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}</span>
+          <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
           <span class="channel-sub">${esc(sub)}</span>
         </div>
         <button class="channel-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
@@ -235,8 +238,8 @@ function applyHistoryFilter(keepPage = false) {
   });
   // 정렬: stem(앞부분이 YYYYMMDDHHMM 타임스탬프)으로 시간순. desc=최신순, asc=과거순.
   _historyFiltered.sort((a, b) => {
-    const ka = (a.date || '') + ' ' + (a.stem || '');
-    const kb = (b.date || '') + ' ' + (b.stem || '');
+    const ka = (a.date || '') + '' + (a.stem || '');
+    const kb = (b.date || '') + '' + (b.stem || '');
     const c = ka < kb ? -1 : ka > kb ? 1 : 0;
     return _histSort === 'asc' ? c : -c;
   });
@@ -1420,6 +1423,34 @@ function adjustReaderFs(dir) {
   _applyReaderScale();
 }
 
+
+/* ── 본문 글꼴 선택 — 일반/몰입 공통, localStorage 기억 ── */
+const _READER_FONTS = {
+  sans:   'Noto Sans KR',
+  serif:  'Noto Serif KR',
+  gowun:  '고운바탕',
+  nanum:  '나눔명조',
+  song:   '송명',
+  system: '시스템',
+  mono:   '고정폭',
+};
+let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
+if (_readerFont === 'news') _readerFont = 'gowun';   // 구 '신문 명조' → 고운바탕
+if (!_READER_FONTS[_readerFont]) _readerFont = 'sans';
+function _applyReaderFont() {
+  const panel = document.getElementById('sum-panel');
+  if (panel) panel.dataset.readerFont = _readerFont;
+  const sel = document.getElementById('sum-font-select');
+  if (sel && sel.value !== _readerFont) sel.value = _readerFont;
+}
+function setReaderFont(key) {
+  if (!_READER_FONTS[key]) return;
+  _readerFont = key;
+  localStorage.setItem('sumReaderFont', key);
+  _applyReaderFont();
+}
+
+
 /* 읽기 진행바: 활성 스크롤 컨테이너(일반=sum-panel-body, 몰입=imm-text) 기준 */
 function _updateSumProgress(el) {
   const bar = document.getElementById('sum-progress');
@@ -1480,6 +1511,7 @@ async function openSummaryModal(summaryPath, title) {
   overlay.hidden      = false;
   document.body.style.overflow = 'hidden';
   _applyReaderScale();                                   // 저장된 글자크기 배율 반영
+  _applyReaderFont();                                    // 저장된 본문 글꼴 반영
   _setImmersive(false);                                  // 항상 일반 보기로 시작
   document.getElementById('sum-immersive-btn').hidden = true;
 
@@ -1519,9 +1551,6 @@ function _setImmersive(on) {
   normal.hidden = on;
   imm.hidden    = !on;
   btn.textContent = on ? '⊠ 일반 보기' : '⊟ 몰입형 읽기';
-  const syncBtn = document.getElementById('sum-sync-btn');
-  syncBtn.hidden = !on;            // 동기화 토글은 몰입형일 때만 노출
-  if (on) _updateSyncBtn();
   if (!on) { _updateSumProgress(normal); return; }
 
   const tmp = document.createElement('div');
@@ -1541,85 +1570,8 @@ function _setImmersive(on) {
   _injectToc(txt);                     // 목차 삽입(몰입형 우측 본문)
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
   _updateSumProgress(txt);
-  _immProgPane = null;
-  _bindImmScroll();
 }
 
-/* ── 몰입형 좌우 스크롤 동기화(타임스탬프 기준) ──
- * 좌(이미지 figcaption [mm:ss]) / 우(소제목 .kf-time) 각각의 시각 앵커를 이용해,
- * 한쪽 스크롤 위치의 '현재 시각'을 보간 → 반대쪽을 같은 시각 위치로 맞춘다. */
-let _immProgPane = null, _immRaf = 0, _immScrollBound = false;
-let _immSyncOn = (localStorage.getItem('immScrollSync') ?? '1') !== '0';   // 동기화 켜짐 여부(기본 ON, 기억됨)
-
-function toggleScrollSync() {
-  _immSyncOn = !_immSyncOn;
-  localStorage.setItem('immScrollSync', _immSyncOn ? '1' : '0');
-  _updateSyncBtn();
-}
-function _updateSyncBtn() {
-  const b = document.getElementById('sum-sync-btn');
-  b.textContent = _immSyncOn ? '⇅ 동기화 ON' : '⇅ 동기화 OFF';
-  b.classList.toggle('on', _immSyncOn);
-}
-
-function _tsToSec(t) {
-  const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (!m) return null;
-  return m[3] ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : (+m[1]) * 60 + (+m[2]);
-}
-
-// 컨테이너 내 앵커 목록 [{sec, top}] (top = 스크롤 콘텐츠 기준 위치). 이미지 로드로 위치가 변해도 매번 실측.
-function _immAnchors(container, key) {
-  const sel  = key === 'gal' ? 'figure' : 'h2, h3';
-  const base = container.getBoundingClientRect().top - container.scrollTop;
-  const out = [];
-  container.querySelectorAll(sel).forEach(el => {
-    const tsEl = key === 'gal' ? el.querySelector('figcaption b') : el.querySelector('.kf-time');
-    const sec = _tsToSec(tsEl && tsEl.textContent);
-    if (sec != null) out.push({ sec, top: el.getBoundingClientRect().top - base });
-  });
-  return out;
-}
-
-function _interp(anchors, x, from, to) {   // x(from축) → to축 보간
-  if (!anchors.length) return 0;
-  if (x <= anchors[0][from]) return anchors[0][to];
-  for (let i = 0; i < anchors.length - 1; i++) {
-    const a = anchors[i], b = anchors[i + 1];
-    if (x <= b[from]) {
-      const f = (x - a[from]) / Math.max(1, b[from] - a[from]);
-      return a[to] + f * (b[to] - a[to]);
-    }
-  }
-  return anchors[anchors.length - 1][to];
-}
-
-function _immSync(srcKey) {
-  if (!_immSyncOn) return;                                        // 동기화 OFF면 비활성
-  if (srcKey === _immProgPane) { _immProgPane = null; return; }   // 우리가 만든 스크롤 → 무시
-  if (_immRaf) return;
-  _immRaf = requestAnimationFrame(() => {
-    _immRaf = 0;
-    const imm = document.getElementById('sum-immersive-body');
-    const gal = imm.querySelector('.imm-gallery'), txt = imm.querySelector('.imm-text');
-    const src = srcKey === 'gal' ? gal : txt;
-    const dst = srcKey === 'gal' ? txt : gal;
-    const dstKey = srcKey === 'gal' ? 'txt' : 'gal';
-    const srcA = _immAnchors(src, srcKey), dstA = _immAnchors(dst, dstKey);
-    if (srcA.length < 1 || dstA.length < 1) return;   // 한쪽이라도 시각 앵커 없으면 동기화 불가
-    const sec = _interp(srcA, src.scrollTop, 'top', 'sec');
-    const target = _interp(dstA, sec, 'sec', 'top');
-    if (Math.abs(dst.scrollTop - target) > 1) { _immProgPane = dstKey; dst.scrollTop = target; }
-  });
-}
-
-function _bindImmScroll() {
-  if (_immScrollBound) return;
-  _immScrollBound = true;
-  const imm = document.getElementById('sum-immersive-body');
-  imm.querySelector('.imm-gallery').addEventListener('scroll', () => _immSync('gal'), { passive: true });
-  imm.querySelector('.imm-text').addEventListener('scroll', () => _immSync('txt'), { passive: true });
-}
 
 function closeSummaryModal() {
   document.getElementById('sum-overlay').hidden = true;
@@ -1684,3 +1636,6 @@ function toggleTheme() {
   const theme = localStorage.getItem('theme') || 'light';
   document.getElementById('theme-btn').textContent = theme === 'light' ? '☀' : '◐';
 })();
+
+/* reader font init */
+_applyReaderFont();

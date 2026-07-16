@@ -268,6 +268,10 @@
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
     .ch-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .15rem; }
     .ch-name { font-size: 14.5px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 길이제한 면제(min_duration=0) 뱃지 */
+    .ch-nolimit { display: inline-block; margin-left: 2px; padding: 0 5px; border-radius: 8px;
+      font-size: 12px; font-weight: 700; line-height: 16px; vertical-align: 1px;
+      color: #b0413e; background: color-mix(in srgb, #b0413e 12%, transparent); }
     .ch-sub  { font-size: 11.5px; font-family: var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ch-toggle { flex-shrink: 0; width: 46px; height: 26px; padding: 0; position: relative; cursor: pointer;
       background: var(--surface2); border: 1px solid var(--border-strong); border-radius: 999px;
@@ -626,8 +630,11 @@ async function loadChannels() {
       const on = !!c.enabled;
       const sub = (c.handle ? '@' + c.handle : c.channel_id) +
                   (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
+      // min_duration=0 → 길이제한 면제(5분 이하도 수집; Shorts·라이브 제외는 유지)
+      const noLimit = c.min_duration === 0
+        ? ' <span class="ch-nolimit" title="길이제한 면제 — 5분 이하 영상도 수집">∞</span>' : '';
       return `<div class="ch-row">
-        <div class="ch-meta"><span class="ch-name">${esc(c.title || c.handle || c.channel_id)}</span><span class="ch-sub">${esc(sub)}</span></div>
+        <div class="ch-meta"><span class="ch-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span><span class="ch-sub">${esc(sub)}</span></div>
         <button class="ch-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
                 onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)"><span class="ch-knob"></span></button>
       </div>`;
