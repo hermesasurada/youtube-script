@@ -72,9 +72,11 @@ async function loadChannels() {
       const on = !!c.enabled;
       const sub = (c.handle ? '@' + c.handle : c.channel_id) +
                   (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
-      // min_duration=0 → 길이제한 면제(5분 이하도 수집; Shorts·라이브 제외는 유지)
+      // min_duration 뱃지: 0=면제(∞), 그 외 값=커스텀 최소길이(N분+). NULL=전역 기본(5분, 표시 없음)
       const noLimit = c.min_duration === 0
-        ? ' <span class="channel-nolimit" title="길이제한 면제 — 5분 이하 영상도 수집">∞</span>' : '';
+        ? ' <span class="channel-nolimit" title="길이제한 면제 — 5분 이하 영상도 수집">∞</span>'
+        : (c.min_duration != null
+          ? ` <span class="channel-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
       return `<li class="channel-row">
         <div class="channel-meta">
           <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
