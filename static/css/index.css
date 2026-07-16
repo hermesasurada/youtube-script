@@ -572,6 +572,9 @@ select option { background: var(--surface); color: var(--text); }
 .remote-mode .hd-path-btn { display: none !important; }  /* 서버 로컬 경로/탐색기 버튼은 원격 무의미 */
 /* 메인은 flex:1 이라 사이드바 제거 시 자동 전체폭. 이력 탭만 활성. */
 .remote-mode .main { border-left: none; }
+/* 원격 전용 채널 모니터 버튼: 로컬은 사이드바에 이미 있으므로 숨김, 원격에서만 노출 */
+.remote-channels-btn { display: none; }
+.remote-mode .remote-channels-btn { display: inline-flex; align-items: center; gap: 3px; }
 
 /* ── Error banner ── */
 #error-banner {
