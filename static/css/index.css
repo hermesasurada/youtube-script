@@ -1,3 +1,12 @@
+/* 조선일보명조(self-host) — 요약 리더 본문용. 조선일보 무료배포 명조, 완성형(드문 음절은 폴백) */
+@font-face {
+  font-family: "Chosunilbo_myungjo";
+  src: url("/static/fonts/ChosunilboNM.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -1791,7 +1800,15 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-panel[data-reader-font="serif"] .sum-md {
   font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
 }
-/* 고운바탕 — 신문·사설 본문 느낌 (조선일보명조 대체) */
+/* 조선일보명조 — self-host 원본(신문 본문 명조) */
+.sum-panel[data-reader-font="chosun"] .sum-md {
+  font-family: "Chosunilbo_myungjo", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+.sum-panel[data-reader-font="chosun"] .sum-md p,
+.sum-panel[data-reader-font="chosun"] .sum-md li { line-height: 1.85; }
+/* 고운바탕 — 신문·사설 본문 느낌 */
 .sum-panel[data-reader-font="gowun"] .sum-md {
   font-family: "Gowun Batang", "Nanum Myeongjo", "Song Myung", "Noto Serif KR", serif;
   letter-spacing: -0.01em;
