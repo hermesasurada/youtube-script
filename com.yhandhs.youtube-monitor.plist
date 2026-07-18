@@ -6,11 +6,11 @@
     <string>com.yhandhs.youtube-monitor</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/yhandhs/youtube-script/.venv/bin/python</string>
+        <string>/Users/yhandhs/projects/youtube-script/.venv/bin/python</string>
         <string>channel_monitor.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/yhandhs/youtube-script</string>
+    <string>/Users/yhandhs/projects/youtube-script</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
