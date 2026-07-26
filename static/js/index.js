@@ -186,6 +186,46 @@ let _histUnreadOnly  = false;
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
 const HIST_PAGE_SIZE = 20;
 
+/* ── 검색조건 유지: 날짜·업로더·제목·미읽음·페이지를 localStorage에 기억해 새로고침 후 복원 ──
+   (정렬 _histSort는 예전부터 histSort 키로 별도 저장 중) */
+const HIST_FILTER_KEY = 'histFilter';
+let _histRestoring = false;   // 복원 중엔 저장 금지(빈 입력값이 저장을 덮어쓰는 것 방지)
+
+function _saveHistFilter() {
+  if (_histRestoring) return;
+  try {
+    localStorage.setItem(HIST_FILTER_KEY, JSON.stringify({
+      dateFrom: document.getElementById('hf-date-from').value,
+      dateTo:   document.getElementById('hf-date-to').value,
+      uploader: document.getElementById('hf-uploader').value,
+      title:    document.getElementById('hf-title').value,
+      unread:   _histUnreadOnly,
+      page:     _historyPage,
+    }));
+  } catch { /* 사파리 프라이빗 등 스토리지 불가 — 무시 */ }
+}
+
+/* 저장된 조건을 입력 UI에 되돌린다. 업로더 옵션이 채워진 뒤 호출해야 함(없는 값이면 '전체'로 남음). */
+function _restoreHistFilter() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem(HIST_FILTER_KEY) || 'null'); } catch { s = null; }
+  if (!s) return;
+  _histRestoring = true;
+  try {
+    if (s.dateFrom) document.getElementById('hf-date-from').value = s.dateFrom;
+    if (s.dateTo)   document.getElementById('hf-date-to').value   = s.dateTo;
+    if (s.title)    document.getElementById('hf-title').value     = s.title;
+    const usel = document.getElementById('hf-uploader');
+    if (s.uploader && [...usel.options].some(o => o.value === s.uploader)) usel.value = s.uploader;
+    _histUnreadOnly = !!s.unread;
+    document.getElementById('hf-unread-btn').classList.toggle('active', _histUnreadOnly);
+    _histRestorePage = Number(s.page) > 1 ? Number(s.page) : 1;   // 필터 적용 후 반영
+  } finally {
+    _histRestoring = false;
+  }
+}
+let _histRestorePage = 1;
+
 loadHistory();
 
 async function loadHistory() {
@@ -200,7 +240,13 @@ async function loadHistory() {
   }
   _populateUploaderOptions();
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
+  _restoreHistFilter();          // 저장된 검색조건 복원(업로더 옵션 채운 뒤여야 값이 붙는다)
   applyHistoryFilter();
+  if (_histRestorePage > 1) {    // 보던 페이지로 복귀(필터 결과 범위 밖이면 렌더가 클램프)
+    _historyPage = _histRestorePage;
+    _histRestorePage = 1;
+    _renderHistoryList();
+  }
 }
 
 function _populateUploaderOptions() {
@@ -249,6 +295,7 @@ function applyHistoryFilter(keepPage = false) {
   // (페이지 수가 줄면 _renderHistoryList의 클램프가 마지막 페이지로 보정).
   // 필터 조건 자체가 바뀐 경우(기본)는 1페이지부터.
   if (!keepPage) _historyPage = 1;
+  _saveHistFilter();   // 모든 필터 변경 경로가 여기를 지나므로 한 곳에서 저장
   _renderHistoryList();
 }
 
@@ -324,6 +371,7 @@ async function deleteCard(btn) {
 function _historyGoToPage(p) {
   const totalPages = Math.max(1, Math.ceil(_historyFiltered.length / HIST_PAGE_SIZE));
   _historyPage = Math.min(Math.max(1, p), totalPages);
+  _saveHistFilter();   // 보던 페이지도 기억(새로고침 시 그 페이지로 복귀)
   _renderHistoryList();
   const grid = document.getElementById('history-grid');
   if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
