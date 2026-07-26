@@ -48,7 +48,7 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 | `MAX_CONCURRENT_TRANSCRIBE` | 1 | 동시 전사 수 |
 | `MAX_CONCURRENT_KEYFRAMES` | 1 | 동시 키프레임 처리 수(세마포어 직렬화) |
 | `CLAUDE_BIN` | (자동탐색) | claude CLI 경로(미설정 시 호출 때마다 최신 설치본 탐색) |
-| `VISION_MODEL` | sonnet | 키프레임 분류 모델 (Claude) |
+| `VISION_MODEL` | opus | 키프레임 분류·캡션 모델 (Claude) |
 | `VIDEO_MAXH` / `FRAME_WIDTH` | 1080 / 1708 | 다운로드 최대 높이 / 프레임 가로폭 |
 | `SCENE_THRESHOLD` | 0.3 | ffmpeg 장면전환 임계값([0,1] clamp) |
 | `MAX_CANDIDATES` / `MIN_GAP` | 40 / 6 | 후보 프레임 상한 / 근접 중복 제거 간격(초) |

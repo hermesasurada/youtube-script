@@ -43,7 +43,7 @@ def _claude_bin() -> str:
 SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3"))))  # ffmpeg 필터 삽입값 — [0,1] clamp
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
-VISION_MODEL    = os.environ.get("VISION_MODEL", "sonnet")
+VISION_MODEL    = os.environ.get("VISION_MODEL", "opus")   # 캡션 품질 우선(요약과 동일 티어)
 _LAST_VISION_ERR = ""   # 마지막 비전 호출 실패 사유(usage limit/장애 분류에 노출)
 VIDEO_MAXH      = int(os.environ.get("VIDEO_MAXH", "1080"))   # 다운로드 최대 높이(해상도)
 FRAME_WIDTH     = int(os.environ.get("FRAME_WIDTH", "1708"))  # 프레임 가로폭(이전 854의 2배)
