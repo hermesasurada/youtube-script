@@ -222,9 +222,11 @@
     // 소제목: 위 여백을 크게 + 왼쪽 컬러 바 → 본문과 한눈에 구분되게
     h3:   'margin:2.6em 0 .85em;padding:.1em 0 .1em .65em;border-left:4px solid #b0413e;'
         + 'font-size:1.2em;font-weight:700;line-height:1.45;color:#1a1a1a;',
-    p:    'margin:0 0 1.15em;line-height:1.85;',
-    li:   'margin:0 0 .55em;line-height:1.8;',
-    ul:   'margin:0 0 1.3em;padding-left:1.3em;',
+    // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
+    // 소제목의 굵기(700)가 뒤따르는 본문까지 번지는 것을 막는다.
+    p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;',
+    li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;',
+    ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
   };
 
@@ -305,10 +307,12 @@
       'margin:0 0 1.3em;padding:.2em 0 .2em 1em;border-left:3px solid #e0d9cc;color:#666;'));
     root.querySelectorAll('code').forEach(c => c.setAttribute('style',
       'background:#f4f1eb;padding:.1em .35em;border-radius:3px;font-size:.92em;'));
+    // 강조는 굵기를 명시(본문 400 지정과 짝을 이뤄 편집기 변환에도 살아남게)
+    root.querySelectorAll('strong,b').forEach(s => s.setAttribute('style', 'font-weight:700;'));
 
     // 5) 조립: 본문 → 출처 푸터
     const body = document.createElement('div');
-    body.setAttribute('style', 'font-size:16px;color:#242424;word-break:keep-all;');
+    body.setAttribute('style', 'font-size:16px;font-weight:400;color:#242424;word-break:keep-all;');
     body.appendChild(root);
     // 섹션 제거로 남은 앞뒤 빈 텍스트 노드 정리(붙여넣기 시 불필요한 빈 줄 방지)
     while (body.firstChild && body.firstChild.nodeType === 3 && !body.firstChild.textContent.trim()) body.firstChild.remove();
