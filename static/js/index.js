@@ -1459,6 +1459,40 @@ let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰�
 
 /* 구글 블로거 포스팅용 복사 — 이미지 제외, 인라인 스타일 서식 HTML을 클립보드에.
    text/html + text/plain 을 함께 넣어 블로거 작성(리치텍스트)·HTML 보기 어디에 붙여도 되게 한다. */
+/* 비보안 컨텍스트(http + 비 localhost, 예: Tailscale IP 접속) 대비 레거시 복사.
+   navigator.clipboard는 HTTPS/localhost에서만 존재하므로 원격 접속 시엔 이 경로가 쓰인다.
+   contenteditable 요소를 선택해 execCommand('copy') → 브라우저가 text/html+text/plain을
+   함께 넣어주므로 서식이 유지된다. */
+function _copyHtmlLegacy(html, text) {
+  let ok = false;
+  // copy 이벤트를 가로채 clipboardData에 html+plain을 직접 넣는다(서식 보장 + 성공 판정 확실).
+  const onCopy = (e) => {
+    e.clipboardData.setData('text/html', html);
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
+    ok = true;
+  };
+  document.addEventListener('copy', onCopy, true);
+  // execCommand('copy')는 선택 영역이 없으면 copy 이벤트를 안 쏘는 브라우저가 있어 임시 선택을 만든다
+  const holder = document.createElement('div');
+  holder.contentEditable = 'true';
+  holder.textContent = ' ';
+  holder.setAttribute('style', 'position:fixed;left:-99999px;top:0;opacity:0;');
+  document.body.appendChild(holder);
+  const sel = window.getSelection();
+  const saved = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  const range = document.createRange();
+  range.selectNodeContents(holder);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  try { document.execCommand('copy'); } catch { /* ok는 false로 남는다 */ }
+  document.removeEventListener('copy', onCopy, true);
+  sel.removeAllRanges();
+  if (saved) sel.addRange(saved);
+  holder.remove();
+  return ok;
+}
+
 async function copySummaryForBlogger(btn) {
   if (!_summaryMd) return;
   const label = btn && btn.querySelector('.blg-label');
@@ -1466,20 +1500,21 @@ async function copySummaryForBlogger(btn) {
     if (label) label.textContent = t;
     if (btn) btn.style.color = color || '';
   };
+  const { html, text } = YS.mdToBloggerHtml(_summaryMd);
+  let ok = false;
   try {
-    const { html, text } = YS.mdToBloggerHtml(_summaryMd);
-    if (navigator.clipboard && window.ClipboardItem) {
+    if (navigator.clipboard && window.ClipboardItem) {      // HTTPS·localhost
       await navigator.clipboard.write([new ClipboardItem({
         'text/html':  new Blob([html], { type: 'text/html' }),
         'text/plain': new Blob([text], { type: 'text/plain' }),
       })]);
-    } else {
-      await navigator.clipboard.writeText(html);   // 폴백: HTML 소스 자체를 평문으로
+      ok = true;
     }
-    setLbl('복사됨', 'var(--success)');
   } catch (e) {
-    setLbl('복사 실패', 'var(--error)');
+    console.warn('[blogger] clipboard API 실패 → 레거시 폴백', e);
   }
+  if (!ok) ok = _copyHtmlLegacy(html, text);                // 원격(비보안 컨텍스트) 경로
+  setLbl(ok ? '복사됨' : '복사 실패', ok ? 'var(--success)' : 'var(--error)');
   setTimeout(() => setLbl('블로거용 복사'), 1600);
 }
 let _immersive = false;
