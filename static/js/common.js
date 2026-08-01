@@ -233,9 +233,7 @@
   function mdToBloggerHtml(md) {
     let src = String(md || '');
     // 1) 앱 전용 마커·이미지 스트립 제거(마커는 화면 칩용, 이미지는 로컬 URL이라 외부에서 깨짐)
-    let model = '', compress = '';
-    src = src.replace(/<!--\s*SUMMARY_MODEL:([\s\S]*?)-->\s*/g, (_, m) => { model = m.trim(); return ''; });
-    src = src.replace(/<!--\s*SUMMARY_COMPRESS:(\d+)\s*-->\s*/g, (_, p) => { compress = p; return ''; });
+    src = src.replace(/<!--\s*SUMMARY_(?:MODEL|COMPRESS):[\s\S]*?-->\s*/g, '');   // 화면 칩용 마커
     src = src.replace(/<div class="kf-strip">[\s\S]*?<\/div>\s*/g, '');
     src = src.replace(/^---\n[\s\S]*?\n---\n?/, '');            // YAML 프론트매터
 
@@ -319,12 +317,12 @@
     while (body.lastChild && body.lastChild.nodeType === 3 && !body.lastChild.textContent.trim()) body.lastChild.remove();
     const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거
     if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .85em;'));
-    const foot = document.createElement('div');
-    foot.setAttribute('style', _BL.foot);
-    foot.innerHTML = '이 글은 영상의 전사본을 AI로 요약·정리한 것입니다'
-      + (model ? ` (요약 모델: ${escapeHtml(model)}${compress ? `, 원문 대비 ${escapeHtml(compress)}%` : ''})` : '')
-      + (url ? `.<br>원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener" style="color:#b0413e;">${attrEscape(url)}</a>` : '.');
-    body.appendChild(foot);
+    if (url) {                                     // 출처는 원본 영상 링크만 남긴다
+      const foot = document.createElement('div');
+      foot.setAttribute('style', _BL.foot);
+      foot.innerHTML = `원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener" style="color:#b0413e;">${attrEscape(url)}</a>`;
+      body.appendChild(foot);
+    }
 
     // 6) 서식 붙여넣기가 안 되는 편집기를 위한 평문 대체본
     const text = body.textContent.replace(/\n{3,}/g, '\n\n').trim();
