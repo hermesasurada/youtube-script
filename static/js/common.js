@@ -219,11 +219,12 @@
      반환: {html, text} — 클립보드에 text/html + text/plain 동시 적재용. */
   const _BL = {           // 블로거 본문 인라인 스타일 팔레트(테마와 무관하게 읽히도록 보수적으로)
     h2:   'margin:2em 0 .7em;padding-bottom:.35em;border-bottom:2px solid #e8e3d8;font-size:1.35em;font-weight:700;line-height:1.4;',
-    h3:   'margin:1.8em 0 .6em;font-size:1.12em;font-weight:700;line-height:1.5;',
+    // 소제목: 위 여백을 크게 + 왼쪽 컬러 바 → 본문과 한눈에 구분되게
+    h3:   'margin:2.6em 0 .85em;padding:.1em 0 .1em .65em;border-left:4px solid #b0413e;'
+        + 'font-size:1.2em;font-weight:700;line-height:1.45;color:#1a1a1a;',
     p:    'margin:0 0 1.15em;line-height:1.85;',
     li:   'margin:0 0 .55em;line-height:1.8;',
     ul:   'margin:0 0 1.3em;padding-left:1.3em;',
-    time: 'margin-left:.5em;font-size:.78em;font-weight:400;color:#9a9186;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
   };
 
@@ -287,9 +288,9 @@
       h.setAttribute('style', _BL.h2);
     });
     root.querySelectorAll('h3').forEach(h => {
-      // '소제목 [mm:ss]' → 시각은 작은 회색으로 분리
-      const m = h.textContent.match(/^([\s\S]*?)\s*\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*$/);
-      if (m) h.innerHTML = escapeHtml(m[1].trim()) + `<span style="${_BL.time}">${m[2]}</span>`;
+      // '소제목 [mm:ss]' → 영상 시각은 블로그 글엔 불필요하므로 제거
+      const m = h.textContent.match(/^([\s\S]*?)\s*\[\d{1,2}:\d{2}(?::\d{2})?\]\s*$/);
+      if (m) h.textContent = m[1].trim();
       h.setAttribute('style', _BL.h3);
     });
     root.querySelectorAll('p').forEach(p => p.setAttribute('style', _BL.p));
@@ -313,7 +314,7 @@
     while (body.firstChild && body.firstChild.nodeType === 3 && !body.firstChild.textContent.trim()) body.firstChild.remove();
     while (body.lastChild && body.lastChild.nodeType === 3 && !body.lastChild.textContent.trim()) body.lastChild.remove();
     const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거
-    if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .6em;'));
+    if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .85em;'));
     const foot = document.createElement('div');
     foot.setAttribute('style', _BL.foot);
     foot.innerHTML = '이 글은 영상의 전사본을 AI로 요약·정리한 것입니다'
