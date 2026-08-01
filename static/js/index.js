@@ -1455,7 +1455,33 @@ async function copyUrl() {
 }
 
 /* ── Summary Modal ── (marked.js 설정은 공유 모듈 common.js에서 일원화) */
-let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성에 사용
+let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성·블로거 복사에 사용
+
+/* 구글 블로거 포스팅용 복사 — 이미지 제외, 인라인 스타일 서식 HTML을 클립보드에.
+   text/html + text/plain 을 함께 넣어 블로거 작성(리치텍스트)·HTML 보기 어디에 붙여도 되게 한다. */
+async function copySummaryForBlogger(btn) {
+  if (!_summaryMd) return;
+  const label = btn && btn.querySelector('.blg-label');
+  const setLbl = (t, color) => {
+    if (label) label.textContent = t;
+    if (btn) btn.style.color = color || '';
+  };
+  try {
+    const { html, text } = YS.mdToBloggerHtml(_summaryMd);
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html':  new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })]);
+    } else {
+      await navigator.clipboard.writeText(html);   // 폴백: HTML 소스 자체를 평문으로
+    }
+    setLbl('복사됨', 'var(--success)');
+  } catch (e) {
+    setLbl('복사 실패', 'var(--error)');
+  }
+  setTimeout(() => setLbl('블로거용 복사'), 1600);
+}
 let _immersive = false;
 
 /* ── 본문 글자크기 배율(−/+) — 일반/몰입 두 본문 공통, 소제목·표는 고정. 로컬 저장 ── */

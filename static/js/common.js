@@ -212,8 +212,113 @@
     return r.json();
   }
 
+  /* ── 구글 블로거 포스팅용 변환 ────────────────────────────────────────
+     블로거 본문은 외부 CSS/클래스를 못 쓰므로 **인라인 style**만 유효하다.
+     이미지(kf-strip)는 /sframe 로컬 URL이라 블로그에서 깨지므로 제외한다.
+     섹션·본문·강조·시각 라벨은 그대로 두고 서식만 입힌다.
+     반환: {html, text} — 클립보드에 text/html + text/plain 동시 적재용. */
+  const _BL = {           // 블로거 본문 인라인 스타일 팔레트(테마와 무관하게 읽히도록 보수적으로)
+    h2:   'margin:2em 0 .7em;padding-bottom:.35em;border-bottom:2px solid #e8e3d8;font-size:1.35em;font-weight:700;line-height:1.4;',
+    h3:   'margin:1.8em 0 .6em;font-size:1.12em;font-weight:700;line-height:1.5;',
+    p:    'margin:0 0 1.15em;line-height:1.85;',
+    li:   'margin:0 0 .55em;line-height:1.8;',
+    ul:   'margin:0 0 1.3em;padding-left:1.3em;',
+    time: 'margin-left:.5em;font-size:.78em;font-weight:400;color:#9a9186;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;',
+    meta: 'margin:0 0 1.8em;padding:.9em 1.1em;background:#faf8f4;border-left:3px solid #b0413e;font-size:.93em;line-height:1.75;color:#555;',
+    foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
+  };
+
+  function mdToBloggerHtml(md) {
+    let src = String(md || '');
+    // 1) 앱 전용 마커·이미지 스트립 제거(마커는 화면 칩용, 이미지는 로컬 URL이라 외부에서 깨짐)
+    let model = '', compress = '';
+    src = src.replace(/<!--\s*SUMMARY_MODEL:([\s\S]*?)-->\s*/g, (_, m) => { model = m.trim(); return ''; });
+    src = src.replace(/<!--\s*SUMMARY_COMPRESS:(\d+)\s*-->\s*/g, (_, p) => { compress = p; return ''; });
+    src = src.replace(/<div class="kf-strip">[\s\S]*?<\/div>\s*/g, '');
+    src = src.replace(/^---\n[\s\S]*?\n---\n?/, '');            // YAML 프론트매터
+
+    // 2) 마크다운 → HTML (앱 장식 없이 순수 변환. CJK 볼드·수식 보정은 공용 로직 재사용)
+    src = _fixCjkEmphasis(src);
+    const math = [];                                            // 수식은 KaTeX 대신 원문 유지(블로거엔 KaTeX 없음)
+    src = src.replace(/\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g, (_, a, b) => {
+      math.push(a || b); return '\x01M' + (math.length - 1) + '\x01';
+    });
+    let html = (global.marked && global.marked.parse) ? global.marked.parse(src) : escapeHtml(src);
+    if (math.length) html = html.replace(/\x01M(\d+)\x01/g, (_, i) => '<i>' + escapeHtml(math[+i]) + '</i>');
+
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    const root = tpl.content;
+
+    // 3) 메타정보 표 → 정보 박스(블로거에서 표는 테마마다 깨져 보이므로 문단형으로)
+    let metaBox = null, title = '', url = '';
+    const h1 = root.querySelector('h1');
+    if (h1) { title = h1.textContent.trim(); h1.remove(); }     // 제목은 블로거 '제목' 칸에 넣도록 본문에선 제외
+    const h2s = [...root.querySelectorAll('h2')];
+    const metaH = h2s.find(h => /메타\s*정보/.test(h.textContent));
+    if (metaH) {
+      const tbl = metaH.nextElementSibling;
+      if (tbl && tbl.tagName === 'TABLE') {
+        const kv = {};
+        tbl.querySelectorAll('tr').forEach(tr => {
+          const c = tr.querySelectorAll('td,th');
+          if (c.length >= 2) kv[c[0].textContent.trim()] = c[1].textContent.trim();
+        });
+        url = kv['URL'] || '';
+        const bits = ['업로더', '날짜', '길이'].filter(k => kv[k]).map(k => `<b>${k}</b> ${escapeHtml(kv[k])}`);
+        metaBox = document.createElement('div');
+        metaBox.setAttribute('style', _BL.meta);
+        metaBox.innerHTML = bits.join(' &nbsp;·&nbsp; ') +
+          (url ? `<br><a href="${attrEscape(url)}" target="_blank" rel="noopener">▶ YouTube에서 영상 보기</a>` : '');
+        tbl.remove();
+      }
+      metaH.remove();
+    }
+
+    // 4) 남은 요소에 인라인 스타일 주입 + 번호 접두어('2. 한눈 요약' → '한눈 요약') 정리
+    root.querySelectorAll('h2').forEach(h => {
+      h.textContent = h.textContent.replace(/^\s*\d+\.\s*/, '');
+      h.setAttribute('style', _BL.h2);
+    });
+    root.querySelectorAll('h3').forEach(h => {
+      // '소제목 [mm:ss]' → 시각은 작은 회색으로 분리
+      const m = h.textContent.match(/^([\s\S]*?)\s*\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*$/);
+      if (m) h.innerHTML = escapeHtml(m[1].trim()) + `<span style="${_BL.time}">${m[2]}</span>`;
+      h.setAttribute('style', _BL.h3);
+    });
+    root.querySelectorAll('p').forEach(p => p.setAttribute('style', _BL.p));
+    root.querySelectorAll('ul,ol').forEach(u => u.setAttribute('style', _BL.ul));
+    root.querySelectorAll('li').forEach(li => li.setAttribute('style', _BL.li));
+    root.querySelectorAll('a').forEach(a => {
+      a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener');
+      a.setAttribute('style', 'color:#b0413e;text-decoration:underline;');
+    });
+    root.querySelectorAll('img,figure,figcaption').forEach(el => el.remove());   // 잔여 이미지 방어
+    root.querySelectorAll('blockquote').forEach(b => b.setAttribute('style',
+      'margin:0 0 1.3em;padding:.2em 0 .2em 1em;border-left:3px solid #e0d9cc;color:#666;'));
+    root.querySelectorAll('code').forEach(c => c.setAttribute('style',
+      'background:#f4f1eb;padding:.1em .35em;border-radius:3px;font-size:.92em;'));
+
+    // 5) 조립: 메타 박스 → 본문 → 출처 푸터
+    const body = document.createElement('div');
+    body.setAttribute('style', 'font-size:16px;color:#242424;word-break:keep-all;');
+    if (metaBox) body.appendChild(metaBox);
+    body.appendChild(root);
+    const foot = document.createElement('div');
+    foot.setAttribute('style', _BL.foot);
+    foot.innerHTML = '이 글은 영상의 전사본을 AI로 요약·정리한 것입니다'
+      + (model ? ` (요약 모델: ${escapeHtml(model)}${compress ? `, 원문 대비 ${escapeHtml(compress)}%` : ''})` : '')
+      + (url ? `.<br>원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener" style="color:#b0413e;">${attrEscape(url)}</a>` : '.');
+    body.appendChild(foot);
+
+    // 6) 서식 붙여넣기가 안 되는 편집기를 위한 평문 대체본
+    const text = body.textContent.replace(/\n{3,}/g, '\n\n').trim();
+    return { html: body.outerHTML, text, title };
+  }
+
   global.YS = {
     renderMarkdown,
+    mdToBloggerHtml,
     escapeHtml,
     attrEscape,
     fmtDate,
