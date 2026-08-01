@@ -224,7 +224,6 @@
     li:   'margin:0 0 .55em;line-height:1.8;',
     ul:   'margin:0 0 1.3em;padding-left:1.3em;',
     time: 'margin-left:.5em;font-size:.78em;font-weight:400;color:#9a9186;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;',
-    meta: 'margin:0 0 1.8em;padding:.9em 1.1em;background:#faf8f4;border-left:3px solid #b0413e;font-size:.93em;line-height:1.75;color:#555;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
   };
 
@@ -250,30 +249,37 @@
     tpl.innerHTML = html;
     const root = tpl.content;
 
-    // 3) 메타정보 표 → 정보 박스(블로거에서 표는 테마마다 깨져 보이므로 문단형으로)
-    let metaBox = null, title = '', url = '';
+    // 3) 섹션 정리: 본문(핵심 내용의 소제목+본문)만 남긴다.
+    //    메타정보 표는 출처 URL만 뽑아 쓰고 제거, 한눈 요약·목차 섹션은 통째로 제거,
+    //    '핵심 내용' 헤더는 그 아래 소제목만 남기면 되므로 헤더만 제거.
+    let title = '', url = '';
     const h1 = root.querySelector('h1');
     if (h1) { title = h1.textContent.trim(); h1.remove(); }     // 제목은 블로거 '제목' 칸에 넣도록 본문에선 제외
-    const h2s = [...root.querySelectorAll('h2')];
-    const metaH = h2s.find(h => /메타\s*정보/.test(h.textContent));
-    if (metaH) {
-      const tbl = metaH.nextElementSibling;
-      if (tbl && tbl.tagName === 'TABLE') {
-        const kv = {};
-        tbl.querySelectorAll('tr').forEach(tr => {
-          const c = tr.querySelectorAll('td,th');
-          if (c.length >= 2) kv[c[0].textContent.trim()] = c[1].textContent.trim();
-        });
-        url = kv['URL'] || '';
-        const bits = ['업로더', '날짜', '길이'].filter(k => kv[k]).map(k => `<b>${k}</b> ${escapeHtml(kv[k])}`);
-        metaBox = document.createElement('div');
-        metaBox.setAttribute('style', _BL.meta);
-        metaBox.innerHTML = bits.join(' &nbsp;·&nbsp; ') +
-          (url ? `<br><a href="${attrEscape(url)}" target="_blank" rel="noopener">▶ YouTube에서 영상 보기</a>` : '');
-        tbl.remove();
+    root.querySelectorAll('details').forEach(d => d.remove());  // 접이식 목차(있을 경우)
+
+    const DROP_SEC = /한눈\s*요약|목\s*차|TL;?DR/i;              // 섹션 전체를 버릴 대상
+    [...root.querySelectorAll('h2')].forEach(h => {
+      const t = h.textContent.replace(/^\s*\d+\.\s*/, '');
+      if (/메타\s*정보/.test(t)) {
+        const tbl = h.nextElementSibling;
+        if (tbl && tbl.tagName === 'TABLE') {
+          const kv = {};
+          tbl.querySelectorAll('tr').forEach(tr => {
+            const c = tr.querySelectorAll('td,th');
+            if (c.length >= 2) kv[c[0].textContent.trim()] = c[1].textContent.trim();
+          });
+          url = kv['URL'] || '';                                 // 출처 표기용으로만 보관
+          tbl.remove();
+        }
+        h.remove();
+      } else if (DROP_SEC.test(t)) {
+        let n = h.nextElementSibling;                            // 다음 h2 전까지가 그 섹션
+        h.remove();
+        while (n && n.tagName !== 'H2') { const nx = n.nextElementSibling; n.remove(); n = nx; }
+      } else if (/핵심\s*내용/.test(t)) {
+        h.remove();                                              // 헤더만 제거, 하위 소제목·본문은 유지
       }
-      metaH.remove();
-    }
+    });
 
     // 4) 남은 요소에 인라인 스타일 주입 + 번호 접두어('2. 한눈 요약' → '한눈 요약') 정리
     root.querySelectorAll('h2').forEach(h => {
@@ -299,11 +305,15 @@
     root.querySelectorAll('code').forEach(c => c.setAttribute('style',
       'background:#f4f1eb;padding:.1em .35em;border-radius:3px;font-size:.92em;'));
 
-    // 5) 조립: 메타 박스 → 본문 → 출처 푸터
+    // 5) 조립: 본문 → 출처 푸터
     const body = document.createElement('div');
     body.setAttribute('style', 'font-size:16px;color:#242424;word-break:keep-all;');
-    if (metaBox) body.appendChild(metaBox);
     body.appendChild(root);
+    // 섹션 제거로 남은 앞뒤 빈 텍스트 노드 정리(붙여넣기 시 불필요한 빈 줄 방지)
+    while (body.firstChild && body.firstChild.nodeType === 3 && !body.firstChild.textContent.trim()) body.firstChild.remove();
+    while (body.lastChild && body.lastChild.nodeType === 3 && !body.lastChild.textContent.trim()) body.lastChild.remove();
+    const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거
+    if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .6em;'));
     const foot = document.createElement('div');
     foot.setAttribute('style', _BL.foot);
     foot.innerHTML = '이 글은 영상의 전사본을 AI로 요약·정리한 것입니다'
