@@ -627,7 +627,8 @@ def close_conn() -> None:
 
 def _row_to_item(r: sqlite3.Row) -> dict:
     return {
-        "date":         r["date"],
+        "date":         r["date"],           # 전사 처리일(res/{date}/ 기준)
+        "upload_date":  r["upload_date"] or "",   # 영상 게시일(YYYYMMDD, 없으면 "")
         "stem":         r["stem"],
         "title":        r["title"] or r["stem"],
         "uploader":     r["uploader"] or r["channel"] or "—",

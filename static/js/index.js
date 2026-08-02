@@ -184,6 +184,7 @@ let _historySelIdx   = -1;
 let _historyPage     = 1;
 let _histUnreadOnly  = false;
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
+let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일
 const HIST_PAGE_SIZE = 20;
 
 /* ── 검색조건 유지: 날짜·업로더·제목·미읽음·페이지를 localStorage에 기억해 새로고침 후 복원 ──
@@ -284,10 +285,9 @@ function applyHistoryFilter(keepPage = false) {
     if (_histUnreadOnly && item.is_read) return false;
     return true;
   });
-  // 정렬: stem(앞부분이 YYYYMMDDHHMM 타임스탬프)으로 시간순. desc=최신순, asc=과거순.
+  // 정렬: 기준(_histSortKey)에 따라 전사 처리일 또는 영상 게시일. desc=최신순, asc=과거순.
   _historyFiltered.sort((a, b) => {
-    const ka = (a.date || '') + '' + (a.stem || '');
-    const kb = (b.date || '') + '' + (b.stem || '');
+    const ka = _histSortValue(a), kb = _histSortValue(b);
     const c = ka < kb ? -1 : ka > kb ? 1 : 0;
     return _histSort === 'asc' ? c : -c;
   });
@@ -299,15 +299,42 @@ function applyHistoryFilter(keepPage = false) {
   _renderHistoryList();
 }
 
+/* 정렬 기준값: 전사 처리일은 date+stem(같은 날 안에서도 시간순), 게시일은 upload_date.
+   게시일이 없는 항목(파일 업로드 등)은 처리일로 대체해 순서가 뒤엉키지 않게 한다. */
+function _histSortValue(item) {
+  if (_histSortKey === 'upload') return (item.upload_date || item.date || '') + (item.stem || '');
+  return (item.date || '') + (item.stem || '');
+}
+
+/* 카드·상세에 보여줄 날짜 — 선택한 정렬 기준을 따른다(게시일 없으면 처리일). */
+function histDisplayDate(item) {
+  return _histSortKey === 'upload' ? (item.upload_date || item.date || '') : (item.date || '');
+}
+
 function _updateSortBtn() {
-  const b = document.getElementById('hf-sort-btn');
-  if (b) b.textContent = _histSort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+  const dir = document.getElementById('hf-sort-btn');
+  if (dir) dir.textContent = _histSort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+  const key = document.getElementById('hf-sortkey-btn');
+  if (key) {
+    key.textContent = _histSortKey === 'upload' ? '영상게시일' : '전사처리일';
+    key.title = _histSortKey === 'upload'
+      ? '영상 게시일 기준 (클릭하면 전사 처리일로)'
+      : '전사 처리일 기준 (클릭하면 영상 게시일로)';
+    key.classList.toggle('on', _histSortKey === 'upload');   // 기본값이 아닐 때 강조
+  }
 }
 function toggleHistorySort() {
   _histSort = (_histSort === 'asc') ? 'desc' : 'asc';
   localStorage.setItem('histSort', _histSort);
   _updateSortBtn();
   applyHistoryFilter();   // 정렬 변경은 1페이지부터
+}
+/* 정렬 기준 전환 — 카드에 찍히는 날짜도 이 기준을 따라 바뀐다. */
+function toggleHistorySortKey() {
+  _histSortKey = (_histSortKey === 'upload') ? 'date' : 'upload';
+  localStorage.setItem('histSortKey', _histSortKey);
+  _updateSortBtn();
+  applyHistoryFilter();
 }
 
 function toggleUnreadFilter() {
@@ -514,7 +541,7 @@ function _renderHistoryList() {
         <h3 class="hist-card-title" title="${titleAttr}">${unreadDot}${esc(item.title)}</h3>
         <div class="hist-card-meta">${uploaderHtml}</div>
         <div class="hist-card-footer">
-          <span class="hist-card-date">${fmtDate(item.date)}</span>
+          <span class="hist-card-date" title="${_histSortKey === 'upload' ? '영상 게시일' : '전사 처리일'}">${fmtDate(histDisplayDate(item))}</span>
           <div class="hist-card-actions">${readBtn}${sumBtn}${txtBtn}${ytBtn}${delBtn}</div>
         </div>
       </div>

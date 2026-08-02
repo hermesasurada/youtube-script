@@ -214,6 +214,7 @@
               <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
                 <option value="">전체 업로더</option>
               </select>
+              <button id="hf-sortkey-btn" type="button" class="hf-sort-toggle hf-sortkey-toggle" onclick="toggleHistorySortKey()" title="전사 처리일 기준 (클릭하면 영상 게시일로)">전사처리일</button>
               <button id="hf-sort-btn" type="button" class="hf-sort-toggle" onclick="toggleHistorySort()" title="정렬 순서 전환(최신순 ↔ 과거순)">최신순 ↓</button>
               <div class="hf-title-wrap">
                 <input type="text" id="hf-title" class="hf-title" placeholder="제목 검색..." oninput="applyHistoryFilter()">

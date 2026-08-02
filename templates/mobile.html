@@ -108,6 +108,8 @@
       background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
     }
     .sort-toggle:active { background: var(--surface2); }
+    /* 정렬 기준이 기본값(전사처리일)이 아닐 때 강조 */
+    .sort-toggle.active { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
 
     /* PTR */
     .ptr {
@@ -395,6 +397,7 @@
 
   <div class="search">
     <input type="search" id="q" placeholder="제목/업로더 검색…" autocomplete="off" enterkeyhint="search">
+    <button class="sort-toggle" id="m-sortkey-btn" type="button" onclick="toggleSortKey()" aria-label="정렬 기준 전환(전사처리일/영상게시일)">전사처리일</button>
     <button class="sort-toggle" id="m-sort-btn" type="button" onclick="toggleSort()" aria-label="정렬 순서 전환">최신순 ↓</button>
     <button class="unread-filter-btn" id="unread-filter-btn" onclick="toggleUnreadFilter()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -454,6 +457,11 @@ const SVG = {
 const PAGE = 20;
 let ALL = [], FILTERED = [], shownCount = 0, _unreadOnly = false;
 let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
+let _sortKey = localStorage.getItem('histSortKey') || 'date';  // 'date'=전사 처리일, 'upload'=영상 게시일 (데스크톱과 공유)
+/* 정렬 기준값 — 게시일이 없으면 처리일로 대체(순서 뒤엉킴 방지) */
+const _sortValue = i => (_sortKey === 'upload' ? (i.upload_date || i.date || '') : (i.date || '')) + ' ' + (i.stem || '');
+/* 카드에 찍을 날짜 — 선택한 정렬 기준을 따른다 */
+const histDisplayDate = i => (_sortKey === 'upload' ? (i.upload_date || i.date || '') : (i.date || ''));
 
 const $ = id => document.getElementById(id);
 // 순수 헬퍼는 공유 모듈(common.js, YS)로 일원화 — 위임만.
@@ -501,9 +509,9 @@ function applyFilter() {
     if (_unreadOnly && i.is_read) return false;
     return true;
   });
-  // 정렬: stem(앞부분 YYYYMMDDHHMM) 기준. desc=최신순, asc=과거순.
+  // 정렬: 기준(_sortKey)에 따라 전사 처리일 또는 영상 게시일. desc=최신순, asc=과거순.
   FILTERED.sort((a, b) => {
-    const ka = (a.date||'') + ' ' + (a.stem||''), kb = (b.date||'') + ' ' + (b.stem||'');
+    const ka = _sortValue(a), kb = _sortValue(b);
     const c = ka < kb ? -1 : ka > kb ? 1 : 0;
     return _sort === 'asc' ? c : -c;
   });
@@ -516,10 +524,22 @@ function applyFilter() {
 function _updateSortBtn() {
   const b = $('m-sort-btn');
   if (b) b.textContent = _sort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+  const k = $('m-sortkey-btn');
+  if (k) {
+    k.textContent = _sortKey === 'upload' ? '영상게시일' : '전사처리일';
+    k.classList.toggle('active', _sortKey === 'upload');
+  }
 }
 function toggleSort() {
   _sort = (_sort === 'asc') ? 'desc' : 'asc';
   localStorage.setItem('histSort', _sort);
+  _updateSortBtn();
+  applyFilter();
+}
+/* 정렬 기준 전환 — 카드 날짜 표기도 이 기준을 따른다 */
+function toggleSortKey() {
+  _sortKey = (_sortKey === 'upload') ? 'date' : 'upload';
+  localStorage.setItem('histSortKey', _sortKey);
   _updateSortBtn();
   applyFilter();
 }
@@ -585,7 +605,7 @@ function renderCard(item) {
       <h3 class="hist-card-title">${unreadDot}${esc(item.title)}</h3>
       <div class="hist-card-meta">${uploader}</div>
       <div class="hist-card-footer">
-        <span class="hist-card-date">${fmtDate(item.date)}</span>
+        <span class="hist-card-date">${fmtDate(histDisplayDate(item))}</span>
         <div class="hist-card-actions">${readBtn}${sumBtn}${txtBtn}${ytBtn}${delBtn}</div>
       </div>
     </div>
