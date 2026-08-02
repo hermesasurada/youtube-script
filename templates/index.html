@@ -206,11 +206,6 @@
           <div class="history-toolbar">
             <div class="history-filter-row">
               <button class="btn-sm btn-ghost" onclick="loadHistory()" title="새로고침">새로고침</button>
-              <div class="hf-group">
-                <input type="date" id="hf-date-from" class="hf-date" onchange="applyHistoryFilter()" title="시작 날짜">
-                <span class="hf-sep">~</span>
-                <input type="date" id="hf-date-to"   class="hf-date" onchange="applyHistoryFilter()" title="종료 날짜">
-              </div>
               <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
                 <option value="">전체 업로더</option>
               </select>

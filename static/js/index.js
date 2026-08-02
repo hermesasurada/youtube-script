@@ -196,8 +196,6 @@ function _saveHistFilter() {
   if (_histRestoring) return;
   try {
     localStorage.setItem(HIST_FILTER_KEY, JSON.stringify({
-      dateFrom: document.getElementById('hf-date-from').value,
-      dateTo:   document.getElementById('hf-date-to').value,
       uploader: document.getElementById('hf-uploader').value,
       title:    document.getElementById('hf-title').value,
       unread:   _histUnreadOnly,
@@ -213,8 +211,6 @@ function _restoreHistFilter() {
   if (!s) return;
   _histRestoring = true;
   try {
-    if (s.dateFrom) document.getElementById('hf-date-from').value = s.dateFrom;
-    if (s.dateTo)   document.getElementById('hf-date-to').value   = s.dateTo;
     if (s.title)    document.getElementById('hf-title').value     = s.title;
     const usel = document.getElementById('hf-uploader');
     if (s.uploader && [...usel.options].some(o => o.value === s.uploader)) usel.value = s.uploader;
@@ -270,16 +266,11 @@ function clearTitleSearch() {
 }
 
 function applyHistoryFilter(keepPage = false) {
-  const dateFrom = document.getElementById('hf-date-from').value;
-  const dateTo   = document.getElementById('hf-date-to').value;
   const uploader = document.getElementById('hf-uploader').value;
   const titleQ   = document.getElementById('hf-title').value.trim().toLowerCase();
   document.getElementById('hf-clear-btn').classList.toggle('visible', titleQ.length > 0);
 
-  const toYMD = d => d.replace(/-/g, '');  // "YYYY-MM-DD" → "YYYYMMDD"
   _historyFiltered = _historyItems.filter(item => {
-    if (dateFrom && item.date < toYMD(dateFrom)) return false;
-    if (dateTo   && item.date > toYMD(dateTo))   return false;
     if (uploader && item.uploader !== uploader)  return false;
     if (titleQ   && !item.title.toLowerCase().includes(titleQ)) return false;
     if (_histUnreadOnly && item.is_read) return false;
@@ -435,16 +426,15 @@ function _renderPagination(totalItems) {
 }
 
 function resetHistoryFilter() {
-  document.getElementById('hf-date-from').value = '';
-  document.getElementById('hf-date-to').value   = '';
   document.getElementById('hf-uploader').value  = '';
   document.getElementById('hf-title').value      = '';
   _histUnreadOnly = false;
   document.getElementById('hf-unread-btn').classList.remove('active');
-  _histSort = 'desc';                                   // 정렬도 기본(최신순)으로
+  _histSort    = 'desc';                                // 정렬도 기본(전사처리일·최신순)으로
+  _histSortKey = 'date';
   localStorage.setItem('histSort', _histSort);
-  const sortSel = document.getElementById('hf-sort');
-  if (sortSel) sortSel.value = _histSort;
+  localStorage.setItem('histSortKey', _histSortKey);
+  _updateSortBtn();
   applyHistoryFilter();
 }
 
