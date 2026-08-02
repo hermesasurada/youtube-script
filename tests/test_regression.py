@@ -354,6 +354,75 @@ def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
     assert 'data: ""' in output[reset_index]
 
 
+def _make_job(job_id, meta=None):
+    import queue as _queue
+    import threading as _threading
+    app.jobs[job_id] = {
+        "queue": _queue.Queue(), "stop_event": _threading.Event(),
+        "status": "running", "result": None, "output_file": None,
+        "error_stage": "", "error_message": "", "meta": meta or {},
+    }
+
+
+def test_truncated_audio_is_rejected_before_transcription(monkeypatch, tmp_path):
+    """라이브 다시보기가 초반만 받히면 whisper를 돌리기 전에 끊는다.
+
+    (3h44m 토론회에서 대기 구간만 받혀 전사가 한 줄로 끝난 회귀가 있었다.)
+    """
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"x")
+    called = {"whisper": False}
+    monkeypatch.setattr(app, "get_file_duration", lambda p: 400.0)          # 실제 오디오 400초
+    monkeypatch.setattr(app, "_run_whisper", lambda *a, **k: called.__setitem__("whisper", True) or 0)
+
+    job_id = "truncated-audio"
+    _make_job(job_id)
+    try:
+        app._transcribe_and_finish(job_id, str(audio), "auto", "8", 13454.0, str(tmp_path / "out.md"))
+        assert called["whisper"] is False, "잘린 오디오인데 전사를 시도했다"
+        assert app.jobs[job_id]["status"] == "error"
+        assert app.jobs[job_id]["error_stage"] == "download"
+        assert "잘렸습니다" in app.jobs[job_id]["error_message"]
+    finally:
+        app.jobs.pop(job_id, None)
+
+
+def test_sparse_transcript_is_rejected_before_saving(monkeypatch, tmp_path):
+    """길이 대비 본문이 사실상 비면 저장하지 않는다(요약·캡처 낭비 차단)."""
+    md = tmp_path / "out.md"
+    saved = {"called": False}
+    monkeypatch.setattr(app, "_parse_transcript", lambda p: "[00:00] We'll be right back.")
+    monkeypatch.setattr(app, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
+
+    job_id = "sparse-transcript"
+    _make_job(job_id, meta={"duration": 13454})
+    try:
+        app._finish_transcription(job_id, str(tmp_path / "a.mp3"), 0, str(md))
+        assert saved["called"] is False, "빈 전사를 저장했다"
+        assert app.jobs[job_id]["status"] == "error"
+        assert app.jobs[job_id]["error_stage"] == "transcribe"
+        assert not md.exists()
+    finally:
+        app.jobs.pop(job_id, None)
+
+
+def test_normal_transcript_still_saves(monkeypatch, tmp_path):
+    """정상 분량 전사는 그대로 저장돼야 한다(방어가 과하게 걸리지 않는지)."""
+    md = tmp_path / "ok.md"
+    saved = {"called": False}
+    monkeypatch.setattr(app, "_parse_transcript", lambda p: "[00:00] " + "가" * 3000)
+    monkeypatch.setattr(app, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
+
+    job_id = "normal-transcript"
+    _make_job(job_id, meta={"duration": 1800})
+    try:
+        app._finish_transcription(job_id, str(tmp_path / "a.mp3"), 0, str(md))
+        assert saved["called"] is True
+        assert app.jobs[job_id]["status"] == "done"
+    finally:
+        app.jobs.pop(job_id, None)
+
+
 def test_job_result_exposes_failure_stage_and_reason():
     job_id = "ui-error-test"
     app.jobs[job_id] = {

@@ -121,6 +121,15 @@ GROK_MODEL    = os.environ.get("GROK_MODEL", "grok-4.5")   # 요약엔 코딩용
 GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"   # 폴백 활성(기본 ON)
 GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
 
+# 불완전 전사 방어 — 라이브 다시보기(was_live)는 프래그먼트가 많아 일부만 받히는 일이 있다.
+# 실제 사례: 3h44m 토론회에서 대기 구간만 받혀 전사가 "We'll be right back." 한 줄로 끝났는데도
+# 정상 처리로 간주돼 요약·캡처까지 진행됐다. 두 지점에서 거른다.
+#  A) 다운로드된 오디오 길이가 원본 duration 대비 이 비율 미만이면 전사 자체를 하지 않는다.
+#  B) 전사 본문이 분당 이 글자수 미만이면(사실상 무음/공백) 실패로 내려 요약·캡처를 막는다.
+MIN_AUDIO_RATIO   = float(os.environ.get("MIN_AUDIO_RATIO", "0.5"))
+MIN_CHARS_PER_MIN = float(os.environ.get("MIN_CHARS_PER_MIN", "40"))
+_TS_TAG_RE = re.compile(r"\[\d{1,2}:\d{2}(?::\d{2})?\]")   # 전사 본문의 시각 마커
+
 # 전사(whisper)는 무거우므로 동시 실행을 제한해 스래싱 방지.
 _transcribe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_TRANSCRIBE", "1")))
 _summarize_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_SUMMARIZE", "1")))
@@ -392,6 +401,20 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
     json_path = audio_path + ".json"
     if rc == 0:
         transcript = _parse_transcript(json_path)
+        # 방어 B: 길이 대비 본문이 사실상 비어 있으면(무음·잘린 오디오) 성공 처리하지 않는다.
+        # 저장까지 하면 요약 LLM 호출과 캡처가 낭비되고 빈 요약본이 이력에 남는다.
+        if transcript is not None:
+            secs = float((jobs[job_id].get("meta") or {}).get("duration") or 0)
+            mins = secs / 60
+            body = _TS_TAG_RE.sub("", transcript).strip()   # [mm:ss] 마커는 본문 길이에서 제외
+            if mins >= 1 and len(body) / mins < MIN_CHARS_PER_MIN:
+                detail = (f"전사 내용이 비어 있습니다: {len(body)}자 / "
+                          f"{_format_duration(secs)} (분당 {len(body) / mins:.0f}자)")
+                _set_job_error(job_id, "transcribe", detail)
+                log.warning("transcript too sparse: %s — %s", os.path.basename(md_path), detail)
+                q.put(f"오류: {detail}")
+                q.put(None)
+                return
         if transcript is not None:
             _save_md(md_path, jobs[job_id].get("meta", {}), transcript)
             jobs[job_id].update({"status": "done", "result": transcript, "output_file": md_path})
@@ -433,6 +456,18 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
     """
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
+    # 방어 A: 받아온 오디오가 원본 길이보다 크게 짧으면 다운로드가 잘린 것 —
+    # 전사·요약·캡처를 태우기 전에 여기서 실패로 끊는다(재시도는 큐 정책이 맡는다).
+    if total > 0:
+        actual = get_file_duration(audio_path)
+        if actual > 0 and actual < total * MIN_AUDIO_RATIO:
+            detail = (f"오디오가 잘렸습니다: {_format_duration(actual)} / 원본 "
+                      f"{_format_duration(total)} ({actual / total:.0%})")
+            _set_job_error(job_id, "download", detail)
+            log.warning("audio truncated: %s (%.0f/%.0fs)", os.path.basename(audio_path), actual, total)
+            q.put(f"오류: {detail}")
+            q.put(None)
+            return
     _stage(q, "transcribe")
     q.put("Whisper 전사 시작...")
     rc = _run_whisper(job_id, audio_path, lang, thr, total)
