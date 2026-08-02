@@ -6,11 +6,32 @@
 실행:  .venv/bin/python -m pytest -q
 주의:  conftest.py가 DB_PATH를 임시 파일로 격리한다(실제 index.db·res/ 미사용).
 """
+import json
 import os
+import sqlite3
+import sys
+from datetime import datetime, timedelta
 
 import app
+import channel_monitor
 import db
 import keyframe_report
+import llm_gateway
+
+
+def test_clean_summary_removes_preamble_before_inline_h1():
+    dirty = "전사 중반이 잘려 있어 전체 내용을 먼저 확인합니다.# 영상 제목\n\n## 1. 메타정보"
+    assert app._clean_summary(dirty) == "# 영상 제목\n\n## 1. 메타정보"
+
+
+def test_clean_summary_does_not_treat_h3_as_title():
+    body = "요약할 수 없습니다.\n\n### 참고"
+    assert app._clean_summary(body) == body
+
+
+def test_clean_summary_skips_stray_hash_before_real_title():
+    dirty = "#\n\n# 실제 영상 제목\n\n## 1. 메타정보"
+    assert app._clean_summary(dirty) == "# 실제 영상 제목\n\n## 1. 메타정보"
 
 
 # ── ① 마크다운 I/O 왕복 + app·db 파서 일치(드리프트 가드) ──────────────
@@ -96,6 +117,55 @@ def test_keyframe_ts_label_and_hms():
     assert keyframe_report._parse_ts_label("[" + keyframe_report._hms(200) + "]") == 200
 
 
+def test_sequoia_opening_is_removed_before_main_interview():
+    meta = {"uploader": "Sequoia Capital", "title": "Factory interview"}
+    body = (
+        "[00:00] cold open answer\n"
+        "[00:30] recurring title animation\n"
+        "[00:52] we're here in the studio with Matan from Factory\n"
+        "[01:15] main interview question"
+    )
+
+    trimmed, intro_ts = keyframe_report.trim_sequoia_opening(meta, body)
+
+    assert intro_ts == 52
+    assert trimmed.startswith("[00:52]")
+    assert "cold open" not in trimmed
+    assert keyframe_report._sequoia_opening_window(meta, body) == (0.0, 57.0)
+
+
+def test_sequoia_opening_candidate_filter_includes_visual_tail():
+    frames = [(0, "zero.jpg"), (25, "cold.jpg"), (55, "tail.jpg"), (58, "main.jpg")]
+    assert keyframe_report._exclude_opening_candidates(frames, (0, 57)) == [(58, "main.jpg")]
+
+
+def test_non_pattern_sequoia_interview_is_not_trimmed():
+    meta = {"uploader": "Sequoia Capital", "title": "Jensen interview"}
+    body = "[00:00] Thank you so much, Jensen.\n[00:32] Can you tell us what is an AI factory?"
+
+    trimmed, intro_ts = keyframe_report.trim_sequoia_opening(meta, body)
+
+    assert intro_ts is None
+    assert trimmed == body
+    assert keyframe_report._sequoia_opening_window(meta, body) is None
+
+
+def test_existing_opening_figures_are_removed_without_touching_main_frames():
+    text = (
+        '# Summary\n\n<div class="kf-strip">'
+        '<figure><img src="/x/kf_00025.jpg"><figcaption>opening</figcaption></figure>'
+        '<figure><img src="/x/kf_00058.jpg"><figcaption>main</figcaption></figure>'
+        '</div>\n\nBody\n'
+    )
+
+    cleaned, removed = keyframe_report._remove_opening_figures(text, (0, 57))
+
+    assert removed == ["kf_00025.jpg"]
+    assert "kf_00025.jpg" not in cleaned
+    assert "kf_00058.jpg" in cleaned
+    assert "Body" in cleaned
+
+
 # ── ⑤ 원격 접근 게이팅(읽음·삭제는 허용, 전사·키프레임·프롬프트는 차단) ──
 def test_remote_access_gating():
     c = app.app.test_client()
@@ -114,3 +184,187 @@ def test_remote_access_gating():
 
     # 로컬(루프백)은 전부 허용
     assert c.get("/keyframes/status").status_code == 200
+
+
+def test_queue_claim_and_stale_recovery(monkeypatch):
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM watch_queue")
+    assert db.enqueue_video("claim-test", "https://youtu.be/claim-test", "claim", "UC1")
+
+    claimed = db.queue_claim_next()
+    assert claimed and claimed["yt_id"] == "claim-test"
+    assert claimed["status"] == "processing"
+    assert claimed["attempt_count"] == 1
+    assert db.queue_claim_next() is None
+
+    old = (datetime.now() - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "UPDATE watch_queue SET claimed_at = ?, updated_at = ? WHERE id = ?",
+        (old, old, claimed["id"]),
+    )
+    assert db.queue_recover_stale(stale_seconds=3600) == 1
+    row = conn.execute("SELECT status, next_retry_at FROM watch_queue WHERE id = ?", (claimed["id"],)).fetchone()
+    assert row["status"] == "deferred" and row["next_retry_at"]
+
+
+def test_transient_filter_is_deferred_and_rechecked(monkeypatch):
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM watch_queue")
+    db.enqueue_video(
+        "live-test", "https://youtu.be/live-test", "live", "UC1",
+        status="deferred", reason="live:is_upcoming", retry_after_seconds=0,
+        error_kind="metadata_transient",
+    )
+    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, min_dur: (True, ""))
+
+    assert channel_monitor.recheck_deferred([], dry=False) == 1
+    row = conn.execute("SELECT status FROM watch_queue WHERE yt_id = 'live-test'").fetchone()
+    assert row["status"] == "pending"
+
+
+def test_permanent_metadata_errors_are_not_retried():
+    """멤버십 전용·삭제 영상은 다시 물어도 답이 같다 — 재시도 예산을 쓰면 안 된다.
+
+    (이 구분이 없어 21건이 각 8회씩 재시도된 뒤 failed로 쌓인 회귀가 있었다.)
+    """
+    permanent = [
+        "meta_error:ERROR: [youtube] X: This video is available to this channel's members",
+        "meta_error:ERROR: [youtube] X: Video unavailable. This video has been removed",
+        "meta_error:ERROR: [youtube] X: Private video. Sign in if you have been granted access",
+        "meta_error:ERROR: [youtube] X: Sign in to confirm your age",
+    ]
+    for reason in permanent:
+        retryable, _, _, kind = channel_monitor._defer_policy(reason)
+        assert retryable is False, reason
+        assert kind == "metadata_permanent"
+
+    transient = [
+        "meta_error:ERROR: unable to download video data: HTTP Error 429",
+        "meta_error:ERROR: read error / connection reset by peer",
+        "meta_error:ERROR: The read operation timed out",
+        # '일시'를 먼저 판정하므로 unavailable 문자열이 섞여도 영구로 새지 않는다
+        "meta_error:ERROR: This video is temporarily unavailable",
+    ]
+    for reason in transient:
+        retryable, _, attempts, kind = channel_monitor._defer_policy(reason)
+        assert retryable is True, reason
+        assert kind == "metadata_transient"
+        assert attempts == 6
+
+    # 처음 보는 오류는 재시도하되 폭주하지 않도록 예산을 적게 준다
+    retryable, _, attempts, kind = channel_monitor._defer_policy("meta_error:ERROR: 새로운 유형")
+    assert (retryable, attempts, kind) == (True, 3, "metadata_unknown")
+
+
+def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch):
+    retry = {
+        "id": 1, "yt_id": "retry-test", "title": "retry", "url": "https://youtu.be/retry-test",
+        "channel_id": "UC1", "txt_path": "/tmp/retry.md",
+    }
+    monkeypatch.setattr(channel_monitor.db, "queue_kf_retry_list", lambda: [retry])
+    monkeypatch.setattr(channel_monitor.db, "queue_next_pending", lambda: None)
+    monkeypatch.setattr(channel_monitor.db, "queue_claim_next", lambda: None)
+    monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
+    monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda: (True, "claude", ""))
+    monkeypatch.setattr(channel_monitor, "process_capture_only", lambda path, url: {"ok": True, "n_frames": 2})
+    notices = []
+    monkeypatch.setattr(channel_monitor, "notify", notices.append)
+
+    channel_monitor.drain()
+    assert any("캡처 재시도 성공" in notice for notice in notices)
+    assert not any("자동 처리 실패" in notice for notice in notices)
+
+
+def test_process_video_resumes_from_saved_transcript(monkeypatch):
+    calls = []
+
+    class ResponseStub:
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self, decode_unicode=False):
+            return iter(["event: done", "data: "])
+
+        def json(self):
+            return {"ok": True, "n_frames": 1}
+
+    def post(url, **kwargs):
+        calls.append(url)
+        return ResponseStub(url)
+
+    monkeypatch.setattr(channel_monitor.os.path, "isfile", lambda path: path == "/tmp/existing.md")
+    monkeypatch.setattr(channel_monitor.requests, "post", post)
+    result = channel_monitor.process_video(
+        {"id": 1, "url": "https://youtu.be/resume", "txt_path": "/tmp/existing.md"},
+        "prompt",
+    )
+
+    assert result["txt_path"] == "/tmp/existing.md"
+    assert not any(url.endswith("/start") for url in calls)
+    assert any(url.endswith("/summarize") for url in calls)
+
+
+def test_stream_command_timeout_and_stderr_drain():
+    events = list(llm_gateway.stream_command(
+        [sys.executable, "-c", "import sys,time; print('ready', flush=True); "
+         "sys.stderr.write('x'*200000); sys.stderr.flush(); time.sleep(2)"],
+        timeout=0.2,
+    ))
+    assert any(event.kind == "stdout" and event.data.strip() == "ready" for event in events)
+    assert events[-1].kind == "timeout"
+    assert events[-1].stderr
+
+
+def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
+    stream = [
+        llm_gateway.StreamEvent("stdout", data='{"type":"system","model":"claude-opus-5-0"}\n'),
+        llm_gateway.StreamEvent(
+            "stdout",
+            data='{"type":"stream_event","event":{"type":"content_block_delta",'
+                 '"delta":{"type":"text_delta","text":"partial"}}}\n',
+        ),
+        llm_gateway.StreamEvent(
+            "stdout", data='{"type":"result","is_error":true,"result":"usage limit"}\n'
+        ),
+        llm_gateway.StreamEvent("complete", returncode=1, stderr="usage limit"),
+    ]
+    monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *args, **kwargs: iter(stream))
+    monkeypatch.setattr(app, "_summarize_with_grok", lambda prompt: ("# Grok 결과", ""))
+
+    output = list(app._summarize_with_claude("prompt", None))
+    partial_index = next(i for i, chunk in enumerate(output) if "partial" in chunk)
+    reset_index = next(i for i, chunk in enumerate(output) if chunk.startswith("event: reset"))
+    grok_index = next(
+        i for i, chunk in enumerate(output)
+        if chunk.startswith("data: ") and "Grok 결과" in json.loads(chunk[6:].strip())
+    )
+    assert partial_index < reset_index < grok_index
+    assert 'data: ""' in output[reset_index]
+
+
+def test_job_result_exposes_failure_stage_and_reason():
+    job_id = "ui-error-test"
+    app.jobs[job_id] = {
+        "status": "running", "result": None, "output_file": None,
+        "error_stage": "", "error_message": "",
+    }
+    try:
+        app._set_job_error(job_id, "download", "\x1b[31m다운로드 실패\x1b[0m\n접근 거부")
+        payload = app.app.test_client().get(f"/result/{job_id}").get_json()
+        assert payload["status"] == "error"
+        assert payload["error_stage"] == "download"
+        assert payload["error_message"] == "다운로드 실패 접근 거부"
+    finally:
+        app.jobs.pop(job_id, None)
