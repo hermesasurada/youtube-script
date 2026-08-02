@@ -1670,6 +1670,35 @@ async function copySummaryForBlogger(btn) {
   setLbl(ok ? '복사됨' : '복사 실패', ok ? 'var(--success)' : 'var(--error)');
   setTimeout(() => setLbl('블로거용 복사'), 1600);
 }
+
+/* 텔레그램용 복사 — 범위는 블로거와 동일하되 텔레그램이 살리는 서식(<b>/<i>/<a>)과
+   줄바꿈만으로 구성한다. 4096자를 넘으면 라벨로 알려 나눠 보내게 한다. */
+async function copySummaryForTelegram(btn) {
+  if (!_summaryMd) return;
+  const label = btn && btn.querySelector('.tg-label');
+  const setLbl = (t, color) => {
+    if (label) label.textContent = t;
+    if (btn) btn.style.color = color || '';
+  };
+  const { html, text, length, parts, overLimit } = YS.mdToTelegram(_summaryMd);
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html':  new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })]);
+      ok = true;
+    }
+  } catch (e) {
+    console.warn('[telegram] clipboard API 실패 → 레거시 폴백', e);
+  }
+  if (!ok) ok = _copyHtmlLegacy(html, text);
+  if (!ok) setLbl('복사 실패', 'var(--error)');
+  else if (overLimit) setLbl(`복사됨 (${parts}개로 나눠 보내기)`, 'var(--warn, #b45309)');
+  else setLbl('복사됨', 'var(--success)');
+  setTimeout(() => setLbl('텔레그램용 복사'), overLimit ? 3200 : 1600);
+}
 let _immersive = false;
 
 /* ── 본문 글자크기 배율(−/+) — 일반/몰입 두 본문 공통, 소제목·표는 고정. 로컬 저장 ── */
