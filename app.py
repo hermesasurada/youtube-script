@@ -1,4 +1,3 @@
-import glob
 import json
 import logging
 import os
@@ -51,7 +50,9 @@ except ImportError:
     pass
 
 import db
+import document_io
 import keyframe_report
+import llm_gateway
 
 try:
     import yt_dlp
@@ -107,33 +108,22 @@ PROMPT_FILE = os.path.join(BASE_DIR, "prompt.txt")
 
 
 def _resolve_claude_bin() -> str:
-    """claude CLI 경로 해석: env → PATH → Claude.app 최신 설치본(버전 하드코딩 제거)."""
-    env = os.environ.get("CLAUDE_BIN")
-    if env and os.path.exists(env):
-        return env
-    found = shutil.which("claude")
-    if found:
-        return found
-    base = os.path.expanduser("~/Library/Application Support/Claude/claude-code")
-    cands = glob.glob(os.path.join(base, "*", "claude.app/Contents/MacOS/claude"))
-    cands = [c for c in cands if os.path.exists(c)]
-    if cands:
-        cands.sort(key=os.path.getmtime)  # 가장 최근 설치본
-        return cands[-1]
-    return env or "claude"
+    return llm_gateway.resolve_claude_bin()
 
 
 CLAUDE_BIN   = _resolve_claude_bin()
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
+CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "900"))
 
 # 요약 폴백: Claude 실패(한도/장애/오류) 시 Grok CLI로 재시도.
-GROK_BIN      = os.environ.get("GROK_BIN") or shutil.which("grok") or os.path.expanduser("~/.grok/bin/grok")
+GROK_BIN      = llm_gateway.resolve_grok_bin()
 GROK_MODEL    = os.environ.get("GROK_MODEL", "grok-4.5")   # 요약엔 코딩용 composer보다 범용 grok-4.5
 GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"   # 폴백 활성(기본 ON)
 GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
 
 # 전사(whisper)는 무거우므로 동시 실행을 제한해 스래싱 방지.
 _transcribe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_TRANSCRIBE", "1")))
+_summarize_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_SUMMARIZE", "1")))
 # 키프레임(다운로드+ffmpeg+비전)도 무거우므로 동시 실행 제한(자원 경쟁 방지).
 _keyframe_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_KEYFRAMES", "1")))
 
@@ -267,35 +257,10 @@ def get_file_duration(file_path: str) -> float:
 # ── Markdown I/O ──────────────────────────────────────────────────────
 
 def _save_md(md_path: str, meta: dict, transcript: str) -> None:
-    lines = ["---"]
-    written = set()
-    for key in _MD_META_ORDER:
-        val = meta.get(key)
-        if val is None or val == "" or val == []:
-            continue
-        written.add(key)
-        if isinstance(val, list):
-            lines.append(f"{key}:")
-            for item in val:
-                lines.append(f"  - {item}")
-        else:
-            lines.append(f"{key}: {val}")
-    # 정의된 순서에 없는 추가 키
-    for key, val in meta.items():
-        if key in written or val is None or val == "" or val == []:
-            continue
-        if isinstance(val, list):
-            lines.append(f"{key}:")
-            for item in val:
-                lines.append(f"  - {item}")
-        else:
-            lines.append(f"{key}: {val}")
-    lines += ["---", ""]
-    if meta.get("title"):
-        lines += [f"# {meta['title']}", ""]
-    lines.append(transcript)
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    document_io.atomic_write_text(
+        md_path,
+        document_io.render_markdown(meta, transcript, key_order=_MD_META_ORDER),
+    )
     try:
         db.upsert(md_path)
     except Exception:
@@ -303,40 +268,11 @@ def _save_md(md_path: str, meta: dict, transcript: str) -> None:
 
 
 def _parse_yaml_front_matter(text: str) -> dict:
-    result: dict = {}
-    current_list_key = None
-    for line in text.splitlines():
-        if line.startswith("  - "):
-            if current_list_key is not None:
-                result[current_list_key].append(line[4:].strip())
-        elif ": " in line:
-            k, v = line.split(": ", 1)
-            result[k.strip()] = v.strip()
-            current_list_key = None
-        elif line.endswith(":") and not line.startswith(" "):
-            k = line[:-1].strip()
-            result[k] = []
-            current_list_key = k
-        else:
-            current_list_key = None
-    return result
+    return document_io.parse_frontmatter(text)
 
 
 def _parse_md(md_path: str) -> tuple[dict, str]:
-    with open(md_path, encoding="utf-8", errors="replace") as f:
-        content = f.read()
-    if not content.startswith("---\n"):
-        return {}, content.strip()
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return {}, content.strip()
-    meta = _parse_yaml_front_matter(content[4:end])
-    body = content[end + 5:].strip()
-    # H1 제목 줄 건너뜀
-    if body.startswith("# "):
-        nl = body.find("\n")
-        body = body[nl + 1:].strip() if nl != -1 else ""
-    return meta, body
+    return document_io.read_markdown(md_path)
 
 
 # ── Transcription core ────────────────────────────────────────────────
@@ -423,6 +359,8 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
             line = raw.decode("utf-8", errors="replace").rstrip("\n")
             if line.startswith("whisper_print_timings"):
                 continue
+            if line.strip():
+                jobs[job_id]["last_log"] = line.strip()
             q.put(line)
             _emit_progress(q, line, total)
         try:
@@ -433,6 +371,19 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
         return proc.returncode
     finally:
         _transcribe_sem.release()
+
+
+def _set_job_error(job_id: str, stage: str, message: object) -> str:
+    """Persist a concise, UI-safe failure reason for the result endpoint."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", str(message or "알 수 없는 오류"))
+    text = re.sub(r"\s+", " ", text).strip()[:800]
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job:
+            job["status"] = "error"
+            job["error_stage"] = stage
+            job["error_message"] = text
+    return text
 
 
 def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
@@ -462,7 +413,12 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
             q.put({"type": "progress", "pct": 100})
             q.put(None)
             return
-    jobs[job_id]["status"] = "error"
+    if rc == 0:
+        detail = "Whisper 결과 파일을 읽을 수 없습니다."
+    else:
+        tail = jobs[job_id].get("last_log") or "상세 로그 없음"
+        detail = f"Whisper 전사 실패 (종료 코드 {rc}): {tail}"
+    _set_job_error(job_id, "transcribe", detail)
     log.warning("transcription failed (rc=%s): %s", rc, os.path.basename(md_path))
     q.put(None)
 
@@ -498,10 +454,7 @@ def _job_guard(fn, job_id: str, *a) -> None:
     except Exception as e:
         log.exception("job %s crashed", job_id)
         try:
-            with jobs_lock:
-                j = jobs.get(job_id)
-                if j and j.get("status") == "running":
-                    j["status"] = "error"
+            _set_job_error(job_id, "worker", f"처리기 내부 오류: {e}")
             j = jobs.get(job_id)
             if j:
                 j["queue"].put(f"오류: {e}")
@@ -526,8 +479,8 @@ def run_job(job_id: str, params: dict) -> None:
         total    = float(info.get("duration") or 0)
     except Exception as e:
         log.warning("video info fetch failed: %s — %s", url, e)
-        q.put(f"오류: {e}")
-        jobs[job_id]["status"] = "error"
+        detail = _set_job_error(job_id, "metadata", f"영상 정보 조회 실패: {e}")
+        q.put(f"오류: {detail}")
         q.put(None)
         return
 
@@ -570,15 +523,20 @@ def run_job(job_id: str, params: dict) -> None:
         }) as ydl:
             ydl.download([url])
     except Exception as e:
-        jobs[job_id]["status"] = "cancelled" if stop.is_set() else "error"
-        if not stop.is_set():
+        if stop.is_set():
+            jobs[job_id]["status"] = "cancelled"
+        else:
             log.warning("download failed: %s — %s", title, e)
-            q.put(f"다운로드 오류: {e}")
+            detail = _set_job_error(job_id, "download", f"영상 다운로드 실패: {e}")
+            q.put(f"다운로드 오류: {detail}")
         q.put(None)
         return
 
     if stop.is_set() or not os.path.exists(audio_path):
-        jobs[job_id]["status"] = "cancelled" if stop.is_set() else "error"
+        if stop.is_set():
+            jobs[job_id]["status"] = "cancelled"
+        else:
+            _set_job_error(job_id, "download", "다운로드 결과 오디오 파일을 찾을 수 없습니다.")
         q.put(None)
         return
 
@@ -780,6 +738,9 @@ def start():
             "proc":           None,
             "stop_event":     threading.Event(),
             "meta":           {},
+            "error_stage":    "",
+            "error_message":  "",
+            "last_log":       "",
         }
 
     target = run_file_job if source == "file" else run_job
@@ -836,6 +797,8 @@ def result(job_id: str):
         "result":   job["result"],
         "filename": os.path.basename(job["output_file"]) if job["output_file"] else None,
         "txt_path": job["output_file"],  # 요약은 이 경로 기반(잡 생명주기와 분리)
+        "error_stage": job.get("error_stage") or "",
+        "error_message": job.get("error_message") or "",
     })
 
 
@@ -889,7 +852,9 @@ def _reindex_summary(save_path: str) -> None:
 def _clean_summary(text: str) -> str:
     if not text:
         return text
-    m = re.search(r"^#\s+\S", text, re.M)
+    # 일부 CLI 응답은 메타 문구 끝에 줄바꿈 없이 H1을 바로 붙인다.
+    # 단일 '#'만 허용해 '### 소제목'을 제목으로 오인하지 않는다.
+    m = re.search(r"(?<!#)#[ \t]+\S", text)
     if m and m.start() > 0:
         return text[m.start():].lstrip()
     return text
@@ -945,9 +910,7 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
         cmd = [GROK_BIN, "--prompt-file", tf.name]
         if GROK_MODEL:
             cmd += ["-m", GROK_MODEL]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=GROK_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return "", f"grok 타임아웃({GROK_TIMEOUT}s)"
+        r = llm_gateway.run_command(cmd, timeout=GROK_TIMEOUT)
     except Exception as e:
         return "", f"grok 실행 오류: {e}"
     finally:
@@ -955,6 +918,8 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
             os.remove(tf.name)
         except OSError:
             pass
+    if r.timed_out:
+        return "", f"grok 타임아웃({GROK_TIMEOUT}s)"
     if r.returncode != 0:
         return "", (r.stderr or f"grok rc={r.returncode}").strip()[:200]
     out = _clean_summary(r.stdout or "")
@@ -978,6 +943,8 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         log.warning("summarize → Grok CLI%s", " (skip_claude)" if skip_claude else " 폴백 시도")
         gtext, gerr = _summarize_with_grok(prompt)
         if gtext:
+            # Claude 부분 출력이 이미 전송됐을 수 있으므로 클라이언트가 본문을 비우게 한다.
+            yield "event: reset\ndata: \"\"\n\n"
             log.info("summarize grok 성공 (%d자)", len(gtext))
             grok_label = _model_label(GROK_MODEL or "grok-4.5")
             full = (_model_line(grok_label)
@@ -985,8 +952,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
             yield f"data: {json.dumps(full)}\n\n"
             if save_path:
                 try:
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        f.write(full)
+                    document_io.atomic_write_text(save_path, full)
                 except Exception as e:
                     yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
                     return
@@ -1001,93 +967,82 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         yield from _yield_grok("Claude 스킵(게이트 판정)")
         return
 
-    proc = None
-    proc = subprocess.Popen(
-        [_resolve_claude_bin(), "-p",   # 호출 시마다 재해석(Claude 자동업데이트로 경로 변동 대비)
-         "--output-format", "stream-json",
-         "--include-partial-messages",
-         "--model", CLAUDE_MODEL,
-         "--allowedTools", "",                       # 도구 비활성(파일 쓰기 시도 차단)
-         "--append-system-prompt", _SUMMARY_SYS,     # 출력 전용 강제
-         "--verbose"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", bufsize=1,
-    )
+    command = [
+        _resolve_claude_bin(), "-p",
+        "--output-format", "stream-json",
+        "--include-partial-messages",
+        "--model", CLAUDE_MODEL,
+        "--allowedTools", "",
+        "--append-system-prompt", _SUMMARY_SYS,
+        "--verbose",
+    ]
+    chunks: list[str] = []
+    final: str | None = None
+    error_msg: str | None = None
+    used_model: str | None = None
     try:
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps('프롬프트 전달 실패: ' + str(e))}\n\n"
-            return
-        chunks: list[str] = []
-        final: str | None = None
-        error_msg: str | None = None
-        used_model: str | None = None
-        try:
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                t = ev.get("type")
-                if t == "system" and ev.get("model") and not used_model:
-                    used_model = ev.get("model")   # init 이벤트: 실제 사용 모델 ID(claude-opus-4-8 등)
-                    yield f"data: {json.dumps(_model_line(_model_label(used_model)))}\n\n"  # 최상단에 모델 표기(본문보다 먼저)
-                if t == "stream_event":
-                    sub = ev.get("event") or {}
-                    if sub.get("type") == "content_block_delta":
-                        delta = sub.get("delta") or {}
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text") or ""
-                            if text:
-                                chunks.append(text)
-                                yield f"data: {json.dumps(text)}\n\n"
-                elif t == "result":
-                    if ev.get("is_error"):
-                        error_msg = ev.get("result") or "Claude CLI 오류"
-                    else:
-                        final = ev.get("result") or "".join(chunks)
-            proc.wait(timeout=10)
-        except Exception as e:
-            error_msg = str(e)
-
-        if error_msg:
-            log.warning("summarize failed (claude): %s", error_msg)   # 인증 401 등 원인 로그로 즉시 확인
-            yield from _yield_grok(error_msg)
-            return
-
-        body = _clean_summary(final if final is not None else "".join(chunks))
-        if body:
-            cline = _compress_line(body, transcript_chars)   # 압축률 마커
-            if cline:
-                yield f"data: {json.dumps(cline)}\n\n"        # 라이브 뷰에도 반영(본문 뒤)
-            # 최상단에 모델·압축률 표기(모델은 init에서 이미 스트림됨 → 저장분에 prepend)
-            full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + cline + body
-            if save_path:
-                try:
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        f.write(full)
-                except Exception as e:
-                    yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
-                    return
-                _reindex_summary(save_path)
-        yield "event: done\ndata: \n\n"
-    finally:
-        # 정상 종료/에러/클라이언트 조기 종료(GeneratorExit) 어느 경우든 claude 프로세스가
-        # 고아로 남아 계속 돌지 않도록 정리. 정상 완료 시엔 이미 죽어 no-op.
-        if proc is not None and proc.poll() is None:
+        for process_event in llm_gateway.stream_command(
+            command, input_text=prompt, timeout=CLAUDE_TIMEOUT
+        ):
+            if process_event.kind == "timeout":
+                detail = process_event.stderr.strip()[:200]
+                error_msg = f"Claude 타임아웃({CLAUDE_TIMEOUT}s)" + (f": {detail}" if detail else "")
+                continue
+            if process_event.kind == "complete":
+                if process_event.returncode != 0 and not error_msg:
+                    error_msg = process_event.stderr.strip()[:200] or f"Claude rc={process_event.returncode}"
+                continue
+            if process_event.kind != "stdout":
+                continue
+            line = process_event.data.strip()
+            if not line:
+                continue
             try:
-                proc.terminate(); proc.wait(timeout=3)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = ev.get("type")
+            if event_type == "system" and ev.get("model") and not used_model:
+                used_model = ev.get("model")
+                yield f"data: {json.dumps(_model_line(_model_label(used_model)))}\n\n"
+            if event_type == "stream_event":
+                sub = ev.get("event") or {}
+                if sub.get("type") == "content_block_delta":
+                    delta = sub.get("delta") or {}
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text") or ""
+                        if text:
+                            chunks.append(text)
+                            yield f"data: {json.dumps(text)}\n\n"
+            elif event_type == "result":
+                if ev.get("is_error"):
+                    error_msg = ev.get("result") or "Claude CLI 오류"
+                else:
+                    final = ev.get("result") or "".join(chunks)
+    except Exception as e:
+        error_msg = str(e)
+
+    if error_msg:
+        log.warning("summarize failed (claude): %s", error_msg)
+        yield from _yield_grok(error_msg)
+        return
+
+    body = _clean_summary(final if final is not None else "".join(chunks))
+    if not body:
+        yield from _yield_grok("Claude 빈 응답")
+        return
+    cline = _compress_line(body, transcript_chars)
+    if cline:
+        yield f"data: {json.dumps(cline)}\n\n"
+    full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + cline + body
+    if save_path:
+        try:
+            document_io.atomic_write_text(save_path, full)
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
+            return
+        _reindex_summary(save_path)
+    yield "event: done\ndata: \n\n"
 
 
 @app.route("/summarize", methods=["POST"])
@@ -1100,11 +1055,24 @@ def summarize():
     if not os.path.isfile(abs_path):
         return _json({"error": "전사 파일을 찾을 수 없습니다."}, 404)
 
-    # 전사 md(메타+본문) 전체를 프롬프트에 주입 — 메타 표 작성을 위해 필요.
+    # 메타+본문 전체를 주입하되, 반복 오프닝이 확인된 Sequoia 영상은
+    # 저장 원문을 보존한 채 본 인터뷰 시작 전 내용만 요약 입력에서 제외한다.
     with open(abs_path, encoding="utf-8", errors="replace") as f:
         transcript_blob = f.read()
     if not transcript_blob.strip():
         return _json({"error": "전사 결과가 없습니다."}, 400)
+    transcript_meta, transcript_body = document_io.parse_markdown_text(transcript_blob)
+    transcript_body, opening_cutoff = keyframe_report.trim_sequoia_opening(
+        transcript_meta, transcript_body
+    )
+    if opening_cutoff is not None:
+        transcript_blob = document_io.render_markdown(
+            transcript_meta, transcript_body, key_order=_MD_META_ORDER
+        )
+        log.info(
+            "Sequoia opening omitted from summary input: %s (before %s)",
+            os.path.basename(abs_path), keyframe_report._hms(opening_cutoff),
+        )
 
     prompt = (data.get("prompt") or DEFAULT_PROMPT).replace("{transcript}", transcript_blob)
     save_path = _summary_path_for_md(abs_path)
@@ -1118,9 +1086,14 @@ def summarize():
         " (skip_claude→grok)" if skip_claude else "",
     )
 
-    gen = _summarize_with_claude(prompt, save_path, skip_claude=skip_claude,
-                                 transcript_chars=len(transcript_blob))
-    return Response(gen, mimetype="text/event-stream",
+    def guarded_summary():
+        with _summarize_sem:
+            yield from _summarize_with_claude(
+                prompt, save_path, skip_claude=skip_claude,
+                transcript_chars=len(transcript_blob),
+            )
+
+    return Response(guarded_summary(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
@@ -1139,8 +1112,7 @@ def save_prompt():
     # {transcript} 자리표시자 필수 — 없으면 요약 시 전사 본문이 주입되지 않음.
     if "{transcript}" not in prompt:
         return _json({"error": "{transcript} 자리표시자가 필요합니다."}, 400)
-    with open(PROMPT_FILE, "w", encoding="utf-8") as f:
-        f.write(prompt)
+    document_io.atomic_write_text(PROMPT_FILE, prompt)
     return _json({"ok": True})
 
 

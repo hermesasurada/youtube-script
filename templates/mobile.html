@@ -6,8 +6,18 @@
   <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <title>이력조회</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@400;600;700&family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Song+Myung&display=swap">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <style>
+    @font-face {
+      font-family: "Chosunilbo_myungjo";
+      src: url("/static/fonts/ChosunilboNM.woff") format("woff");
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
     :root {
       --bg:        #f7f7f8;
       --surface:   #ffffff;
@@ -232,7 +242,7 @@
       background: var(--surface);
     }
     .modal-hdr h2 {
-      margin: 0; font-size: 15px; font-weight: 600; flex: 1;
+      margin: 0; font-size: 15px; font-weight: 600; flex: 1; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     /* 읽기 진행바(헤더 아래, 스크롤에 따라 채워짐) */
@@ -258,6 +268,58 @@
       line-height: 1; cursor: pointer; padding: 0;
     }
     .fs-btn:active { background: var(--surface2); }
+    .font-ctrl {
+      display: inline-flex; align-items: center; flex-shrink: 0;
+      height: 30px; padding: 0 .25rem 0 .4rem;
+      border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+    }
+    .font-ctrl[hidden] { display: none; }
+    .font-ctrl select {
+      width: 78px; height: 100%; border: 0; outline: 0;
+      appearance: none; -webkit-appearance: none;
+      background-color: transparent; color: var(--text);
+      font: inherit; font-size: 11.5px; font-weight: 500;
+      padding: 0 .9rem 0 0; cursor: pointer;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888' d='M1 1l4 4 4-4'/></svg>");
+      background-repeat: no-repeat; background-position: right center;
+    }
+    /* 데스크톱 요약 팝업과 같은 글꼴 키를 사용한다. */
+    .modal[data-reader-font="sans"] .modal-body.markdown {
+      font-family: "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+    }
+    .modal[data-reader-font="serif"] .modal-body.markdown {
+      font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
+    }
+    .modal[data-reader-font="chosun"] .modal-body.markdown {
+      font-family: "Chosunilbo_myungjo", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+      letter-spacing: -.01em; word-break: keep-all;
+    }
+    .modal[data-reader-font="chosun"] .modal-body.markdown p,
+    .modal[data-reader-font="chosun"] .modal-body.markdown li { line-height: 1.85; }
+    .modal[data-reader-font="gowun"] .modal-body.markdown {
+      font-family: "Gowun Batang", "Nanum Myeongjo", "Song Myung", "Noto Serif KR", serif;
+      letter-spacing: -.01em; word-break: keep-all;
+    }
+    .modal[data-reader-font="gowun"] .modal-body.markdown p,
+    .modal[data-reader-font="gowun"] .modal-body.markdown li { line-height: 1.82; }
+    .modal[data-reader-font="nanum"] .modal-body.markdown {
+      font-family: "Nanum Myeongjo", "Gowun Batang", "Noto Serif KR", serif;
+      letter-spacing: -.01em; word-break: keep-all;
+    }
+    .modal[data-reader-font="nanum"] .modal-body.markdown p,
+    .modal[data-reader-font="nanum"] .modal-body.markdown li { line-height: 1.8; }
+    .modal[data-reader-font="song"] .modal-body.markdown {
+      font-family: "Song Myung", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+      letter-spacing: -.01em; word-break: keep-all;
+    }
+    .modal[data-reader-font="song"] .modal-body.markdown p,
+    .modal[data-reader-font="song"] .modal-body.markdown li { line-height: 1.8; }
+    .modal[data-reader-font="system"] .modal-body.markdown {
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+    }
+    .modal[data-reader-font="mono"] .modal-body.markdown {
+      font-family: var(--font-mono); letter-spacing: -.01em;
+    }
     /* ── 채널 자동 모니터(모달 내) ── */
     .modal-body.channels { padding: 1rem; display: flex; flex-direction: column; gap: .6rem; }
     .ch-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
@@ -355,6 +417,18 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
       </button>
       <h2 id="modal-title">제목</h2>
+      <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
+        <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
+          <option value="sans">Noto Sans KR</option>
+          <option value="chosun">조선일보명조</option>
+          <option value="serif">Noto Serif KR</option>
+          <option value="gowun">고운바탕</option>
+          <option value="nanum">나눔명조</option>
+          <option value="song">송명</option>
+          <option value="system">시스템</option>
+          <option value="mono">고정폭</option>
+        </select>
+      </label>
       <div class="fs-ctrl" id="fs-ctrl" hidden>
         <button class="fs-btn" onclick="adjustFs(-1)" aria-label="글자 작게">−</button>
         <button class="fs-btn" onclick="adjustFs(1)" aria-label="글자 크게">+</button>
@@ -608,6 +682,7 @@ function closeModal() {
 /* ── 채널 자동 모니터(원격 관리) ── */
 async function openChannels() {
   $('fs-ctrl').hidden = true;             // 글자크기 컨트롤은 요약 전용
+  $('font-ctrl').hidden = true;           // 글꼴 컨트롤도 요약 전용
   openModal('채널 자동 모니터');
   $('modal-body').className = 'modal-body channels';
   await loadChannels();
@@ -683,10 +758,31 @@ function adjustFs(delta) {
   _applyReaderFs();
 }
 
+// 데스크톱과 같은 본문 글꼴 설정을 공유하고 로컬에 기억한다.
+const _READER_FONTS = {
+  sans: 'Noto Sans KR', chosun: '조선일보명조', serif: 'Noto Serif KR',
+  gowun: '고운바탕', nanum: '나눔명조', song: '송명', system: '시스템', mono: '고정폭',
+};
+let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
+if (_readerFont === 'news') _readerFont = 'gowun';
+if (!_READER_FONTS[_readerFont]) _readerFont = 'sans';
+function _applyReaderFont() {
+  $('modal').dataset.readerFont = _readerFont;
+  if ($('font-select').value !== _readerFont) $('font-select').value = _readerFont;
+}
+function setReaderFont(key) {
+  if (!_READER_FONTS[key]) return;
+  _readerFont = key;
+  localStorage.setItem('sumReaderFont', key);
+  _applyReaderFont();
+}
+
 async function openSummary(path, title) {
   openModal(title);
   $('fs-ctrl').hidden = false;   // 요약에서만 글자크기 조절 노출
+  $('font-ctrl').hidden = false;
   _applyReaderFs();
+  _applyReaderFont();
   try {
     const d = await YS.apiSummaryContent(path);
     if (d.error) {
@@ -703,6 +799,7 @@ async function openSummary(path, title) {
 async function openTranscript(path, title) {
   openModal(title);
   $('fs-ctrl').hidden = true;   // 전사 보기엔 글자크기 조절 숨김(요약 전용)
+  $('font-ctrl').hidden = true;
   try {
     const r = await fetch('/history/text', {
       method: 'POST', headers: {'Content-Type':'application/json'},

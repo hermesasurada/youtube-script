@@ -19,27 +19,16 @@ import subprocess
 import tempfile
 import time
 
+import document_io
+import llm_gateway
+
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 FFMPEG      = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE     = shutil.which("ffprobe") or "ffprobe"
 FFMPEG_DIR  = os.path.dirname(FFMPEG)
 
 def _claude_bin() -> str:
-    """claude CLI 경로(호출 시마다 재해석) — Claude 자동업데이트로 버전 폴더가 바뀌어도
-    삭제된 옛 경로를 쓰지 않도록 '존재하는 최신 설치본'을 고른다."""
-    env = os.environ.get("CLAUDE_BIN")
-    if env and os.path.exists(env):
-        return env
-    found = shutil.which("claude")
-    if found:
-        return found
-    cands = [c for c in glob.glob(os.path.expanduser(
-        "~/Library/Application Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude"))
-        if os.path.exists(c)]
-    if cands:
-        cands.sort(key=os.path.getmtime)   # 가장 최근 설치본(존재하는 것만)
-        return cands[-1]
-    return env or "claude"
+    return llm_gateway.resolve_claude_bin()
 SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3"))))  # ffmpeg 필터 삽입값 — [0,1] clamp
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
@@ -51,6 +40,17 @@ FRAME_WIDTH     = int(os.environ.get("FRAME_WIDTH", "1708"))  # 프레임 가로
 PROBE_TIMEOUT   = int(os.environ.get("PROBE_TIMEOUT", "30"))
 FFMPEG_TIMEOUT  = int(os.environ.get("FFMPEG_TIMEOUT", "600"))
 VISION_TIMEOUT  = int(os.environ.get("VISION_TIMEOUT", "300"))
+
+_SEQUOIA_CHANNELS = {"sequoia capital"}
+_TRANSCRIPT_TS_RE = re.compile(r"\[(\d{1,2}):\d{2}(?::\d{2})?\]")
+_SEQUOIA_INTERVIEW_INTRO_RE = re.compile(
+    r"(?:\bwe(?:'re| are) here\b"
+    r"|\bwelcome\b.{0,80}\b(?:to the show|to training data)\b"
+    r"|\btoday we(?:'re| are) delighted to have\b"
+    r"|\b(?:delighted|thrilled) to have you here\b"
+    r"|\bi(?:'m| am) delighted to have\b)",
+    re.I | re.S,
+)
 
 
 def log(*a): print(*a, flush=True)
@@ -82,6 +82,83 @@ def _parse_ts_label(text: str) -> float | None:
         return None
     a, b, c = m.group(1), m.group(2), m.group(3)
     return (int(a) * 3600 + int(b) * 60 + int(c)) if c else (int(a) * 60 + int(b))
+
+
+def _paired_transcript_path(summary_path: str) -> str | None:
+    marker = os.sep + "summary" + os.sep
+    if marker not in summary_path:
+        return None
+    candidate = summary_path.replace(marker, os.sep, 1)
+    return candidate if os.path.isfile(candidate) else None
+
+
+def _timestamped_segments(body: str, *, max_seconds: int = 150) -> list[tuple[float, str]]:
+    matches = list(_TRANSCRIPT_TS_RE.finditer(body))
+    segments: list[tuple[float, str]] = []
+    for idx, match in enumerate(matches):
+        ts = _parse_ts_label(match.group(0))
+        if ts is None or ts > max_seconds:
+            continue
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
+        if segments and segments[-1][0] == ts:
+            segments[-1] = (ts, segments[-1][1] + " " + body[match.end():end])
+        else:
+            segments.append((ts, body[match.end():end]))
+    return segments
+
+
+def _sequoia_main_intro_time(meta: dict, body: str) -> float | None:
+    """Locate the main-interview intro after Sequoia's cold open/title sequence."""
+    channel = str(meta.get("uploader") or meta.get("channel") or "").strip().casefold()
+    if channel not in _SEQUOIA_CHANNELS:
+        return None
+    segments = _timestamped_segments(body)
+    for idx, (intro_ts, text) in enumerate(segments):
+        if idx == 0 or not _SEQUOIA_INTERVIEW_INTRO_RE.search(text):
+            continue
+        return intro_ts
+    return None
+
+
+def _sequoia_opening_window(meta: dict, body: str) -> tuple[float, float] | None:
+    """Return the full disposable opening window, including cold open and title animation."""
+    intro_ts = _sequoia_main_intro_time(meta, body)
+    if intro_ts is None:
+        return None
+    # The extra visual tail avoids retaining the final title-animation frames while
+    # preserving the transcript from the exact main-interview introduction.
+    return 0.0, intro_ts + 5.0
+
+
+def trim_sequoia_opening(meta: dict, body: str) -> tuple[str, float | None]:
+    """Remove Sequoia's disposable opening from LLM input; leave stored transcript intact."""
+    intro_ts = _sequoia_main_intro_time(meta, body)
+    if intro_ts is None:
+        return body, None
+    for match in _TRANSCRIPT_TS_RE.finditer(body):
+        if _parse_ts_label(match.group(0)) == intro_ts:
+            return body[match.start():].lstrip(), intro_ts
+    return body, None
+
+
+def _opening_exclusion_for_summary(summary_path: str) -> tuple[float, float] | None:
+    transcript_path = _paired_transcript_path(summary_path)
+    if not transcript_path:
+        return None
+    try:
+        meta, body = document_io.read_markdown(transcript_path)
+    except OSError:
+        return None
+    return _sequoia_opening_window(meta, body)
+
+
+def _exclude_opening_candidates(
+    frames: list[tuple[float, str]], window: tuple[float, float] | None
+) -> list[tuple[float, str]]:
+    if not window:
+        return frames
+    start, end = window
+    return [(ts, path) for ts, path in frames if not start <= ts <= end]
 
 
 # ── 프레임 확보 ───────────────────────────────────────────────────────
@@ -205,6 +282,7 @@ def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict],
 각 캡처에 대해 판단:
 - keep=true 조건: 슬라이드·차트/그래프·다이어그램·스크린샷·데이터 시각화·제품/기기/시연/수술·장비 등 '자료로서 정보를 전달'하는 화면
 - keep=false 조건: 발표자/진행자/인터뷰이 얼굴·토킹헤드, 청중, 블랙/전환 화면, 흐릿하거나 정보없는 장면
+- 채널·프로그램의 반복 브랜드 오프닝/타이틀 애니메이션은 차트나 다이어그램처럼 보여도 반드시 keep=false
 - **중복 제거**: 여러 장이 동일하거나 거의 같은 화면(같은 슬라이드·같은 장면·같은 인물 구도)이면, 그 중 가장 선명하고 정보가 잘 보이는 1장만 keep=true로 하고 나머지는 keep=false. 단 차트의 데이터·텍스트·피사체 등 '내용'이 다르면 서로 다른 것으로 보고 각각 유지할 것.
 - keep=true면 위 소제목 중 내용상 가장 관련있는 번호(section)와 8단어 이내 한국어 caption 부여
 
@@ -216,10 +294,11 @@ JSON 배열로만 답하라(다른 설명 금지):
 
     def _call() -> tuple[list | None, str]:
         """(파싱된 배열|None, 실패사유). 실패사유는 usage limit/장애 분류에 쓰인다."""
-        try:
-            r = subprocess.run([_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
-                               capture_output=True, text=True, timeout=VISION_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        r = llm_gateway.run_command(
+            [_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
+            timeout=VISION_TIMEOUT,
+        )
+        if r.timed_out:
             return None, f"타임아웃({VISION_TIMEOUT}s)"
         out = (r.stdout or "").strip()
         err = (r.stderr or "").strip()
@@ -261,6 +340,49 @@ JSON 배열로만 답하라(다른 설명 금지):
 
 _KF_STRIP_RE = re.compile(r"\n*<div class=\"kf-strip\">.*?</div>[ \t]*\n*", re.S)
 _KF_APX_RE   = re.compile(r"\n*##\s*기타 자료 캡처[ \t]*\n*")
+_KF_FIGURE_RE = re.compile(
+    r'<figure>.*?src="[^"]*/(?P<file>kf_(?P<ts>\d{5})\.jpg)".*?</figure>', re.S
+)
+_KF_EMPTY_STRIP_RE = re.compile(r"\n*<div class=\"kf-strip\">\s*</div>[ \t]*\n*", re.S)
+
+
+def _remove_opening_figures(
+    text: str, window: tuple[float, float]
+) -> tuple[str, list[str]]:
+    removed: list[str] = []
+    start, end = window
+
+    def replace(match: re.Match) -> str:
+        if start <= int(match.group("ts")) <= end:
+            removed.append(match.group("file"))
+            return ""
+        return match.group(0)
+
+    cleaned = _KF_FIGURE_RE.sub(replace, text)
+    cleaned = _KF_EMPTY_STRIP_RE.sub("\n\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip() + "\n"
+    return cleaned, removed
+
+
+def prune_summary_opening_frames(summary_md_path: str) -> dict:
+    """Remove previously generated Sequoia opening frames from one summary."""
+    window = _opening_exclusion_for_summary(summary_md_path)
+    if not window:
+        return {"removed": 0, "window": None}
+    with open(summary_md_path, encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    cleaned, removed = _remove_opening_figures(text, window)
+    if not removed:
+        return {"removed": 0, "window": window}
+
+    document_io.atomic_write_text(summary_md_path, cleaned)
+    frame_dir = os.path.splitext(summary_md_path)[0] + ".frames"
+    for filename in set(removed):
+        try:
+            os.remove(os.path.join(frame_dir, filename))
+        except FileNotFoundError:
+            pass
+    return {"removed": len(set(removed)), "window": window}
 
 
 def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], url_base: str):
@@ -323,7 +445,7 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
         out.append("")
         out.append(strip_html(bysec[None]))
         out.append("")
-    open(md_path, "w", encoding="utf-8").write("\n".join(out))
+    document_io.atomic_write_text(md_path, "\n".join(out))
 
 
 def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_base: str,
@@ -345,6 +467,15 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
         # 무거운 작업(추출·비전)은 임시 폴더에서만 수행 — 완성 전엔 기존 결과를 건드리지 않는다.
         # (중단/재기동되어도 기존 캡처·요약이 보존됨)
         cands = extract_candidates(video, os.path.join(tmp, "f"))
+        opening_window = _opening_exclusion_for_summary(summary_md_path)
+        if opening_window:
+            before = len(cands)
+            cands = _exclude_opening_candidates(cands, opening_window)
+            log(
+                "    Sequoia 오프닝 제외: "
+                f"{_hms(opening_window[0])}~{_hms(opening_window[1])}, "
+                f"후보 {before - len(cands)}장 제거"
+            )
         if not cands:
             return {"ok": False, "reason": "no_frames"}    # ffmpeg 추출 실패/0장
         verdict = classify_and_assign(cands, meta["headings"], skip_claude=skip_claude)  # 중복은 비전이 keep=false로

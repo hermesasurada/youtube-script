@@ -10,7 +10,7 @@ YouTube 영상을 **전사(whisper.cpp) → 요약(Claude CLI) → 키프레임 
 | `app.py` | Flask 라우트·SSE 스트림·작업(jobs) 관리·전사/요약 오케스트레이션 |
 | `db.py` | SQLite + FTS5 이력 인덱스(upsert/검색/reindex). `PRAGMA user_version` 마이그레이션 |
 | `keyframe_report.py` | 영상 다운로드(yt-dlp) → ffmpeg 프레임 추출 → Claude 비전 분류 → 요약 md에 캡처 스트립 주입 |
-| `templates/` | `index.html`(데스크톱) · `mobile.html` · `summary.html` |
+| `templates/` | `index.html`(데스크톱) · `mobile.html`(모바일 이력) |
 | `static/js/common.js` | 공유 모듈(`window.YS`): 마크다운 렌더·이스케이프·이력 API·키프레임 라이트박스 |
 | `static/js/index.js` | 데스크톱 UI 로직(큐·SSE·모달·이력) |
 | `static/css/index.css` | 데스크톱 스타일 |
@@ -46,13 +46,17 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 |------|------|------|
 | `KEEP_AUDIO` | (off) | `1`이면 전사 후 다운로드 오디오 보존 |
 | `MAX_CONCURRENT_TRANSCRIBE` | 1 | 동시 전사 수 |
+| `MAX_CONCURRENT_SUMMARIZE` | 1 | 동시 요약 수 |
 | `MAX_CONCURRENT_KEYFRAMES` | 1 | 동시 키프레임 처리 수(세마포어 직렬화) |
 | `CLAUDE_BIN` | (자동탐색) | claude CLI 경로(미설정 시 호출 때마다 최신 설치본 탐색) |
+| `CLAUDE_TIMEOUT` | 900 | 요약 Claude CLI wall-clock 제한(초) |
 | `VISION_MODEL` | opus | 키프레임 분류·캡션 모델 (Claude) |
 | `VIDEO_MAXH` / `FRAME_WIDTH` | 1080 / 1708 | 다운로드 최대 높이 / 프레임 가로폭 |
 | `SCENE_THRESHOLD` | 0.3 | ffmpeg 장면전환 임계값([0,1] clamp) |
 | `MAX_CANDIDATES` / `MIN_GAP` | 40 / 6 | 후보 프레임 상한 / 근접 중복 제거 간격(초) |
 | `PROBE_TIMEOUT` / `FFMPEG_TIMEOUT` / `VISION_TIMEOUT` | 30 / 600 / 300 | subprocess 타임아웃(초) |
+| `MONITOR_STALE_PROCESSING_SEC` | 10800 | 중단된 자동 처리 claim 회수 기준(초) |
+| `MONITOR_MAX_PIPELINE_ATTEMPTS` | 3 | 자동 처리 최대 시도 횟수 |
 
 ## 키프레임 추출 개요
 

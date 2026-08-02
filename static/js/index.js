@@ -734,6 +734,10 @@ function copySummary() {
 
 /* ── Start transcription ── */
 async function startTranscription() {
+  if (_queueLaunchTimer) {
+    clearTimeout(_queueLaunchTimer);
+    _queueLaunchTimer = null;
+  }
   clearError();
 
   if (currentSource === 'url' && !document.getElementById('url-input').value.trim()) {
@@ -750,8 +754,11 @@ async function startTranscription() {
     const _existing = urlQueue.find(i => i.url === _url && i.status === 'waiting');
     if (_existing) {
       _existing.status = 'running';
+      _existing.error = '';
+      _existing.errorStage = '';
+      _existing.retryFrom = '';
     } else if (!_runningItem()) {
-      urlQueue.push({url: _url, meta: null, status: 'running'});
+      urlQueue.push({url: _url, meta: null, status: 'running', error: '', errorStage: '', txtPath: ''});
     }
     renderQueue();
   }
@@ -783,19 +790,43 @@ async function startTranscription() {
       body: JSON.stringify(payload),
     });
   } catch (e) {
-    showError('서버 연결 실패: ' + e.message);
+    const reason = '서버 연결 실패: ' + e.message;
+    showError(reason);
     setRunning(false);
-    _failCurrentAndNext();
+    _failCurrentAndNext(reason, 'connection');
     return;
   }
 
-  const data = await resp.json();
-  if (data.error) { showError(data.error); setRunning(false); _failCurrentAndNext(); return; }
+  let data;
+  try {
+    data = await resp.json();
+  } catch (e) {
+    const reason = `작업 시작 응답 오류 (HTTP ${resp.status})`;
+    showError(reason);
+    setRunning(false);
+    _failCurrentAndNext(reason, 'start');
+    return;
+  }
+  if (data.error) {
+    showError(data.error);
+    setRunning(false);
+    _failCurrentAndNext(data.error, 'start');
+    return;
+  }
   currentJobId = data.job_id;
 
   const es = new EventSource('/stream/' + currentJobId);
+  let jobLastError = '';
+  const jobLogTail = [];
 
-  es.onmessage = (e) => appendLog(e.data);
+  es.onmessage = (e) => {
+    appendLog(e.data);
+    if (e.data.trim()) {
+      jobLogTail.push(e.data.trim());
+      if (jobLogTail.length > 3) jobLogTail.shift();
+    }
+    if (/오류|error|failed|실패/i.test(e.data)) jobLastError = e.data.trim();
+  };
 
   es.addEventListener('duration', (e) => {
     const { seconds } = JSON.parse(e.data);
@@ -849,11 +880,21 @@ async function startTranscription() {
     setRunning(false);
     setProgress(100);
 
-    const r = await fetch('/result/' + currentJobId);
-    const result = await r.json();
+    let result;
+    try {
+      const r = await fetch('/result/' + currentJobId);
+      result = await r.json();
+    } catch (e) {
+      const reason = '작업 결과 조회 실패: ' + e.message;
+      showError(reason);
+      _failCurrentAndNext(reason, 'result');
+      return;
+    }
 
     if (result.status === 'done' && result.result) {
       currentTxtPath = result.txt_path || null;
+      const running = _runningItem();
+      if (running) running.txtPath = currentTxtPath || '';
       document.getElementById('result-area').textContent = result.result;
       document.getElementById('result-fname').textContent = result.filename || '';
       showTab('result');
@@ -862,32 +903,42 @@ async function startTranscription() {
       if (document.getElementById('auto-summarize').checked) {
         switchTab('summary');
         const summarized = await generateSummary();
-        if (summarized) _autoStartNext();        // 요약 성공 시에만 다음 항목
-        else _haltQueueOnSummaryFail();          // 요약 실패 → 대기열 정지(전사는 보존)
+        if (summarized.ok) _autoStartNext();
+        else _failCurrentAndNext(summarized.error, 'summary');
       } else {
         switchTab('result');
         _autoStartNext();
       }
     } else if (result.status === 'cancelled') {
       appendLog('⏹ 전사가 중지되었습니다.');
-      const _ri = _runningItem(); if (_ri) { _ri.status = 'cancelled'; renderQueue(); }
+      const _ri = _runningItem();
+      if (_ri) {
+        _ri.status = 'cancelled';
+        _ri.error = '사용자가 작업을 중지했습니다.';
+        _ri.errorStage = 'cancelled';
+        renderQueue();
+      }
     } else {
-      showError('전사 실패. 위의 로그를 확인해주세요.');
-      _failCurrentAndNext();
+      const logDetail = jobLogTail.length ? `마지막 로그: ${jobLogTail.join(' / ')}` : '';
+      const reason = result.error_message || jobLastError || logDetail ||
+        '전사 처리 중 알 수 없는 오류가 발생했습니다.';
+      showError(reason);
+      _failCurrentAndNext(reason, result.error_stage || 'transcribe');
     }
   });
 
   es.onerror = () => {
     es.close();
     setRunning(false);
-    showError('스트리밍 연결이 끊어졌습니다.');
-    _failCurrentAndNext();
+    const reason = jobLastError || '서버와의 진행 상태 연결이 끊어졌습니다.';
+    showError(reason);
+    _failCurrentAndNext(reason, 'connection');
   };
 }
 
 /* ── Generate summary ── */
 async function generateSummary() {
-  if (!currentTxtPath) return;
+  if (!currentTxtPath) return {ok: false, error: '요약할 전사 파일 경로가 없습니다.'};
 
   const btn = document.getElementById('summarize-btn');
   const statusEl = document.getElementById('summary-status');
@@ -907,6 +958,7 @@ async function generateSummary() {
 
   const promptText = document.getElementById('prompt-text').value;
   let hasError = false;
+  let errorMessage = '';
 
   try {
     let resp;
@@ -917,9 +969,22 @@ async function generateSummary() {
         body: JSON.stringify({txt_path: currentTxtPath, prompt: promptText}),
       });
     } catch (e) {
-      area.textContent = '오류: ' + e.message;
+      errorMessage = '요약 서버 연결 실패: ' + e.message;
+      area.textContent = '오류: ' + errorMessage;
       hasError = true;
-      return;
+      return {ok: false, error: errorMessage};
+    }
+
+    if (!resp.ok) {
+      try {
+        const payload = await resp.json();
+        errorMessage = payload.error || `요약 요청 실패 (HTTP ${resp.status})`;
+      } catch (_) {
+        errorMessage = `요약 요청 실패 (HTTP ${resp.status})`;
+      }
+      area.textContent = '오류: ' + errorMessage;
+      hasError = true;
+      return {ok: false, error: errorMessage};
     }
 
     // Stream the SSE response via ReadableStream
@@ -937,8 +1002,13 @@ async function generateSummary() {
       buffer = lines.pop();
 
       for (const line of lines) {
-        if (errorNext && line.startsWith('data: ')) {
-          area.textContent = '오류: ' + JSON.parse(line.slice(6));
+        if (line.startsWith('event: reset')) {
+          area.textContent = '';
+          rendered.innerHTML = '';
+          errorNext = false;
+        } else if (errorNext && line.startsWith('data: ')) {
+          errorMessage = JSON.parse(line.slice(6));
+          area.textContent = '오류: ' + errorMessage;
           hasError = true;
           errorNext = false;
         } else if (line.startsWith('event: error')) {
@@ -955,6 +1025,10 @@ async function generateSummary() {
         }
       }
     }
+  } catch (e) {
+    errorMessage = '요약 응답 처리 실패: ' + e.message;
+    area.textContent = '오류: ' + errorMessage;
+    hasError = true;
   } finally {
     btn.disabled = false;
     btn.textContent = '다시 생성';
@@ -974,7 +1048,7 @@ async function generateSummary() {
       }
     }
   }
-  return !hasError;   // 호출측(대기열)이 성공 여부로 다음 진행 결정
+  return {ok: !hasError, error: errorMessage || (hasError ? '요약 생성에 실패했습니다.' : '')};
 }
 
 /* 영상 키프레임 추출→요약에 합치기(백그라운드). 실패해도 요약은 유지(폴백).
@@ -1196,8 +1270,9 @@ document.getElementById('url-input').addEventListener('keydown', (e) => {
 });
 
 /* ── URL Queue ── */
-// 큐 아이템: {url, meta, status: 'waiting'|'running'|'done'|'error'|'cancelled'}
+// 큐 아이템: {url, meta, status, error, errorStage, txtPath, retryFrom}
 let urlQueue = [];
+let _queueLaunchTimer = null;
 renderQueue();
 
 function _runningItem() { return urlQueue.find(i => i.status === 'running') || null; }
@@ -1266,7 +1341,9 @@ async function addToQueue() {
   }
 
   clearError();
-  const item = {url, meta: null, status: 'waiting'};
+  const item = {
+    url, meta: null, status: 'waiting', error: '', errorStage: '', txtPath: '', retryFrom: '',
+  };
   urlQueue.push(item);
   document.getElementById('url-input').value = '';
   renderQueue();
@@ -1312,6 +1389,7 @@ async function copyQueue() {
     if (m.uploader) lines.push(`업로더: ${m.uploader}`);
     if (m.duration) lines.push(`길이: ${fmtDur(m.duration)}`);
     lines.push(`상태: ${stCfg.label}`);
+    if (item.error) lines.push(`오류: ${item.error}`);
     lines.push(item.url);
     return lines.join('\n');
   }).join('\n\n');
@@ -1338,6 +1416,12 @@ const _STATUS_CFG = {
   cancelled: {cls: 'qs-cancelled', label: '취소',   rowCls: 'queue-item-cancelled'},
 };
 
+const _ERROR_STAGE_LABELS = {
+  metadata: '영상 정보', download: '다운로드', transcribe: '전사', summary: '요약',
+  connection: '연결', result: '결과 조회', start: '작업 시작', worker: '내부 처리',
+  cancelled: '중지',
+};
+
 function renderQueue() {
   const list    = document.getElementById('queue-list');
   const countEl = document.getElementById('queue-count');
@@ -1349,12 +1433,23 @@ function renderQueue() {
     const removeBtn = item.status !== 'running'
       ? `<button class="queue-item-remove" onclick="removeFromQueue(${i})">✕</button>`
       : '';
+    const retryBtn = item.status === 'error' || item.status === 'cancelled'
+      ? `<button class="queue-item-retry" onclick="retryQueueItem(${i})" title="이 영상 재시도">재시도</button>`
+      : '';
     // 영상정보(제목) 확보 시 제목으로 치환 표시(URL은 내부/툴팁 보존)
     const display = (item.meta && item.meta.title) ? item.meta.title : item.url;
+    const stage = _ERROR_STAGE_LABELS[item.errorStage] || '오류';
+    const errorLine = item.error
+      ? `<span class="queue-item-error-text" title="${_attrEsc(item.error)}">${esc(stage)} · ${esc(item.error)}</span>`
+      : '';
     return `<li class="queue-item ${cfg.rowCls}">
       <span class="queue-item-idx">${i + 1}</span>
-      <span class="queue-item-url" title="${_attrEsc(item.url)}">${esc(display)}</span>
+      <span class="queue-item-content">
+        <span class="queue-item-url" title="${_attrEsc(item.url)}">${esc(display)}</span>
+        ${errorLine}
+      </span>
       <span class="queue-status ${cfg.cls}">${cfg.label}</span>
+      ${retryBtn}
       ${removeBtn}
     </li>`;
   });
@@ -1379,7 +1474,12 @@ function renderQueue() {
 
 function _autoStartNext() {
   const running = _runningItem();
-  if (running) running.status = 'done';
+  if (running) {
+    running.status = 'done';
+    running.error = '';
+    running.errorStage = '';
+    running.retryFrom = '';
+  }
 
   const next = urlQueue.find(i => i.status === 'waiting');
   if (!next) { renderQueue(); return; }
@@ -1387,28 +1487,67 @@ function _autoStartNext() {
   renderQueue();
   const rem = urlQueue.filter(i => i.status === 'waiting').length - 1;
   appendLog(`\n⏭ 대기열 다음 항목 자동 시작 (남은: ${rem}개)...`);
-  setTimeout(() => {
-    document.getElementById('url-input').value = next.url;
-    startTranscription();
-  }, 1500);
+  _launchQueueItem(next, 1500);
 }
 
-/* 요약 실패 시: 전사는 성공(이력 보존)했으나 요약이 실패 → 대기열을 멈춘다(다음 자동시작 안 함).
-   남은 대기 항목은 그대로 두어, 원인(예: Claude 인증) 해결 후 '전사 시작'으로 재개 가능. */
-function _haltQueueOnSummaryFail() {
-  const running = _runningItem();
-  if (running) running.status = 'error';   // 이 항목은 요약 실패로 표기(전사 .md는 이력에 남아있음)
+async function _retrySummaryItem(item) {
+  item.status = 'running';
+  item.error = '';
+  item.errorStage = '';
   renderQueue();
-  const rem = urlQueue.filter(i => i.status === 'waiting').length;
-  showError(`요약 실패로 대기열을 멈췄습니다 (남은 ${rem}개 보류). ` +
-            `Claude 인증 등 원인 해결 후 '전사 시작'으로 재개하세요. 전사본은 이력에 저장돼 있습니다.`);
-  appendLog(`\n⛔ 요약 실패 — 대기열 정지. 남은 ${rem}개는 보류됨(자동 진행 안 함).`);
+  clearError();
+  setRunning(true);
+  currentTxtPath = item.txtPath;
+  showTab('summary');
+  switchTab('summary');
+  const summarized = await generateSummary();
+  setRunning(false);
+  if (summarized.ok) _autoStartNext();
+  else _failCurrentAndNext(summarized.error, 'summary');
 }
 
-/* 현재 항목을 오류로 표기하고 다음 대기열로 넘어간다 */
-function _failCurrentAndNext() {
+function _launchQueueItem(item, delay = 0) {
+  if (_queueLaunchTimer) clearTimeout(_queueLaunchTimer);
+  _queueLaunchTimer = setTimeout(() => {
+    _queueLaunchTimer = null;
+    if (!item || item.status !== 'waiting') return;
+    if (item.retryFrom === 'summary' && item.txtPath) {
+      _retrySummaryItem(item);
+      return;
+    }
+    document.getElementById('url-input').value = item.url;
+    startTranscription();
+  }, delay);
+}
+
+function retryQueueItem(idx) {
+  const item = urlQueue[idx];
+  if (!item || !['error', 'cancelled'].includes(item.status)) return;
+
+  const summaryOnly = item.errorStage === 'summary' && Boolean(item.txtPath);
+  item.status = 'waiting';
+  item.retryFrom = summaryOnly ? 'summary' : '';
+  item.error = '';
+  item.errorStage = '';
+  renderQueue();
+
+  if (_runningItem() || document.getElementById('start-btn').disabled) {
+    appendLog(`\n↻ 재시도 대기열에 추가: ${(item.meta && item.meta.title) || item.url}`);
+    return;
+  }
+  appendLog(`\n↻ ${summaryOnly ? '요약만 ' : ''}재시도 시작: ${(item.meta && item.meta.title) || item.url}`);
+  _launchQueueItem(item);
+}
+
+/* 현재 항목의 원인을 보존하고 나머지 대기열은 계속 처리한다. */
+function _failCurrentAndNext(reason = '알 수 없는 오류가 발생했습니다.', stage = 'worker') {
   const running = _runningItem();
-  if (running) running.status = 'error';
+  if (running) {
+    running.status = 'error';
+    running.error = reason;
+    running.errorStage = stage;
+    running.retryFrom = stage === 'summary' && running.txtPath ? 'summary' : '';
+  }
   renderQueue();
 
   const next = urlQueue.find(i => i.status === 'waiting');
@@ -1416,10 +1555,7 @@ function _failCurrentAndNext() {
 
   const rem = urlQueue.filter(i => i.status === 'waiting').length - 1;
   appendLog(`\n⏭ 오류 발생 — 대기열 다음 항목으로 넘어갑니다 (남은: ${rem}개)...`);
-  setTimeout(() => {
-    document.getElementById('url-input').value = next.url;
-    startTranscription();
-  }, 1500);
+  _launchQueueItem(next, 1500);
 }
 
 /* ── Icon SVG strings ── */

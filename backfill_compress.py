@@ -17,6 +17,7 @@ import re
 import sys
 
 import db
+from document_io import atomic_write_text
 
 _MODEL_RE = re.compile(r"<!--\s*SUMMARY_MODEL:[\s\S]*?-->\s*", re.M)
 _COMPRESS_RE = re.compile(r"<!--\s*SUMMARY_COMPRESS:(\d+)\s*-->\s*", re.M)
@@ -78,8 +79,7 @@ def process_pair(md_path: str, summary_path: str, *, force: bool, dry_run: bool)
         return f"would:{pct}"
 
     try:
-        with open(summary_path, "w", encoding="utf-8") as f:
-            f.write(new)
+        atomic_write_text(summary_path, new)
     except OSError as e:
         return f"err:{e}"
 

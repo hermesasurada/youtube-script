@@ -11,7 +11,10 @@ import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta
 from typing import Any, Iterable
+
+from document_io import parse_frontmatter, read_markdown
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 RES_DIR     = os.path.join(BASE_DIR, "res")
@@ -112,7 +115,11 @@ CREATE TABLE IF NOT EXISTS watch_queue (
     added_at    TEXT,
     updated_at  TEXT,
     txt_path    TEXT,                             -- 캡처 재시도용 전사 md 경로(요약 성공 시 기록)
-    kf_attempts INTEGER NOT NULL DEFAULT 0        -- 캡처 재시도 횟수(1회로 제한)
+    kf_attempts INTEGER NOT NULL DEFAULT 0,       -- 캡처 재시도 횟수(1회로 제한)
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TEXT,
+    error_kind    TEXT,
+    claimed_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_wq_status ON watch_queue(status);
 """
@@ -149,44 +156,48 @@ def init() -> None:
             if "kf_attempts" not in wcols:
                 c.execute("ALTER TABLE watch_queue ADD COLUMN kf_attempts INTEGER NOT NULL DEFAULT 0")
             c.execute("PRAGMA user_version = 3")
+        if ver < 4:
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            additions = {
+                "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+                "next_retry_at": "TEXT",
+                "error_kind": "TEXT",
+                "claimed_at": "TEXT",
+            }
+            for column, declaration in additions.items():
+                if column not in wcols:
+                    c.execute(f"ALTER TABLE watch_queue ADD COLUMN {column} {declaration}")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_wq_retry ON watch_queue(status, next_retry_at)")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 예정/진행 라이브와 메타 조회 오류는 확정 제외가 아니다. 과거 누락분도 재판정한다.
+            c.execute(
+                """UPDATE watch_queue
+                      SET status = 'deferred', next_retry_at = ?, error_kind = 'metadata_transient',
+                          updated_at = ?
+                    WHERE status = 'skipped'
+                      AND (reason LIKE 'live:%' OR reason LIKE 'meta_error:%')""",
+                (now, now),
+            )
+            # 서버 재시작·다운로드 일시 오류로 실패한 과거 전사도 제한된 재시도 경로에 태운다.
+            c.execute(
+                """UPDATE watch_queue
+                      SET status = 'deferred', next_retry_at = ?, error_kind = 'pipeline_transient',
+                          attempt_count = CASE WHEN attempt_count < 1 THEN 1 ELSE attempt_count END,
+                          updated_at = ?
+                    WHERE status = 'failed' AND reason LIKE '전사%'""",
+                (now, now),
+            )
+            c.execute("PRAGMA user_version = 4")
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
 
 def _parse_yaml_front_matter(text: str) -> dict:
-    result: dict = {}
-    current_list_key = None
-    for line in text.splitlines():
-        if line.startswith("  - "):
-            if current_list_key is not None:
-                result[current_list_key].append(line[4:].strip())
-        elif ": " in line:
-            k, v = line.split(": ", 1)
-            result[k.strip()] = v.strip()
-            current_list_key = None
-        elif line.endswith(":") and not line.startswith(" "):
-            k = line[:-1].strip()
-            result[k] = []
-            current_list_key = k
-        else:
-            current_list_key = None
-    return result
+    return parse_frontmatter(text)
 
 
 def parse_md(md_path: str) -> tuple[dict, str]:
-    with open(md_path, encoding="utf-8", errors="replace") as f:
-        content = f.read()
-    if not content.startswith("---\n"):
-        return {}, content.strip()
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return {}, content.strip()
-    meta = _parse_yaml_front_matter(content[4:end])
-    body = content[end + 5:].strip()
-    if body.startswith("# "):
-        nl = body.find("\n")
-        body = body[nl + 1:].strip() if nl != -1 else ""
-    return meta, body
+    return read_markdown(md_path)
 
 
 # ── upsert / delete ────────────────────────────────────────────────────
@@ -332,8 +343,12 @@ def find_by_yt_id(yt_id: str) -> dict | None:
 
 
 def _now() -> str:
-    from datetime import datetime
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _after(seconds: int | float | None) -> str:
+    delay = max(0, float(seconds or 0))
+    return (datetime.now() + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ── 채널 모니터링: channels ────────────────────────────────────────────
@@ -416,17 +431,23 @@ def in_queue(yt_id: str) -> bool:
 
 
 def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
-                  status: str = "pending", reason: str = "") -> bool:
+                  status: str = "pending", reason: str = "", *,
+                  retry_after_seconds: int | float | None = None,
+                  error_kind: str = "") -> bool:
     """큐에 추가(yt_id UNIQUE라 중복이면 무시). 새로 넣었으면 True."""
     yt_id = (yt_id or "").strip()
     if not yt_id:
         return False
     with _lock:
+        now = _now()
+        next_retry_at = _after(retry_after_seconds) if retry_after_seconds is not None else None
         cur = _conn().execute(
             """INSERT OR IGNORE INTO watch_queue
-                 (yt_id, url, title, channel_id, status, reason, added_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (yt_id, url, title, channel_id, status, reason, _now(), _now()),
+                 (yt_id, url, title, channel_id, status, reason, added_at, updated_at,
+                  next_retry_at, error_kind)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (yt_id, url, title, channel_id, status, reason, now, now,
+             next_retry_at, error_kind),
         )
         return cur.rowcount > 0
 
@@ -438,12 +459,126 @@ def queue_next_pending() -> dict | None:
     return dict(r) if r else None
 
 
+def queue_claim_next() -> dict | None:
+    """Atomically claim the oldest pending item for the single pipeline worker."""
+    with _lock:
+        conn = _conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT * FROM watch_queue WHERE status = 'pending' ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            now = _now()
+            cur = conn.execute(
+                """UPDATE watch_queue
+                      SET status = 'processing', claimed_at = ?, updated_at = ?,
+                          attempt_count = attempt_count + 1, next_retry_at = NULL
+                    WHERE id = ? AND status = 'pending'""",
+                (now, now, row["id"]),
+            )
+            if cur.rowcount != 1:
+                conn.execute("ROLLBACK")
+                return None
+            claimed = conn.execute("SELECT * FROM watch_queue WHERE id = ?", (row["id"],)).fetchone()
+            conn.execute("COMMIT")
+            return dict(claimed)
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
 def queue_set_status(qid: int, status: str, reason: str = "") -> None:
     with _lock:
         _conn().execute(
-            "UPDATE watch_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ?",
-            (status, reason, _now(), qid),
+            """UPDATE watch_queue
+                  SET status = ?, reason = ?, updated_at = ?,
+                      claimed_at = CASE WHEN ? = 'processing' THEN claimed_at ELSE NULL END,
+                      next_retry_at = CASE WHEN ? = 'deferred' THEN next_retry_at ELSE NULL END
+                WHERE id = ?""",
+            (status, reason, _now(), status, status, qid),
         )
+
+
+def queue_activate(qid: int, *, reset_attempts: bool = False) -> None:
+    """Move a revalidated deferred item to pending without losing pipeline attempts."""
+    with _lock:
+        _conn().execute(
+            """UPDATE watch_queue SET status = 'pending', reason = '', error_kind = NULL,
+                      next_retry_at = NULL, claimed_at = NULL, updated_at = ?,
+                      attempt_count = CASE WHEN ? THEN 0 ELSE attempt_count END
+                WHERE id = ?""",
+            (_now(), 1 if reset_attempts else 0, qid),
+        )
+
+
+def queue_set_txt_path(qid: int, txt_path: str) -> None:
+    with _lock:
+        _conn().execute(
+            "UPDATE watch_queue SET txt_path = ?, updated_at = ? WHERE id = ?",
+            (txt_path, _now(), qid),
+        )
+
+
+def queue_defer(
+    qid: int,
+    reason: str,
+    *,
+    error_kind: str,
+    retry_after_seconds: int | float,
+    increment_attempt: bool = False,
+    max_attempts: int | None = None,
+) -> str:
+    """Schedule a retry, or make the item terminal after its retry budget."""
+    with _lock:
+        conn = _conn()
+        row = conn.execute("SELECT attempt_count FROM watch_queue WHERE id = ?", (qid,)).fetchone()
+        if row is None:
+            return "missing"
+        attempts = int(row["attempt_count"] or 0) + (1 if increment_attempt else 0)
+        if max_attempts is not None and attempts >= max_attempts:
+            conn.execute(
+                """UPDATE watch_queue SET status = 'failed', reason = ?, error_kind = ?,
+                          attempt_count = ?, next_retry_at = NULL, claimed_at = NULL, updated_at = ?
+                    WHERE id = ?""",
+                (reason, error_kind, attempts, _now(), qid),
+            )
+            return "failed"
+        conn.execute(
+            """UPDATE watch_queue SET status = 'deferred', reason = ?, error_kind = ?,
+                      attempt_count = ?, next_retry_at = ?, claimed_at = NULL, updated_at = ?
+                WHERE id = ?""",
+            (reason, error_kind, attempts, _after(retry_after_seconds), _now(), qid),
+        )
+        return "deferred"
+
+
+def queue_due_deferred(limit: int = 100) -> list[dict]:
+    rows = _conn().execute(
+        """SELECT * FROM watch_queue
+            WHERE status = 'deferred' AND COALESCE(next_retry_at, '') <= ?
+            ORDER BY id LIMIT ?""",
+        (_now(), limit),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def queue_recover_stale(stale_seconds: int = 10800) -> int:
+    cutoff = (datetime.now() - timedelta(seconds=stale_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+    now = _now()
+    with _lock:
+        cur = _conn().execute(
+            """UPDATE watch_queue
+                  SET status = 'deferred', reason = '중단된 processing 복구',
+                      error_kind = 'worker_interrupted', next_retry_at = ?, claimed_at = NULL,
+                      updated_at = ?
+                WHERE status = 'processing'
+                  AND COALESCE(claimed_at, updated_at, '') < ?""",
+            (now, now, cutoff),
+        )
+        return cur.rowcount
 
 
 def queue_mark_kf_retry(qid: int, txt_path: str, reason: str = "") -> None:
@@ -451,7 +586,8 @@ def queue_mark_kf_retry(qid: int, txt_path: str, reason: str = "") -> None:
     with _lock:
         _conn().execute(
             "UPDATE watch_queue SET status = 'kf_retry', txt_path = ?, "
-            "kf_attempts = kf_attempts + 1, reason = ?, updated_at = ? WHERE id = ?",
+            "kf_attempts = kf_attempts + 1, reason = ?, updated_at = ?, claimed_at = NULL "
+            "WHERE id = ?",
             (txt_path, reason, _now(), qid),
         )
 
