@@ -270,6 +270,19 @@
       line-height: 1; cursor: pointer; padding: 0;
     }
     .fs-btn:active { background: var(--surface2); }
+    /* 텔레그램용 복사 — 요약 볼 때만 노출. 복사 후 라벨이 잠깐 텍스트로 바뀐다 */
+    .tg-btn {
+      min-width: 30px; height: 30px; flex-shrink: 0; padding: 0 .45rem;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--text); font-size: 14px;
+      line-height: 1; cursor: pointer;
+    }
+    .tg-btn[hidden] { display: none; }
+    .tg-btn:active { background: var(--surface2); }
+    .tg-btn.done   { color: var(--success, #16a34a); border-color: currentColor; font-size: 11.5px; }
+    .tg-btn.warn   { color: #b45309; border-color: currentColor; font-size: 11.5px; }
+    .tg-btn.err    { color: var(--error, #dc2626); border-color: currentColor; font-size: 11.5px; }
     .font-ctrl {
       display: inline-flex; align-items: center; flex-shrink: 0;
       height: 30px; padding: 0 .25rem 0 .4rem;
@@ -436,6 +449,10 @@
         <button class="fs-btn" onclick="adjustFs(-1)" aria-label="글자 작게">−</button>
         <button class="fs-btn" onclick="adjustFs(1)" aria-label="글자 크게">+</button>
       </div>
+      <button class="tg-btn" id="tg-btn" onclick="copyForTelegram(this)" hidden
+              aria-label="텔레그램용 복사" title="본문을 텔레그램에서 읽기 좋은 형태로 복사">
+        <span class="tg-label">✈️</span>
+      </button>
     </header>
     <div class="read-progress" id="read-progress"></div>
     <div class="modal-body" id="modal-body"></div>
@@ -797,29 +814,87 @@ function setReaderFont(key) {
   _applyReaderFont();
 }
 
+let _summaryMd = '';   // 현재 열린 요약 원문 — 텔레그램용 복사에 사용
+
 async function openSummary(path, title) {
   openModal(title);
   $('fs-ctrl').hidden = false;   // 요약에서만 글자크기 조절 노출
   $('font-ctrl').hidden = false;
   _applyReaderFs();
   _applyReaderFont();
+  _summaryMd = '';
+  $('tg-btn').hidden = true;
   try {
     const d = await YS.apiSummaryContent(path);
     if (d.error) {
       $('modal-body').textContent = '오류: ' + d.error;
     } else {
+      _summaryMd = d.content || '';
       $('modal-body').className = 'modal-body markdown';
-      $('modal-body').innerHTML = YS.renderMarkdown(d.content || '');
+      $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
+      $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
     }
   } catch (e) {
     $('modal-body').textContent = '오류: ' + e.message;
   }
 }
 
+/* 비보안 컨텍스트(원격 http 접속)에는 navigator.clipboard가 없다 —
+   copy 이벤트를 가로채 clipboardData에 직접 넣는 경로로 폴백한다(데스크톱과 동일 방식). */
+function _copyHtmlLegacy(html, text) {
+  let ok = false;
+  const onCopy = (e) => {
+    e.clipboardData.setData('text/html', html);
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
+    ok = true;
+  };
+  document.addEventListener('copy', onCopy, true);
+  const holder = document.createElement('div');
+  holder.contentEditable = 'true';
+  holder.textContent = ' ';
+  holder.setAttribute('style', 'position:fixed;left:-99999px;top:0;opacity:0;');
+  document.body.appendChild(holder);
+  const sel = window.getSelection();
+  const saved = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  const range = document.createRange();
+  range.selectNodeContents(holder);
+  sel.removeAllRanges(); sel.addRange(range);
+  try { document.execCommand('copy'); } catch { /* ok=false 유지 */ }
+  document.removeEventListener('copy', onCopy, true);
+  sel.removeAllRanges(); if (saved) sel.addRange(saved);
+  holder.remove();
+  return ok;
+}
+
+async function copyForTelegram(btn) {
+  if (!_summaryMd) return;
+  const lbl = btn.querySelector('.tg-label');
+  const reset = () => { lbl.textContent = '✈️'; btn.className = 'tg-btn'; };
+  const { html, text, parts, overLimit } = YS.mdToTelegram(_summaryMd);
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html':  new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })]);
+      ok = true;
+    }
+  } catch (e) { /* 레거시로 폴백 */ }
+  if (!ok) ok = _copyHtmlLegacy(html, text);
+  if (!ok)              { lbl.textContent = '실패';            btn.className = 'tg-btn err'; }
+  else if (overLimit)   { lbl.textContent = `복사됨 ${parts}개`; btn.className = 'tg-btn warn'; }
+  else                  { lbl.textContent = '복사됨';           btn.className = 'tg-btn done'; }
+  setTimeout(reset, overLimit ? 3000 : 1600);
+}
+
 async function openTranscript(path, title) {
   openModal(title);
   $('fs-ctrl').hidden = true;   // 전사 보기엔 글자크기 조절 숨김(요약 전용)
   $('font-ctrl').hidden = true;
+  $('tg-btn').hidden = true;    // 텔레그램용 복사도 요약 전용
+  _summaryMd = '';
   try {
     const r = await fetch('/history/text', {
       method: 'POST', headers: {'Content-Type':'application/json'},

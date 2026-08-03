@@ -258,6 +258,18 @@ def test_permanent_metadata_errors_are_not_retried():
     assert (retryable, attempts, kind) == (True, 3, "metadata_unknown")
 
 
+def test_retry_delay_backs_off_exponentially():
+    """403·LLM 한도처럼 한동안 지속되는 장애는 간격을 벌려야 복구율이 높다."""
+    d = channel_monitor._retry_delay
+    assert d(1) == 1800          # 30분
+    assert d(2) == 3600          # 1시간
+    assert d(3) == 7200          # 2시간
+    assert d(1) < d(2) < d(3)
+    assert d(99) == channel_monitor.RETRY_MAX_SEC   # 상한에서 멈춘다
+    assert d(0) == d(1)          # attempt 미기록(0/None)도 최소 간격 보장
+    assert d(None) == d(1)
+
+
 def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch):
     retry = {
         "id": 1, "yt_id": "retry-test", "title": "retry", "url": "https://youtu.be/retry-test",

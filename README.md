@@ -57,6 +57,7 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 | `PROBE_TIMEOUT` / `FFMPEG_TIMEOUT` / `VISION_TIMEOUT` | 30 / 600 / 300 | subprocess 타임아웃(초) |
 | `MONITOR_STALE_PROCESSING_SEC` | 10800 | 중단된 자동 처리 claim 회수 기준(초) |
 | `MONITOR_MAX_PIPELINE_ATTEMPTS` | 3 | 자동 처리 최대 시도 횟수 |
+| `MONITOR_RETRY_BASE_SEC` / `MONITOR_RETRY_MAX_SEC` | 1800 / 21600 | 재시도 지수 백오프 시작 간격 / 상한(30분→1h→2h, 최대 6h) |
 
 ## 키프레임 추출 개요
 

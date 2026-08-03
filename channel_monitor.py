@@ -50,6 +50,16 @@ SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
 KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
 STALE_PROCESSING_SEC = int(os.environ.get("MONITOR_STALE_PROCESSING_SEC", "10800"))
 MAX_PIPELINE_ATTEMPTS = int(os.environ.get("MONITOR_MAX_PIPELINE_ATTEMPTS", "3"))
+# 파이프라인 실패 재시도 간격 — 지수 백오프(30분 → 1시간 → 2시간, 상한 6시간).
+# YouTube 403이나 LLM 한도처럼 '한동안 지속되는' 장애가 대부분이라, 짧게 몰아 재시도하면
+# 오히려 차단이 길어진다. 시간을 두고 드물게 두드리는 편이 복구율이 높다.
+RETRY_BASE_SEC = int(os.environ.get("MONITOR_RETRY_BASE_SEC", "1800"))
+RETRY_MAX_SEC  = int(os.environ.get("MONITOR_RETRY_MAX_SEC", "21600"))
+
+
+def _retry_delay(attempt: int) -> int:
+    """다음 재시도까지 대기 초. attempt는 지금까지 시도한 횟수(1부터)."""
+    return min(RETRY_MAX_SEC, RETRY_BASE_SEC * (2 ** max(0, int(attempt or 1) - 1)))
 LOCK_PATH  = os.environ.get("MONITOR_LOCK", os.path.expanduser("~/.hermes/youtube-monitor.lock"))
 OUTBOX     = os.environ.get("MONITOR_OUTBOX", os.path.expanduser("~/.hermes/youtube-monitor.outbox"))
 ENV_PATH   = os.path.expanduser("~/.hermes/youtube-monitor.env")
@@ -349,6 +359,10 @@ def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
 
         retryable, delay, max_attempts, error_kind = _defer_policy(reason)
         if retryable:
+            # 메타 오류(403·네트워크 등)는 재시도할수록 간격을 벌린다. 라이브 재확인은
+            # '방송이 끝났나' 주기 확인이라 백오프 없이 고정 간격을 유지한다.
+            if error_kind.startswith("metadata"):
+                delay = max(delay, _retry_delay(item.get("attempt_count")))
             log(f"[deferred] 재확인 대기 [{reason}]: {item['title'][:50]}")
             if not dry:
                 db.queue_defer(
@@ -580,7 +594,8 @@ def drain() -> None:
             # summarize가 Claude+Grok 모두 실패한 경우(폴백까지 소진)
             db.queue_defer(
                 v["id"], "요약 경로 재시도 대기", error_kind="llm_unavailable",
-                retry_after_seconds=1800, max_attempts=MAX_PIPELINE_ATTEMPTS,
+                retry_after_seconds=_retry_delay(v.get("attempt_count")),
+                max_attempts=MAX_PIPELINE_ATTEMPTS,
             )
             notify(
                 f"⛔ 요약 실패(Claude·폴백 소진) — 큐 정지, 다음 주기 재시도\n"
@@ -591,7 +606,7 @@ def drain() -> None:
             reason = str(e)[:120]
             state = db.queue_defer(
                 v["id"], reason, error_kind="pipeline_transient",
-                retry_after_seconds=min(3600, 600 * max(1, int(v.get("attempt_count") or 1))),
+                retry_after_seconds=_retry_delay(v.get("attempt_count")),
                 max_attempts=MAX_PIPELINE_ATTEMPTS,
             )
             notify(
