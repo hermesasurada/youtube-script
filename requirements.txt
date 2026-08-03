@@ -4,7 +4,7 @@
 # 외부 바이너리(별도 설치 필요): whisper.cpp(whisper-cli), ffmpeg/ffprobe, claude CLI, deno(yt-dlp JS 챌린지 런타임)
 
 Flask==3.1.3
-yt-dlp[default]==2026.6.9   # [default]=ejs 챌린지 솔버 포함(포맷 누락 방지). JS 런타임(deno) 필요
+yt-dlp[default]==2026.7.4   # [default]=ejs 챌린지 솔버 포함(포맷 누락 방지). JS 런타임(deno) 필요
 python-dotenv==1.2.2
 requests==2.34.2
 
