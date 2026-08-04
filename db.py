@@ -188,6 +188,16 @@ def init() -> None:
                 (now, now),
             )
             c.execute("PRAGMA user_version = 4")
+        if ver < 5:
+            # v5: 채널별 '지식증류 대상' 플래그. 증류(옵시디언 볼트)는 그동안
+            # hermes 쪽 config의 채널명 하드코딩으로만 걸렀는데, 채널명이 바뀌면
+            # 매칭이 깨지고 UI로 바꿀 수도 없었다. channel_id 기준으로 여기서 관리한다.
+            ccols = {r[1] for r in c.execute("PRAGMA table_info(channels)").fetchall()}
+            if "distill" not in ccols:
+                c.execute("ALTER TABLE channels ADD COLUMN distill INTEGER NOT NULL DEFAULT 1")
+            # 기존 제외분(hermes config의 excluded_channels)을 옮겨온다.
+            c.execute("UPDATE channels SET distill = 0 WHERE title IN ('집코노미')")
+            c.execute("PRAGMA user_version = 5")
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
@@ -417,6 +427,33 @@ def set_channel_min_duration(cid: int, seconds: int | None) -> bool:
         cur = _conn().execute(
             "UPDATE channels SET min_duration = ? WHERE id = ?", (seconds, cid))
         return cur.rowcount > 0
+
+
+def set_channel_distill(cid: int, enabled: bool) -> bool:
+    """채널을 지식증류(옵시디언 볼트) 대상에 포함할지. 0이면 증류 파이프라인이 건너뛴다."""
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE channels SET distill = ? WHERE id = ?", (1 if enabled else 0, cid))
+        return cur.rowcount > 0
+
+
+def distill_excluded_names() -> list[str]:
+    """증류 제외 채널의 표시명 전부(등록명 + 실제 이력에 쓰인 업로더명).
+
+    채널명은 시간이 지나며 바뀌어서(예: 'RLWRLD' → 'RLWRLD - Dexterity Physical AI')
+    한 이름만으론 과거 노트를 못 거른다. channel_id로 묶어 이름 변형을 모두 모은다.
+    증류 파이프라인(hermes)이 이 목록을 읽어 문서 로딩 단계에서 제외한다.
+    """
+    rows = _conn().execute(
+        """SELECT c.title, i.channel, i.uploader
+             FROM channels c
+             LEFT JOIN items i ON i.channel_url LIKE '%' || c.channel_id
+            WHERE COALESCE(c.distill, 1) = 0"""
+    ).fetchall()
+    names = set()
+    for r in rows:
+        names |= {v.strip() for v in (r["title"], r["channel"], r["uploader"]) if v and v.strip()}
+    return sorted(names)
 
 
 def mark_channel_checked(cid: int) -> None:

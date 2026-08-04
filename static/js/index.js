@@ -77,12 +77,17 @@ async function loadChannels() {
         ? ' <span class="channel-nolimit" title="길이제한 면제 — 5분 이하 영상도 수집">∞</span>'
         : (c.min_duration != null
           ? ` <span class="channel-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
+      const dis = c.distill == null ? true : !!c.distill;   // 기본은 증류 대상
       return `<li class="channel-row">
         <div class="channel-meta">
           <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
           <span class="channel-sub">${esc(sub)}</span>
         </div>
+        <button class="channel-distill ${dis ? 'on' : ''}" role="switch" aria-checked="${dis}"
+                title="지식증류(옵시디언 볼트) 대상 — 끄면 증류에서 제외"
+                onclick="toggleChannelDistill(${c.id}, ${dis ? 'false' : 'true'}, this)">증류</button>
         <button class="channel-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
+                title="자동 수집 ON/OFF"
                 onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)">
           <span class="channel-toggle-knob"></span>
         </button>
@@ -105,6 +110,25 @@ async function toggleChannel(id, enable, btn) {
     btn.setAttribute('onclick', `toggleChannel(${id}, ${d.enabled ? 'false' : 'true'}, this)`);
   } catch (e) {
     alert('토글 실패: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* 지식증류 대상 토글 — 끄면 hermes 증류 파이프라인이 그 채널 문서를 건너뛴다. */
+async function toggleChannelDistill(id, enable, btn) {
+  btn.disabled = true;
+  try {
+    const d = await (await fetch('/channels/' + id, {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({distill: enable}),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    btn.classList.toggle('on', d.distill);
+    btn.setAttribute('aria-checked', String(d.distill));
+    btn.setAttribute('onclick', `toggleChannelDistill(${id}, ${d.distill ? 'false' : 'true'}, this)`);
+  } catch (e) {
+    alert('증류 설정 실패: ' + e.message);
   } finally {
     btn.disabled = false;
   }

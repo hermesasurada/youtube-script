@@ -848,6 +848,16 @@ select option { background: var(--surface); color: var(--text); }
 .channel-toggle.on { background: var(--highlight-soft); border-color: var(--highlight); }
 .channel-toggle.on .channel-toggle-knob { left: 20px; background: var(--highlight); }
 .channel-toggle:disabled { opacity: .5; cursor: default; }
+/* 지식증류 대상 — 자동수집 토글과 성격이 달라 칩 형태로 구분(켜짐일 때만 강조) */
+.channel-distill {
+  flex-shrink: 0; height: 22px; padding: 0 .5rem; margin-right: .1rem;
+  background: transparent; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); font-family: inherit; font-size: 11px; line-height: 1;
+  cursor: pointer; transition: color .15s, background .15s, border-color .15s;
+}
+.channel-distill:hover { border-color: var(--border-strong); color: var(--text); }
+.channel-distill.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+.channel-distill:disabled { opacity: .5; cursor: default; }
 
 /* Summary toolbar */
 .summary-toolbar {

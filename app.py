@@ -1163,12 +1163,32 @@ def channels_list():
 
 @app.route("/channels/<int:cid>", methods=["PATCH"])
 def channel_toggle(cid: int):
-    """채널 ON/OFF 토글."""
+    """채널 설정 변경 — 자동수집 ON/OFF(enabled), 지식증류 대상(distill).
+
+    보낸 키만 반영한다(둘 중 하나만 바꿔도 다른 값이 덮이지 않게).
+    """
     data = request.get_json(force=True) or {}
-    ok = db.set_channel_enabled(cid, bool(data.get("enabled")))
-    if not ok:
-        return _json({"error": "채널을 찾을 수 없습니다."}, 404)
-    return _json({"ok": True, "enabled": bool(data.get("enabled"))})
+    out, touched = {"ok": True}, False
+    if "enabled" in data:
+        if not db.set_channel_enabled(cid, bool(data["enabled"])):
+            return _json({"error": "채널을 찾을 수 없습니다."}, 404)
+        out["enabled"] = bool(data["enabled"]); touched = True
+    if "distill" in data:
+        if not db.set_channel_distill(cid, bool(data["distill"])):
+            return _json({"error": "채널을 찾을 수 없습니다."}, 404)
+        out["distill"] = bool(data["distill"]); touched = True
+    if not touched:
+        return _json({"error": "변경할 항목이 없습니다(enabled/distill)."}, 400)
+    return _json(out)
+
+
+@app.route("/channels/distill-excluded")
+def channels_distill_excluded():
+    """증류 제외 채널명 목록 — hermes 증류 파이프라인이 조회해 문서 로딩 단계에서 거른다."""
+    try:
+        return _json({"names": db.distill_excluded_names()})
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
 
 
 @app.route("/history")
