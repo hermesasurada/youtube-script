@@ -651,6 +651,7 @@ _LOOPBACK = {"127.0.0.1", "::1"}
 # 원격에서 허용되는 데이터 엔드포인트(이력 조회/요약/읽음/삭제). 페이지(/, /m)는 별도 처리.
 _REMOTE_DATA_ALLOWED = {
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
+    "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
 }
 _MOBILE_UA = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.I)
 
@@ -1191,6 +1192,32 @@ def channels_distill_excluded():
         return _json({"error": str(e)}, 500)
 
 
+@app.route("/distill/policy")
+def distill_policy():
+    """증류 정책 전체 — 채널 제외 목록 + 영상 단위 오버라이드(오버라이드가 우선)."""
+    try:
+        return _json({"excluded_channels": db.distill_excluded_names(),
+                      "overrides": db.distill_overrides()})
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+
+
+@app.route("/history/distill", methods=["PATCH"])
+def history_distill():
+    """영상 단위 증류 설정 — distill: true(포함) / false(제외) / null(미설정=채널 따름)."""
+    data = request.get_json(force=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return _json({"error": "path 필요"}, 400)
+    raw = data.get("distill", "__missing__")
+    if raw == "__missing__":
+        return _json({"error": "distill 필요(true/false/null)"}, 400)
+    value = None if raw is None else bool(raw)
+    if not db.set_item_distill(path, value):
+        return _json({"error": "항목을 찾을 수 없습니다."}, 404)
+    return _json({"ok": True, **(db.get_item_distill(path) or {})})
+
+
 @app.route("/history")
 def get_history():
     q = (request.args.get("q") or "").strip()
@@ -1350,7 +1377,8 @@ def summary_content():
     try:
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             content = f.read()
-        return _json({"content": content})
+        # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
+        return _json({"content": content, "distill": db.get_item_distill(abs_path)})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 

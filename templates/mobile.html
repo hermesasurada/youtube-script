@@ -280,6 +280,19 @@
     }
     .tg-btn[hidden] { display: none; }
     .tg-btn:active { background: var(--surface2); }
+    /* 증류 선택 — 제목을 없앤 자리라 auto margin으로 헤더 가장 우측에 붙인다 */
+    .distill-ctrl {
+      margin-left: auto; flex-shrink: 0;
+      display: inline-flex; align-items: center; height: 30px; padding: 0 .15rem 0 .4rem;
+      border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+    }
+    .distill-ctrl[hidden] { display: none; }
+    .distill-ctrl select {
+      height: 100%; border: 0; outline: 0; appearance: none; -webkit-appearance: none;
+      background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .distill-ctrl.set { border-color: var(--highlight); background: var(--highlight-soft); }
+    .distill-ctrl.set select { color: var(--highlight); font-weight: 600; }
     .tg-btn.done   { color: var(--success, #16a34a); border-color: currentColor; font-size: 11.5px; }
     .tg-btn.warn   { color: #b45309; border-color: currentColor; font-size: 11.5px; }
     .tg-btn.err    { color: var(--error, #dc2626); border-color: currentColor; font-size: 11.5px; }
@@ -438,7 +451,6 @@
       <button class="icon-btn" onclick="closeModal()" aria-label="닫기">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
       </button>
-      <h2 id="modal-title">제목</h2>
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
         <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
           <option value="sans">Noto Sans KR</option>
@@ -463,6 +475,13 @@
               aria-label="텔레그램용 복사" title="본문을 텔레그램에서 읽기 좋은 형태로 복사">
         <span class="tg-label">✈️</span>
       </button>
+      <label class="distill-ctrl" id="distill-ctrl" hidden>
+        <select id="distill-sel" onchange="setItemDistill(this.value)" aria-label="증류 대상">
+          <option value="">증류: 채널</option>
+          <option value="1">증류: 포함</option>
+          <option value="0">증류: 제외</option>
+        </select>
+      </label>
     </header>
     <div class="read-progress" id="read-progress"></div>
     <div class="modal-body" id="modal-body"></div>
@@ -698,7 +717,6 @@ function _updateReadProgress() {
 document.getElementById('modal-body').addEventListener('scroll', _updateReadProgress, { passive: true });
 
 function openModal(title) {
-  $('modal-title').textContent = title || '';
   $('modal-body').textContent = '로드 중…';
   $('modal-body').className = 'modal-body';
   $('modal-body').scrollTop = 0;
@@ -855,8 +873,11 @@ async function openSummary(path, title) {
   _applyReaderFs();
   _applyReaderFont();
   _summaryMd = '';
+  _summaryPath = path;
   $('tg-btn').hidden = true;
   $('blg-btn').hidden = true;
+  $('distill-ctrl').hidden = true;
+  _setDistillUI(null);
   try {
     const d = await YS.apiSummaryContent(path);
     if (d.error) {
@@ -867,6 +888,8 @@ async function openSummary(path, title) {
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
       $('blg-btn').hidden = !_summaryMd;
+      $('distill-ctrl').hidden = !_summaryMd;
+      _setDistillUI(d.distill);
     }
   } catch (e) {
     $('modal-body').textContent = '오류: ' + e.message;
@@ -901,6 +924,36 @@ function _copyHtmlLegacy(html, text) {
   return ok;
 }
 
+let _summaryPath = '';   // 현재 열린 요약 경로 — 증류 설정 대상
+
+/* 증류 셀렉터 표시 — d = {override, channel, effective} | null */
+function _setDistillUI(d) {
+  const sel = $('distill-sel'), box = $('distill-ctrl');
+  if (!sel || !box) return;
+  const ov = d ? d.override : null;
+  sel.value = ov === null || ov === undefined ? '' : (ov ? '1' : '0');
+  box.classList.toggle('set', sel.value !== '');
+  const eff = d ? (d.effective ? '포함' : '제외') : '—';
+  box.title = sel.value === '' ? `채널 설정을 따름 → 현재 ${eff}`
+                               : `이 영상만 ${sel.value === '1' ? '포함' : '제외'}(채널보다 우선)`;
+}
+
+/* 영상 단위 증류 설정 — ''=미설정(채널 따름), '1'=포함, '0'=제외 */
+async function setItemDistill(value) {
+  if (!_summaryPath) return;
+  try {
+    const r = await fetch('/history/distill', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: _summaryPath, distill: value === '' ? null : value === '1' }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _setDistillUI(d);
+  } catch (e) {
+    alert('증류 설정 실패: ' + e.message);
+  }
+}
+
 /* 내보내기 복사 공통 — build()가 {html,text}(+텔레그램은 parts/overLimit)를 준다.
    원격 http(비보안)에는 navigator.clipboard가 없어 레거시 경로로 폴백한다. */
 async function _copyExport(btn, icon, build) {
@@ -931,8 +984,9 @@ async function openTranscript(path, title) {
   openModal(title);
   $('fs-ctrl').hidden = true;   // 전사 보기엔 글자크기 조절 숨김(요약 전용)
   $('font-ctrl').hidden = true;
-  $('tg-btn').hidden = true;    // 내보내기 복사는 요약 전용
+  $('tg-btn').hidden = true;    // 내보내기 복사·증류 설정은 요약 전용
   $('blg-btn').hidden = true;
+  $('distill-ctrl').hidden = true;
   _summaryMd = '';
   try {
     const r = await fetch('/history/text', {

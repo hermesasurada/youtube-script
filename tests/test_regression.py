@@ -258,6 +258,46 @@ def test_permanent_metadata_errors_are_not_retried():
     assert (retryable, attempts, kind) == (True, 3, "metadata_unknown")
 
 
+def test_item_distill_overrides_channel_setting():
+    """영상 단위 증류 지정은 채널 설정보다 우선하고, 미설정이면 채널을 따른다."""
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM items WHERE md_path = '/tmp/_d.md'")
+    conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
+    db.add_channel("UC_DTEST", handle="dtest", title="D채널",
+                   url="https://www.youtube.com/channel/UC_DTEST")
+    conn.execute(
+        "INSERT INTO items (md_path, summary_path, date, stem, title, channel_url, yt_id, "
+        "                   mtime_md, indexed_at) "
+        "VALUES ('/tmp/_d.md', '/tmp/_d_s.md', '20260804', 's', 't', "
+        "'https://www.youtube.com/channel/UC_DTEST', 'DVID', 0, 0)")
+
+    cid = [c["id"] for c in db.list_channels() if c["channel_id"] == "UC_DTEST"][0]
+    try:
+        for ch_on in (True, False):
+            db.set_channel_distill(cid, ch_on)
+            # 미설정 → 채널 설정을 따른다
+            db.set_item_distill("/tmp/_d.md", None)
+            d = db.get_item_distill("/tmp/_d.md")
+            assert d["override"] is None and d["effective"] is ch_on
+            # 포함/제외 → 채널과 무관하게 그 값이 이긴다
+            db.set_item_distill("/tmp/_d.md", True)
+            assert db.get_item_distill("/tmp/_d.md")["effective"] is True
+            db.set_item_distill("/tmp/_d.md", False)
+            assert db.get_item_distill("/tmp/_d.md")["effective"] is False
+
+        # 요약 경로로도 지정할 수 있어야 한다(뷰어가 summary_path를 키로 쓴다)
+        assert db.set_item_distill("/tmp/_d_s.md", True)
+        assert db.get_item_distill("/tmp/_d_s.md")["override"] is True
+        assert db.distill_overrides().get("DVID") is True
+        # 미설정은 오버라이드 목록에서 빠진다
+        db.set_item_distill("/tmp/_d.md", None)
+        assert "DVID" not in db.distill_overrides()
+    finally:
+        conn.execute("DELETE FROM items WHERE md_path = '/tmp/_d.md'")
+        conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
+
+
 def test_retry_delay_backs_off_exponentially():
     """403·LLM 한도처럼 한동안 지속되는 장애는 간격을 벌려야 복구율이 높다."""
     d = channel_monitor._retry_delay

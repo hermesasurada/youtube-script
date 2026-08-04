@@ -1633,6 +1633,42 @@ async function copyUrl() {
 
 /* ── Summary Modal ── (marked.js 설정은 공유 모듈 common.js에서 일원화) */
 let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성·블로거 복사에 사용
+let _summaryPath = '';    // 현재 열린 요약 경로 — 증류 설정 변경 대상
+
+/* 증류 셀렉터 표시 — d = {override, channel, effective} | null(미조회)
+   기본값(채널 따름)일 때는 흐리게, 이 영상만 따로 지정했으면 강조한다. */
+function _setDistillUI(d) {
+  const sel = document.getElementById('sum-distill');
+  const box = document.getElementById('sum-distill-ctrl');
+  if (!sel || !box) return;
+  const ov = d ? d.override : null;
+  sel.value = ov === null || ov === undefined ? '' : (ov ? '1' : '0');
+  box.classList.toggle('set', sel.value !== '');
+  // 채널 설정을 따를 때 실제로 어떻게 적용되는지 툴팁으로 알려준다
+  const eff = d ? (d.effective ? '포함' : '제외') : '—';
+  box.title = sel.value === ''
+    ? `채널 설정을 따름 → 현재 ${eff} (채널 모니터에서 변경)`
+    : `이 영상만 ${sel.value === '1' ? '포함' : '제외'}으로 지정됨 (채널 설정보다 우선)`;
+}
+
+/* 영상 단위 증류 설정 변경 — ''=미설정(채널 따름), '1'=포함, '0'=제외 */
+async function setItemDistill(value) {
+  if (!_summaryPath) return;
+  const box = document.getElementById('sum-distill-ctrl');
+  const payload = value === '' ? null : value === '1';
+  try {
+    const r = await fetch('/history/distill', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: _summaryPath, distill: payload }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _setDistillUI(d);
+  } catch (e) {
+    alert('증류 설정 실패: ' + e.message);
+    if (box) box.classList.remove('set');
+  }
+}
 
 /* 구글 블로거 포스팅용 복사 — 이미지 제외, 인라인 스타일 서식 HTML을 클립보드에.
    text/html + text/plain 을 함께 넣어 블로거 작성(리치텍스트)·HTML 보기 어디에 붙여도 되게 한다. */
@@ -1821,10 +1857,10 @@ function _injectToc(container) {
 
 async function openSummaryModal(summaryPath, title) {
   const overlay  = document.getElementById('sum-overlay');
-  const titleEl  = document.getElementById('sum-panel-title');
   const bodyEl   = document.getElementById('sum-panel-body');
 
-  titleEl.textContent = title;
+  _summaryPath = summaryPath;                            // 증류 설정 변경 대상
+  _setDistillUI(null);                                   // 값 로드 전에는 기본 표시
   bodyEl.innerHTML    = '<p class="sum-loading">불러오는 중…</p>';
   overlay.hidden      = false;
   document.body.style.overflow = 'hidden';
@@ -1837,6 +1873,7 @@ async function openSummaryModal(summaryPath, title) {
     const data = await YS.apiSummaryContent(summaryPath);
     if (data.error) throw new Error(data.error);
     _summaryMd = data.content || '';
+    _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     _injectToc(bodyEl);                                    // 목차 삽입(일반 보기)
     bodyEl.scrollTop = 0;

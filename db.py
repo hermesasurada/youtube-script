@@ -198,6 +198,13 @@ def init() -> None:
             # 기존 제외분(hermes config의 excluded_channels)을 옮겨온다.
             c.execute("UPDATE channels SET distill = 0 WHERE title IN ('집코노미')")
             c.execute("PRAGMA user_version = 5")
+        if ver < 6:
+            # v6: 영상 단위 증류 오버라이드. NULL=미설정(채널 설정을 따름),
+            # 1=포함, 0=제외. 채널 설정보다 우선한다.
+            icols = {r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()}
+            if "distill" not in icols:
+                c.execute("ALTER TABLE items ADD COLUMN distill INTEGER")   # NULL 허용 = 미설정
+            c.execute("PRAGMA user_version = 6")
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
@@ -435,6 +442,46 @@ def set_channel_distill(cid: int, enabled: bool) -> bool:
         cur = _conn().execute(
             "UPDATE channels SET distill = ? WHERE id = ?", (1 if enabled else 0, cid))
         return cur.rowcount > 0
+
+
+def set_item_distill(path: str, value: bool | None) -> bool:
+    """영상 단위 증류 오버라이드. None=미설정(채널 설정을 따름), True=포함, False=제외.
+
+    path는 전사(md_path) 또는 요약(summary_path) 어느 쪽이든 받는다(뷰어마다 키가 달라서).
+    """
+    v = None if value is None else (1 if value else 0)
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE items SET distill = ? WHERE md_path = ? OR summary_path = ?",
+            (v, path, path))
+        return cur.rowcount > 0
+
+
+def get_item_distill(path: str) -> dict | None:
+    """영상의 증류 설정 조회 → {override: True/False/None, channel: bool, effective: bool}.
+
+    effective = 영상 오버라이드가 있으면 그것, 없으면 채널 설정.
+    """
+    r = _conn().execute(
+        """SELECT i.distill AS ov, i.channel_url, COALESCE(c.distill, 1) AS ch
+             FROM items i
+             LEFT JOIN channels c ON i.channel_url LIKE '%' || c.channel_id
+            WHERE i.md_path = ? OR i.summary_path = ? LIMIT 1""",
+        (path, path)).fetchone()
+    if r is None:
+        return None
+    override = None if r["ov"] is None else bool(r["ov"])
+    channel = bool(r["ch"])
+    return {"override": override, "channel": channel,
+            "effective": channel if override is None else override}
+
+
+def distill_overrides() -> dict[str, bool]:
+    """영상 단위 오버라이드가 지정된 것만 {yt_id: 포함여부}. 증류 파이프라인이 채널 설정보다 우선 적용."""
+    rows = _conn().execute(
+        "SELECT yt_id, distill FROM items WHERE distill IS NOT NULL AND yt_id IS NOT NULL"
+    ).fetchall()
+    return {r["yt_id"]: bool(r["distill"]) for r in rows}
 
 
 def distill_excluded_names() -> list[str]:
