@@ -449,6 +449,10 @@
         <button class="fs-btn" onclick="adjustFs(-1)" aria-label="글자 작게">−</button>
         <button class="fs-btn" onclick="adjustFs(1)" aria-label="글자 크게">+</button>
       </div>
+      <button class="tg-btn" id="blg-btn" onclick="copyForBlogger(this)" hidden
+              aria-label="블로거용 복사" title="본문을 구글 블로거 포스팅용 서식으로 복사">
+        <span class="tg-label">📋</span>
+      </button>
       <button class="tg-btn" id="tg-btn" onclick="copyForTelegram(this)" hidden
               aria-label="텔레그램용 복사" title="본문을 텔레그램에서 읽기 좋은 형태로 복사">
         <span class="tg-label">✈️</span>
@@ -824,6 +828,7 @@ async function openSummary(path, title) {
   _applyReaderFont();
   _summaryMd = '';
   $('tg-btn').hidden = true;
+  $('blg-btn').hidden = true;
   try {
     const d = await YS.apiSummaryContent(path);
     if (d.error) {
@@ -833,6 +838,7 @@ async function openSummary(path, title) {
       $('modal-body').className = 'modal-body markdown';
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
+      $('blg-btn').hidden = !_summaryMd;
     }
   } catch (e) {
     $('modal-body').textContent = '오류: ' + e.message;
@@ -867,11 +873,12 @@ function _copyHtmlLegacy(html, text) {
   return ok;
 }
 
-async function copyForTelegram(btn) {
+/* 내보내기 복사 공통 — build()가 {html,text}(+텔레그램은 parts/overLimit)를 준다.
+   원격 http(비보안)에는 navigator.clipboard가 없어 레거시 경로로 폴백한다. */
+async function _copyExport(btn, icon, build) {
   if (!_summaryMd) return;
   const lbl = btn.querySelector('.tg-label');
-  const reset = () => { lbl.textContent = '✈️'; btn.className = 'tg-btn'; };
-  const { html, text, parts, overLimit } = YS.mdToTelegram(_summaryMd);
+  const { html, text, parts, overLimit } = build(_summaryMd);
   let ok = false;
   try {
     if (navigator.clipboard && window.ClipboardItem) {
@@ -886,14 +893,18 @@ async function copyForTelegram(btn) {
   if (!ok)              { lbl.textContent = '실패';            btn.className = 'tg-btn err'; }
   else if (overLimit)   { lbl.textContent = `복사됨 ${parts}개`; btn.className = 'tg-btn warn'; }
   else                  { lbl.textContent = '복사됨';           btn.className = 'tg-btn done'; }
-  setTimeout(reset, overLimit ? 3000 : 1600);
+  setTimeout(() => { lbl.textContent = icon; btn.className = 'tg-btn'; }, overLimit ? 3000 : 1600);
 }
+
+const copyForTelegram = (btn) => _copyExport(btn, '✈️', YS.mdToTelegram);
+const copyForBlogger  = (btn) => _copyExport(btn, '📋', YS.mdToBloggerHtml);
 
 async function openTranscript(path, title) {
   openModal(title);
   $('fs-ctrl').hidden = true;   // 전사 보기엔 글자크기 조절 숨김(요약 전용)
   $('font-ctrl').hidden = true;
-  $('tg-btn').hidden = true;    // 텔레그램용 복사도 요약 전용
+  $('tg-btn').hidden = true;    // 내보내기 복사는 요약 전용
+  $('blg-btn').hidden = true;
   _summaryMd = '';
   try {
     const r = await fetch('/history/text', {
