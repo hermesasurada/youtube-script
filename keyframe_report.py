@@ -33,6 +33,10 @@ SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
 VISION_MODEL    = os.environ.get("VISION_MODEL", "opus")   # 캡션 품질 우선(요약과 동일 티어)
+# Claude 비전 3회 실패 시 Grok 폴백(요약 폴백과 동일 기조). grok CLI는 이미지 옵션이 없지만
+# 프롬프트의 @경로를 읽어 비전이 동작한다 — 캡처를 통째로 잃는 것보다 낫다.
+GROK_VISION_FALLBACK = os.environ.get("GROK_VISION_FALLBACK", "1") != "0"
+GROK_VISION_MODEL    = os.environ.get("GROK_VISION_MODEL", os.environ.get("GROK_MODEL", "grok-4.5"))
 _LAST_VISION_ERR = ""   # 마지막 비전 호출 실패 사유(usage limit/장애 분류에 노출)
 VIDEO_MAXH      = int(os.environ.get("VIDEO_MAXH", "1080"))   # 다운로드 최대 높이(해상도)
 FRAME_WIDTH     = int(os.environ.get("FRAME_WIDTH", "1708"))  # 프레임 가로폭(이전 854의 2배)
@@ -292,12 +296,8 @@ JSON 배열로만 답하라(다른 설명 금지):
 이미지: {refs}"""
     log(f"[3] 비전 분류+정렬 ({len(frames)}장, 1회 호출)")
 
-    def _call() -> tuple[list | None, str]:
-        """(파싱된 배열|None, 실패사유). 실패사유는 usage limit/장애 분류에 쓰인다."""
-        r = llm_gateway.run_command(
-            [_claude_bin(), "-p", "--model", VISION_MODEL, prompt],
-            timeout=VISION_TIMEOUT,
-        )
+    def _parse(r) -> tuple[list | None, str]:
+        """CLI 실행 결과 → (파싱된 배열|None, 실패사유). 실패사유는 usage limit/장애 분류에 쓰인다."""
         if r.timed_out:
             return None, f"타임아웃({VISION_TIMEOUT}s)"
         out = (r.stdout or "").strip()
@@ -315,20 +315,54 @@ JSON 배열로만 답하라(다른 설명 금지):
             return None, "JSON 파싱 실패"
         return (data, "") if isinstance(data, list) else (None, "배열 아님")
 
+    def _call_claude() -> tuple[list | None, str]:
+        return _parse(llm_gateway.run_command(
+            [_claude_bin(), "-p", "--model", VISION_MODEL, prompt], timeout=VISION_TIMEOUT))
+
+    def _call_grok() -> tuple[list | None, str]:
+        """요약과 같은 Grok 폴백. grok CLI는 이미지 첨부 옵션이 없지만 프롬프트의 @경로를
+        읽어 비전이 동작한다(TUI가 뜨지 않도록 --prompt-file 단일턴으로 호출)."""
+        grok = llm_gateway.resolve_grok_bin()
+        if not (grok and os.path.exists(grok)):
+            return None, "grok 실행파일 없음"
+        tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+        try:
+            tf.write(prompt)
+            tf.close()
+            cmd = [grok, "--prompt-file", tf.name]
+            if GROK_VISION_MODEL:
+                cmd += ["-m", GROK_VISION_MODEL]
+            return _parse(llm_gateway.run_command(cmd, timeout=VISION_TIMEOUT))
+        except Exception as e:
+            return None, f"grok 실행 오류: {e}"
+        finally:
+            try:
+                os.remove(tf.name)
+            except OSError:
+                pass
+
     # 최대 3회 시도(일시적 장애·형식 일탈·과부하 대비, 점증 백오프). 마지막 사유를 caller에 노출.
     _LAST_VISION_ERR = ""
     data = None
     for attempt in range(3):
-        data, err = _call()
+        data, err = _call_claude()
         if data is not None:
             break
         _LAST_VISION_ERR = err
         log(f"  비전 응답 실패({attempt + 1}/3): {err}")
         if attempt < 2:
             time.sleep(3 * (attempt + 1))
+    if data is None and GROK_VISION_FALLBACK:
+        # Claude가 3회 다 실패 → 요약과 동일하게 Grok으로 폴백(캡처를 통째로 잃지 않게)
+        log(f"  비전 Claude 실패 → Grok 폴백 시도")
+        data, gerr = _call_grok()
+        if data is None:
+            _LAST_VISION_ERR = f"{_LAST_VISION_ERR} / grok 폴백 실패: {gerr}"
+        else:
+            log(f"  비전 Grok 폴백 성공")
     if data is None:
         # None = '비전 호출 자체 실패'. 빈 dict('자료 없음')과 구분해 호출측에 전파.
-        log(f"  비전 호출 실패(3회) — vision_failed: {_LAST_VISION_ERR}")
+        log(f"  비전 호출 실패 — vision_failed: {_LAST_VISION_ERR}")
         return None
     res = {d["name"]: d for d in data if isinstance(d, dict) and d.get("name")}
     kept = sum(1 for d in res.values() if d.get("keep"))
