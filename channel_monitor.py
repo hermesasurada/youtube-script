@@ -501,7 +501,7 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
         raise RuntimeError(f"요약 실패: {summary_err}")
 
     # 캡처(동기) — 요약은 이미 저장됨. 실패해도 항목은 완료(요약이 본체), systemic 여부만 표시
-    kf_note, kf_systemic = "", False
+    kf_note, kf_systemic, kf_permanent = "", False, False
     try:
         kf_body = {"txt_path": txt_path, "url": url}
         if skip_claude:
@@ -513,11 +513,18 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
             emsg = str(kf.get("error") or "")
             # 비전 호출 실패 + 한도 신호일 때만 systemic (다운로드 403 등과 구분)
             kf_systemic = kf_note == "vision_failed" and _is_systemic(emsg)
-            log(f"[kf] 캡처 스킵/실패: {kf_note} {emsg[:120]}")
+            # 멤버십 전용 전환·삭제·비공개는 다시 받아도 결과가 같다 → 재시도 대상에서 제외.
+            # (수집 당시엔 공개였다가 나중에 멤버십으로 돌리는 채널이 있어 캡처만 실패한다)
+            kf_permanent = bool(_META_PERMANENT_RE.search(emsg))
+            if kf_permanent:
+                log(f"[kf] 캡처 불가(영구 사유, 재시도 안 함): {emsg[:110]}")
+            else:
+                log(f"[kf] 캡처 스킵/실패: {kf_note} {emsg[:120]}")
     except Exception as e:
         kf_note = "오류"
         log(f"[kf] 캡처 오류(요약은 유지): {e}")
-    return {"txt_path": txt_path, "kf_note": kf_note, "kf_systemic": kf_systemic}
+    return {"txt_path": txt_path, "kf_note": kf_note, "kf_systemic": kf_systemic,
+            "kf_permanent": kf_permanent}
 
 
 def process_capture_only(txt_path: str, url: str) -> dict:
@@ -569,8 +576,9 @@ def drain() -> None:
         try:
             res = process_video(v, prompt, skip_claude=(mode == "grok"))
             kf_note = res.get("kf_note")
-            # 캡처만 일시 실패(systemic·Grok스킵 아님) → 다음 주기 1회 재시도 예약(전사경로 보관)
-            retryable = bool(kf_note) and not res.get("kf_systemic") and mode == "claude"
+            # 캡처만 일시 실패(systemic·영구사유·Grok스킵 아님) → 다음 주기 1회 재시도 예약
+            retryable = (bool(kf_note) and not res.get("kf_systemic")
+                         and not res.get("kf_permanent") and mode == "claude")
             if retryable and res.get("txt_path"):
                 db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
                 notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
@@ -634,9 +642,16 @@ def drain() -> None:
                     log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
                 else:
                     rz = str(kf.get("reason") or "실패")
-                    db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
-                    log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {str(kf.get('error'))[:120]}")
-                    notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
+                    emsg = str(kf.get("error") or "")
+                    # 재시도 사이에 멤버십 전용으로 바뀌었을 수 있다 — 사유를 구분해 알린다
+                    if _META_PERMANENT_RE.search(emsg):
+                        db.queue_set_status(v["id"], "done", reason="캡처 불가(멤버십/비공개 전환)")
+                        log(f"[kf-retry] 캡처 불가(영구 사유): {emsg[:110]}")
+                        notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
+                    else:
+                        db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
+                        log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {emsg[:120]}")
+                        notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
             except Exception as e:
                 db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
                 log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")

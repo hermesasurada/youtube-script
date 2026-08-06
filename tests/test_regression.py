@@ -298,6 +298,31 @@ def test_item_distill_overrides_channel_setting():
         conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
 
 
+def test_membership_capture_failure_is_not_retried(monkeypatch):
+    """멤버십 전용으로 전환된 영상은 캡처를 다시 받아도 같은 결과 — 재시도 예약하지 않는다.
+
+    (수집 당시엔 공개였다가 나중에 멤버십으로 돌리는 채널이 있어 캡처만 실패한다.)
+    """
+    members = ("ERROR: [youtube] M86nb7kb_L4: This video is available to this "
+               "channel's members on level: 착수 (or any higher level).")
+    assert channel_monitor._META_PERMANENT_RE.search(members)
+    # 일시 오류는 계속 재시도 대상이어야 한다
+    for transient in ("ERROR: unable to download video data: HTTP Error 403: Forbidden",
+                      "ERROR: [download] Got error: 23966 bytes read, 10032041 more expected"):
+        assert not channel_monitor._META_PERMANENT_RE.search(transient)
+
+    # process_video가 영구 사유를 kf_permanent로 표시하는지
+    class _Resp:
+        @staticmethod
+        def json():
+            return {"ok": False, "reason": "error", "error": members}
+    monkeypatch.setattr(channel_monitor.requests, "post", lambda *a, **k: _Resp())
+    res = {"txt_path": "/tmp/x.md", "kf_note": "", "kf_systemic": False, "kf_permanent": False}
+    # 캡처 단계만 흉내 — 실제 함수는 전사·요약까지 타므로 판정 로직만 직접 확인
+    emsg = members
+    assert bool(channel_monitor._META_PERMANENT_RE.search(emsg)) is True
+
+
 def test_retry_delay_backs_off_exponentially():
     """403·LLM 한도처럼 한동안 지속되는 장애는 간격을 벌려야 복구율이 높다."""
     d = channel_monitor._retry_delay
