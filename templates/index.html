@@ -263,13 +263,8 @@
       <button class="sum-blogger-btn" id="sum-telegram-btn" onclick="copySummaryForTelegram(this)"
               title="같은 본문을 텔레그램에서 읽기 좋은 형태(굵은 소제목·줄바꿈)로 클립보드에 복사">✈️ <span class="tg-label">텔레그램용 복사</span></button>
       <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
-      <label class="sum-distill-ctrl" id="sum-distill-ctrl" title="이 영상의 지식증류 대상 여부 (채널 설정보다 우선)">
-        <select id="sum-distill" onchange="setItemDistill(this.value)" aria-label="증류 대상">
-          <option value="">증류: 채널 따름</option>
-          <option value="1">증류: 포함</option>
-          <option value="0">증류: 제외</option>
-        </select>
-      </label>
+      <button class="sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
+              aria-label="증류 대상 전환">증류 —</button>
       <button class="sum-panel-close" onclick="closeSummaryModal()" title="닫기">×</button>
     </div>
     <div class="sum-panel-body sum-md" id="sum-panel-body"></div>

@@ -1772,20 +1772,21 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   flex-shrink: 0;
   opacity: .85;
 }
-/* 요약 헤더의 증류 선택 — 제목을 없앤 자리라 auto margin으로 가장 우측(닫기 앞)에 붙인다 */
+/* 요약 헤더의 증류 토글 — 제목을 없앤 자리라 auto margin으로 가장 우측(닫기 앞)에 붙인다.
+   클릭할 때마다 채널 따름 → 포함 → 제외로 순환한다. */
 .sum-distill-ctrl {
   margin-left: auto; flex-shrink: 0;
-  display: inline-flex; align-items: center;
-  height: var(--sum-ctrl-h); padding: 0 .2rem 0 .5rem;
+  display: inline-flex; align-items: center; gap: .3rem;
+  height: var(--sum-ctrl-h); padding: 0 .65rem;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2);
+  color: var(--muted); font-family: inherit; font-size: 12px; white-space: nowrap;
+  cursor: pointer; transition: color .15s, background .15s, border-color .15s;
 }
-.sum-distill-ctrl select {
-  height: 100%; border: 0; outline: 0; background: transparent; color: var(--muted);
-  font-family: inherit; font-size: 12px; cursor: pointer;
-}
-/* 기본값(채널 따름)이 아닐 때만 강조 — 이 영상만 따로 지정했음을 드러낸다 */
-.sum-distill-ctrl.set { border-color: var(--highlight); background: var(--highlight-soft); }
-.sum-distill-ctrl.set select { color: var(--highlight); font-weight: 600; }
+.sum-distill-ctrl:hover { border-color: var(--border-strong); color: var(--text); }
+/* 이 영상만 따로 지정했을 때 강조(채널 따름은 기본값이라 흐리게 둔다) */
+.sum-distill-ctrl.set { border-color: var(--highlight); background: var(--highlight-soft); color: var(--highlight); font-weight: 600; }
+/* 채널 따름일 때 옆에 붙는 실제 적용값 */
+.sum-distill-ctrl .dist-eff { color: var(--subtle); font-size: 11px; }
 
 .sum-panel-title {
   flex: 1;

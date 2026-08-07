@@ -1635,38 +1635,55 @@ async function copyUrl() {
 let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성·블로거 복사에 사용
 let _summaryPath = '';    // 현재 열린 요약 경로 — 증류 설정 변경 대상
 
-/* 증류 셀렉터 표시 — d = {override, channel, effective} | null(미조회)
-   기본값(채널 따름)일 때는 흐리게, 이 영상만 따로 지정했으면 강조한다. */
+let _distill = null;      // 현재 영상의 증류 상태 {override, channel, effective}
+
+/* 증류 토글 표시 — d = {override, channel, effective} | null(미조회).
+   채널 따름일 때는 그 채널이 실제로 어떤 값인지(포함/제외) 옆에 함께 보여준다. */
 function _setDistillUI(d) {
-  const sel = document.getElementById('sum-distill');
   const box = document.getElementById('sum-distill-ctrl');
-  if (!sel || !box) return;
+  if (!box) return;
+  _distill = d || null;
   const ov = d ? d.override : null;
-  sel.value = ov === null || ov === undefined ? '' : (ov ? '1' : '0');
-  box.classList.toggle('set', sel.value !== '');
-  // 채널 설정을 따를 때 실제로 어떻게 적용되는지 툴팁으로 알려준다
-  const eff = d ? (d.effective ? '포함' : '제외') : '—';
-  box.title = sel.value === ''
-    ? `채널 설정을 따름 → 현재 ${eff} (채널 모니터에서 변경)`
-    : `이 영상만 ${sel.value === '1' ? '포함' : '제외'}으로 지정됨 (채널 설정보다 우선)`;
+  const set = ov !== null && ov !== undefined;
+  box.classList.toggle('set', set);
+  if (!d) {
+    box.textContent = '증류 —';
+    box.title = '';
+    return;
+  }
+  const chan = d.channel ? '포함' : '제외';
+  if (!set) {
+    box.innerHTML = `증류 ↪ 채널 <span class="dist-eff">(${chan})</span>`;
+    box.title = `채널 설정을 따름 → 현재 ${chan}. 클릭하면 이 영상만 '포함'으로 지정`;
+  } else if (ov) {
+    box.textContent = '증류 ✓ 포함';
+    box.title = `이 영상만 포함으로 지정됨(채널은 ${chan}). 클릭하면 '제외'로`;
+  } else {
+    box.textContent = '증류 ✕ 제외';
+    box.title = `이 영상만 제외로 지정됨(채널은 ${chan}). 클릭하면 '채널 따름'으로`;
+  }
 }
 
-/* 영상 단위 증류 설정 변경 — ''=미설정(채널 따름), '1'=포함, '0'=제외 */
+/* 클릭할 때마다 채널 따름 → 포함 → 제외 → 채널 따름 순으로 돈다. */
+function cycleItemDistill() {
+  const ov = _distill ? _distill.override : null;
+  const next = (ov === null || ov === undefined) ? true : (ov ? false : null);
+  setItemDistill(next);
+}
+
+/* 영상 단위 증류 설정 변경 — null=미설정(채널 따름), true=포함, false=제외 */
 async function setItemDistill(value) {
   if (!_summaryPath) return;
-  const box = document.getElementById('sum-distill-ctrl');
-  const payload = value === '' ? null : value === '1';
   try {
     const r = await fetch('/history/distill', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: _summaryPath, distill: payload }),
+      body: JSON.stringify({ path: _summaryPath, distill: value }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     _setDistillUI(d);
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
-    if (box) box.classList.remove('set');
   }
 }
 
