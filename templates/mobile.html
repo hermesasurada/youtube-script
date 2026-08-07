@@ -501,7 +501,18 @@ const SVG = {
 };
 
 const PAGE = 20;
-let ALL = [], FILTERED = [], shownCount = 0, _unreadOnly = false;
+let ALL = [], FILTERED = [], shownCount = 0;
+/* 미읽음만 보기 — 데스크톱과 같은 'histFilter' 키를 공유해 기기 간 상태가 이어진다 */
+function _savedFilter() {
+  try { return JSON.parse(localStorage.getItem('histFilter') || 'null') || {}; }
+  catch { return {}; }
+}
+function _saveUnread() {
+  try {
+    localStorage.setItem('histFilter', JSON.stringify({ ..._savedFilter(), unread: _unreadOnly }));
+  } catch { /* 스토리지 불가(사파리 프라이빗 등) — 무시 */ }
+}
+let _unreadOnly = !!_savedFilter().unread;
 let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
 let _sortKey = localStorage.getItem('histSortKey') || 'date';  // 'date'=전사 처리일, 'upload'=영상 게시일 (데스크톱과 공유)
 /* 정렬 기준값 — 게시일이 없으면 처리일로 대체(순서 뒤엉킴 방지) */
@@ -545,6 +556,7 @@ async function loadHistory(force) {
   }
   btn.classList.remove('spin');
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
+  $('unread-filter-btn').classList.toggle('active', _unreadOnly);   // 저장된 미읽음 상태 반영
   applyFilter();
 }
 
@@ -593,6 +605,7 @@ function toggleSortKey() {
 function toggleUnreadFilter() {
   _unreadOnly = !_unreadOnly;
   $('unread-filter-btn').classList.toggle('active', _unreadOnly);
+  _saveUnread();
   applyFilter();
 }
 
