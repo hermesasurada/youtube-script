@@ -8,7 +8,7 @@
 흐름:
   1) 활성 채널마다 RSS(feeds/videos.xml)로 최근 업로드 목록 수집
   2) 최초 폴이면 현재 피드를 baseline(seen)로 기록만 하고 처리 안 함(백필 방지)
-  3) 이후엔 이력(items)·큐에 없는 신규만 메타 확인 → 필터(≤5분·라이브·Shorts 제외) → 큐 적재
+  3) 이후엔 이력(items)·큐에 없는 신규만 메타 확인 → 필터(≤3분·라이브·Shorts 제외) → 큐 적재
   4) 큐 drain 게이트: Claude OK 또는 Grok 폴백 준비 시 진행
      → /start→/result→/summarize(Claude→Grok)→/keyframes(Claude 비전)
   5) 건별 완료/실패 알림(Telegram, 자격증명 있을 때)
@@ -43,7 +43,7 @@ except Exception:
 
 # ── 설정 ───────────────────────────────────────────────────────────────
 BASE       = os.environ.get("YTS_BASE", "http://127.0.0.1:5001")
-MIN_DUR    = int(os.environ.get("MONITOR_MIN_DURATION", "300"))   # 5분 이하 제외
+MIN_DUR    = int(os.environ.get("MONITOR_MIN_DURATION", "180"))   # 3분 이하 제외(채널별 오버라이드 가능)
 POLL_SEC   = int(os.environ.get("MONITOR_POLL_SEC", "6"))         # /result 폴링 간격
 MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "9000"))  # 건당 전사 상한(2.5h)
 SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
