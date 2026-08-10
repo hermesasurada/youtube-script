@@ -353,6 +353,21 @@
     .ch-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
     .ch-queue { font-size: 11.5px; font-family: var(--font-mono); color: var(--muted);
       background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: .45rem .6rem; }
+    .model-order-card { display: grid; gap: .6rem; padding: .75rem;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .model-order-head { display: flex; align-items: center; justify-content: space-between;
+      color: var(--text); font-size: 13px; font-weight: 700; }
+    .model-order-status { min-height: 1em; color: var(--muted); font-size: 11px; font-weight: 500; }
+    .model-order-row { display: flex; align-items: center; gap: .55rem; }
+    .model-order-label { flex: 0 0 34px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .model-order-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .3rem; flex: 1; }
+    .model-order-slot { display: flex; align-items: center; gap: .2rem; min-width: 0; }
+    .model-order-rank { color: var(--muted); font: 10px var(--font-mono); }
+    .model-order-select { min-width: 0; width: 100%; height: 31px; padding: 0 1rem 0 .3rem;
+      color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 5px; font: 11px var(--font-mono); }
+    .model-order-select:disabled { opacity: .55; }
+    .model-order-hint { margin: -.1rem 0 0 40px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
     .ch-empty, .ch-loading { color: var(--muted); font-size: 13.5px; padding: .5rem .2rem; }
     .ch-row { display: flex; align-items: center; gap: .75rem; padding: .7rem .8rem;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -604,6 +619,23 @@ function toggleUnreadFilter() {
   applyFilter();
 }
 
+/* 썸네일 폴백 — 비공개 전환 영상은 404여도 회색 자리표시(120x90)가 실려와 onload가 뜬다.
+   그래서 크기까지 확인해 작은 이미지면 전사 때 받아둔 사본(/thumb)으로 내려간다. */
+function _thumbCheck(img) {
+  if (img.naturalWidth > 0 && img.naturalWidth <= 120) _thumbFallback(img);
+}
+function _thumbFallback(img) {
+  const vid = img.dataset.vid || '';
+  const step = img.dataset.step || '0';
+  if (step === '0' && vid) { img.dataset.step = '1'; img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`; return; }
+  if (step === '1' && vid) { img.dataset.step = '2'; img.src = `/thumb/${encodeURIComponent(vid)}`; return; }
+  img.onerror = null;
+  const ph = document.createElement('div');
+  ph.className = 'hist-thumb-placeholder';
+  ph.textContent = '썸네일 없음';
+  img.replaceWith(ph);
+}
+
 function appendPage() {
   const slice = FILTERED.slice(shownCount, shownCount + PAGE);
   if (slice.length === 0) {
@@ -621,7 +653,7 @@ function appendPage() {
 function renderCard(item) {
   const vid = ytVideoId(item.webpage_url);
   const thumb = vid
-    ? `<img class="hist-thumb" src="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" alt="" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${vid}/hqdefault.jpg'">`
+    ? `<img class="hist-thumb" src="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" alt="" loading="lazy" data-vid="${attrEsc(vid)}" onerror="_thumbFallback(this)" onload="_thumbCheck(this)">`
     : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
   const dur = item.duration
     ? `<span class="hist-thumb-dur">${fmtDurBadge(item.duration)}</span>` : '';
@@ -760,12 +792,71 @@ async function openChannels() {
   $('modal-body').className = 'modal-body channels';
   await loadChannels();
 }
+const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
+const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok-4.5' };
+let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+
+function monitorModelControlsHtml() {
+  return `<div class="model-order-card">
+    <div class="model-order-head"><span>LLM 처리 순서</span><span class="model-order-status" id="model-order-status"></span></div>
+    <div class="model-order-row"><span class="model-order-label">요약</span><div class="model-order-selects" id="summary-model-order"></div></div>
+    <div class="model-order-row"><span class="model-order-label">캡처</span><div class="model-order-selects" id="capture-model-order"></div></div>
+    <p class="model-order-hint">1순위 실패 시 왼쪽에서 오른쪽 순서로 자동 전환합니다.</p>
+  </div>`;
+}
+
+function renderMonitorModelOrders() {
+  for (const kind of ['summary', 'capture']) {
+    const el = $(kind + '-model-order');
+    if (!el) continue;
+    const order = monitorModelOrders[kind] || MONITOR_MODELS;
+    el.innerHTML = order.map((selected, index) => {
+      const options = MONITOR_MODELS.map(model =>
+        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model]}</option>`
+      ).join('');
+      return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
+        + `<select class="model-order-select" aria-label="${kind === 'summary' ? '요약' : '캡처'} ${index + 1}순위" `
+        + `onchange="changeMonitorModelOrder('${kind}', ${index}, this.value)">${options}</select></label>`;
+    }).join('');
+  }
+}
+
+async function changeMonitorModelOrder(kind, index, selected) {
+  const original = [...monitorModelOrders[kind]];
+  const next = [...original];
+  const other = next.indexOf(selected);
+  if (other !== index) [next[index], next[other]] = [next[other], next[index]];
+  monitorModelOrders[kind] = next;
+  renderMonitorModelOrders();
+  const selects = document.querySelectorAll('.model-order-select');
+  const status = $('model-order-status');
+  selects.forEach(el => { el.disabled = true; });
+  status.textContent = '저장 중…';
+  try {
+    const d = await (await fetch('/channels/model-orders', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [kind]: next }),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    monitorModelOrders = d.model_orders;
+    status.textContent = '저장됨';
+  } catch (e) {
+    monitorModelOrders[kind] = original;
+    status.textContent = '저장 실패';
+    alert('모델 순서 저장 실패: ' + e.message);
+  } finally {
+    renderMonitorModelOrders();
+    window.setTimeout(() => { if (status.textContent === '저장됨') status.textContent = ''; }, 1400);
+  }
+}
+
 async function loadChannels() {
   const body = $('modal-body');
   body.innerHTML = '<div class="ch-loading">불러오는 중…</div>';
   try {
     const d = await (await fetch('/channels', { cache: 'no-store' })).json();
     if (d.error) throw new Error(d.error);
+    monitorModelOrders = d.model_orders || monitorModelOrders;
     const q = d.queue || {}, parts = [];
     if (q.pending)    parts.push(`대기 ${q.pending}`);
     if (q.processing) parts.push(`처리중 ${q.processing}`);
@@ -793,7 +884,8 @@ async function loadChannels() {
       </div>`;
     }).join('') : '<div class="ch-empty">등록된 채널이 없습니다.</div>';
     body.innerHTML = `<p class="ch-hint">등록 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다(20분 주기).</p>`
-      + `<div class="ch-queue">${esc(qline)}</div>${rows}`;
+      + monitorModelControlsHtml() + `<div class="ch-queue">${esc(qline)}</div>${rows}`;
+    renderMonitorModelOrders();
   } catch (e) {
     body.innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
   }

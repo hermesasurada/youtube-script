@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import urllib.request
 import uuid
 from datetime import datetime
 
@@ -95,6 +96,9 @@ FFMPEG_LOCATION = os.path.dirname(_resolve_binary("ffmpeg"))
 AUDIO_DIR   = os.environ.get("AUDIO_DIR", BASE_DIR)
 RES_DIR     = os.path.join(BASE_DIR, "res")
 SUMMARY_DIR = os.path.join(RES_DIR, "summary")
+# 썸네일 사본 — 전사 시점에 받아 둔다. 영상이 나중에 비공개·멤버십 전용으로 바뀌면
+# i.ytimg.com 이미지도 함께 막혀 이력 카드가 빈칸이 되므로, 그때 이 사본으로 폴백한다.
+THUMB_DIR   = os.path.join(RES_DIR, "thumbs")
 AUDIO_EXT   = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".mp4", ".webm"}
 
 DEFAULT_PROMPT = """\
@@ -114,6 +118,11 @@ def _resolve_claude_bin() -> str:
 CLAUDE_BIN   = _resolve_claude_bin()
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "900"))
+
+# GPT 옵션은 로컬에 로그인된 Codex CLI를 단일턴 모델 호출기로 사용한다.
+GPT_BIN       = llm_gateway.resolve_codex_bin()
+GPT_MODEL     = os.environ.get("GPT_MODEL", "gpt-5.6-sol")
+GPT_TIMEOUT   = int(os.environ.get("GPT_TIMEOUT", "900"))
 
 # 요약 폴백: Claude 실패(한도/장애/오류) 시 Grok CLI로 재시도.
 GROK_BIN      = llm_gateway.resolve_grok_bin()
@@ -395,6 +404,41 @@ def _set_job_error(job_id: str, stage: str, message: object) -> str:
     return text
 
 
+_THUMB_SOURCES = ("mqdefault", "hqdefault", "sddefault", "maxresdefault")
+
+
+def save_thumbnail(yt_id: str) -> str | None:
+    """영상 썸네일을 res/thumbs/{yt_id}.jpg 로 내려받는다(이미 있으면 그대로 둔다).
+
+    나중에 비공개·멤버십 전용으로 바뀌면 원본 URL이 막히므로 그 전에 확보해 둔다.
+    실패해도 파이프라인엔 영향이 없다(폴백이 없을 뿐).
+    """
+    yt_id = (yt_id or "").strip()
+    if not yt_id or not re.fullmatch(r"[\w-]{5,20}", yt_id):
+        return None
+    dest = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
+    if os.path.exists(dest) and os.path.getsize(dest) > 1024:
+        return dest
+    os.makedirs(THUMB_DIR, exist_ok=True)
+    for name in _THUMB_SOURCES:
+        try:
+            with urllib.request.urlopen(
+                f"https://i.ytimg.com/vi/{yt_id}/{name}.jpg", timeout=15) as r:
+                data = r.read()
+        except Exception:
+            continue
+        # YouTube는 없는 해상도에 회색 자리표시(120x90, ~1KB)를 준다 — 크기로 거른다
+        if len(data) < 2048:
+            continue
+        tmp = dest + ".part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)      # 부분 파일이 보이지 않도록 원자적 교체
+        log.info("thumbnail saved: %s (%s, %d bytes)", yt_id, name, len(data))
+        return dest
+    return None
+
+
 def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                           delete_audio: bool = False) -> None:
     q = jobs[job_id]["queue"]
@@ -431,6 +475,11 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                     log.info("source audio removed: %s", os.path.basename(audio_path))
                 except OSError as e:
                     log.warning("audio cleanup failed: %s (%s)", os.path.basename(audio_path), e)
+            # 썸네일 사본 확보(비공개 전환 대비). 실패해도 전사 결과엔 영향 없음.
+            try:
+                save_thumbnail((jobs[job_id].get("meta") or {}).get("id") or "")
+            except Exception as e:
+                log.warning("thumbnail save failed: %s", e)
             log.info("transcription done: %s", os.path.basename(md_path))
             q.put(f"✅ 전사 저장됨: {os.path.basename(md_path)}")
             q.put({"type": "progress", "pct": 100})
@@ -679,7 +728,8 @@ def _restrict_remote_access():
             or p.startswith("/channels")   # 채널 자동 모니터 조회/토글(모바일 원격 관리)
             or p.startswith("/m/")
             or p.startswith("/static/")
-            or p.startswith("/sframe/")):
+            or p.startswith("/sframe/")
+            or p.startswith("/thumb/")):   # 썸네일 사본(비공개 전환 영상 폴백)
         return
     is_mobile = bool(_MOBILE_UA.search(request.headers.get("User-Agent", "")))
     # 이력 페이지: 디바이스에 맞는 쪽으로 정규화
@@ -914,6 +964,9 @@ def _model_label(model_id: str) -> str:
         v = re.search(r"(\d+)\.(\d+)", mid)
         ver = f" {v.group(0)}" if v else ""
         return ("Grok Composer" if "composer" in low else "Grok") + ver
+    if low.startswith("gpt"):
+        v = re.search(r"(\d+(?:\.\d+)?)", mid)
+        return "GPT" + (f" {v.group(1)}" if v else "")
     return mid or "?"
 
 
@@ -930,6 +983,26 @@ def _compress_line(summary_body: str, transcript_chars: int) -> str:
         return ""
     pct = max(1, round(len(summary_body) / transcript_chars * 100))
     return f"<!--SUMMARY_COMPRESS:{pct}-->\n\n"
+
+
+def _summarize_with_gpt(prompt: str) -> tuple[str, str]:
+    """Codex CLI의 GPT 모델로 단일턴 요약. (요약 텍스트, 오류사유)."""
+    try:
+        r = llm_gateway.run_codex_prompt(
+            _SUMMARY_SYS + "\n\n" + prompt,
+            model=GPT_MODEL,
+            timeout=GPT_TIMEOUT,
+        )
+    except Exception as e:
+        return "", f"gpt 실행 오류: {e}"
+    if r.timed_out:
+        return "", f"gpt 타임아웃({GPT_TIMEOUT}s)"
+    if r.returncode != 0:
+        return "", (r.stderr or r.stdout or f"gpt rc={r.returncode}").strip()[:200]
+    out = _clean_summary(r.stdout or "")
+    if not out.strip():
+        return "", "gpt 빈 응답"
+    return out, ""
 
 
 def _summarize_with_grok(prompt: str) -> tuple[str, str]:
@@ -962,6 +1035,138 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
     if not out.strip():
         return "", "grok 빈 응답"
     return out, ""
+
+
+def _summarize_ordered(prompt: str, save_path: str | None, model_order,
+                       *, transcript_chars: int = 0):
+    """지정 순서대로 Opus/GPT/Grok을 시도하는 자동모니터용 SSE 생성기."""
+    order = llm_gateway.normalize_model_order(model_order)
+    failures: list[str] = []
+    client_has_output = False
+
+    def reset_client():
+        nonlocal client_has_output
+        if client_has_output:
+            client_has_output = False
+            return "event: reset\ndata: \"\"\n\n"
+        return ""
+
+    def save_full(body: str, label: str) -> tuple[str, str]:
+        cline = _compress_line(body, transcript_chars)
+        full = _model_line(label) + cline + body
+        if save_path:
+            try:
+                document_io.atomic_write_text(save_path, full)
+                _reindex_summary(save_path)
+            except Exception as e:
+                return "", "저장 실패: " + str(e)
+        return full, ""
+
+    for key in order:
+        if key == "opus":
+            command = [
+                _resolve_claude_bin(), "-p",
+                "--output-format", "stream-json",
+                "--include-partial-messages",
+                "--model", CLAUDE_MODEL,
+                "--allowedTools", "",
+                "--append-system-prompt", _SUMMARY_SYS,
+                "--verbose",
+            ]
+            chunks: list[str] = []
+            final: str | None = None
+            error_msg: str | None = None
+            used_model: str | None = None
+            marker_sent = False
+            try:
+                for process_event in llm_gateway.stream_command(
+                    command, input_text=prompt, timeout=CLAUDE_TIMEOUT
+                ):
+                    if process_event.kind == "timeout":
+                        detail = process_event.stderr.strip()[:200]
+                        error_msg = f"Claude 타임아웃({CLAUDE_TIMEOUT}s)" + (f": {detail}" if detail else "")
+                        continue
+                    if process_event.kind == "complete":
+                        if process_event.returncode != 0 and not error_msg:
+                            error_msg = process_event.stderr.strip()[:200] or f"Claude rc={process_event.returncode}"
+                        continue
+                    if process_event.kind != "stdout":
+                        continue
+                    line = process_event.data.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    event_type = ev.get("type")
+                    if event_type == "system" and ev.get("model") and not used_model:
+                        used_model = ev.get("model")
+                        marker_sent = True
+                        client_has_output = True
+                        yield f"data: {json.dumps(_model_line(_model_label(used_model)))}\n\n"
+                    if event_type == "stream_event":
+                        sub = ev.get("event") or {}
+                        if sub.get("type") == "content_block_delta":
+                            delta = sub.get("delta") or {}
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text") or ""
+                                if text:
+                                    if not marker_sent:
+                                        marker_sent = True
+                                        client_has_output = True
+                                        yield f"data: {json.dumps(_model_line(_model_label(CLAUDE_MODEL)))}\n\n"
+                                    chunks.append(text)
+                                    client_has_output = True
+                                    yield f"data: {json.dumps(text)}\n\n"
+                    elif event_type == "result":
+                        if ev.get("is_error"):
+                            error_msg = ev.get("result") or "Claude CLI 오류"
+                        else:
+                            final = ev.get("result") or "".join(chunks)
+            except Exception as e:
+                error_msg = str(e)
+
+            body = _clean_summary(final if final is not None else "".join(chunks))
+            if not error_msg and body:
+                cline = _compress_line(body, transcript_chars)
+                if cline:
+                    yield f"data: {json.dumps(cline)}\n\n"
+                _, save_err = save_full(body, _model_label(used_model or CLAUDE_MODEL))
+                if save_err:
+                    yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
+                    return
+                yield "event: done\ndata: \n\n"
+                return
+            failures.append(f"Opus: {error_msg or '빈 응답'}")
+            log.warning("summarize opus 실패 → 다음 모델: %s", failures[-1])
+            reset = reset_client()
+            if reset:
+                yield reset
+            continue
+
+        if key == "gpt":
+            body, err = _summarize_with_gpt(prompt)
+            label = _model_label(GPT_MODEL or "gpt")
+        else:
+            body, err = _summarize_with_grok(prompt)
+            label = _model_label(GROK_MODEL or "grok")
+        if not body:
+            failures.append(f"{key.upper()}: {err or '빈 응답'}")
+            log.warning("summarize %s 실패 → 다음 모델: %s", key, failures[-1])
+            continue
+        full, save_err = save_full(body, label)
+        if save_err:
+            yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
+            return
+        reset = reset_client()
+        if reset:
+            yield reset
+        yield f"data: {json.dumps(full)}\n\n"
+        yield "event: done\ndata: \n\n"
+        return
+
+    yield f"event: error\ndata: {json.dumps('모든 요약 모델 실패: ' + ' / '.join(failures))}\n\n"
 
 
 def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: bool = False,
@@ -1116,6 +1321,9 @@ def summarize():
         data.get("skip_claude")
         or str(data.get("mode") or "").lower() == "grok"
     )
+    requested_order = data.get("models") or data.get("model_order")
+    model_order = (llm_gateway.normalize_model_order(requested_order)
+                   if requested_order is not None else None)
     log.info(
         "summarize start: %s%s",
         os.path.basename(abs_path),
@@ -1124,10 +1332,16 @@ def summarize():
 
     def guarded_summary():
         with _summarize_sem:
-            yield from _summarize_with_claude(
-                prompt, save_path, skip_claude=skip_claude,
-                transcript_chars=len(transcript_blob),
-            )
+            if model_order is not None:
+                yield from _summarize_ordered(
+                    prompt, save_path, model_order,
+                    transcript_chars=len(transcript_blob),
+                )
+            else:
+                yield from _summarize_with_claude(
+                    prompt, save_path, skip_claude=skip_claude,
+                    transcript_chars=len(transcript_blob),
+                )
 
     return Response(guarded_summary(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1157,7 +1371,31 @@ def save_prompt():
 def channels_list():
     """모니터링 채널 목록 + 큐 요약(모달용)."""
     try:
-        return _json({"channels": db.list_channels(), "queue": db.queue_counts()})
+        return _json({"channels": db.list_channels(), "queue": db.queue_counts(),
+                      "model_orders": db.get_monitor_model_orders()})
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+
+
+@app.route("/channels/model-orders", methods=["PATCH"])
+def channel_model_orders():
+    """자동모니터 요약/캡처의 Opus·GPT·Grok 폴백 순서를 저장한다."""
+    data = request.get_json(force=True) or {}
+    updates = {}
+    expected = set(llm_gateway.MODEL_KEYS)
+    for key in ("summary", "capture"):
+        if key not in data:
+            continue
+        value = data[key]
+        if (not isinstance(value, list) or len(value) != len(expected)
+                or set(str(v).lower() for v in value) != expected):
+            return _json({"error": f"{key} 순서는 opus, gpt, grok을 한 번씩 포함해야 합니다."}, 400)
+        updates[key] = [str(v).lower() for v in value]
+    if not updates:
+        return _json({"error": "변경할 순서가 없습니다(summary/capture)."}, 400)
+    try:
+        saved = db.set_monitor_model_orders(**updates)
+        return _json({"ok": True, "model_orders": saved})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 
@@ -1383,6 +1621,17 @@ def summary_content():
         return _json({"error": str(e)}, 500)
 
 
+@app.route("/thumb/<yt_id>")
+def serve_thumbnail(yt_id: str):
+    """전사 때 받아둔 썸네일 사본. 원본(i.ytimg.com)이 막힌 영상의 폴백용."""
+    if not re.fullmatch(r"[\w-]{5,20}", yt_id or ""):
+        return _json({"error": "잘못된 id"}, 400)
+    p = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
+    if not os.path.isfile(p):
+        return _json({"error": "없음"}, 404)
+    return send_file(p, mimetype="image/jpeg", max_age=86400)
+
+
 @app.route("/sframe/<path:rel>")
 def serve_summary_frame(rel: str):
     """요약 키프레임 이미지 서빙 (res/summary 하위로 경로 검증)."""
@@ -1424,9 +1673,13 @@ def keyframes():
                 or data.get("skip_claude_vision")
                 or str(data.get("mode") or "").lower() == "grok"
             )
+            requested_order = data.get("models") or data.get("model_order")
+            model_order = (llm_gateway.normalize_model_order(requested_order)
+                           if requested_order is not None else None)
             res = keyframe_report.generate_keyframes(
                 summary_path, (data.get("url") or "").strip(), frames_dir, url_base,
                 skip_claude=skip_claude,
+                model_order=model_order,
             )
     except Exception as e:
         log.warning("keyframes error: %s", e)

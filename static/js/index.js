@@ -51,6 +51,57 @@ function closeChannelsModal() {
 function handleChannelsOverlayClick(e) {
   if (e.target.id === 'channels-overlay') closeChannelsModal();
 }
+const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
+const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok-4.5' };
+let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+
+function renderMonitorModelOrders() {
+  for (const kind of ['summary', 'capture']) {
+    const el = document.getElementById(kind + '-model-order');
+    if (!el) continue;
+    const order = monitorModelOrders[kind] || MONITOR_MODELS;
+    el.innerHTML = order.map((selected, index) => {
+      const options = MONITOR_MODELS.map(model =>
+        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model]}</option>`
+      ).join('');
+      return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
+        + `<select class="model-order-select" aria-label="${kind === 'summary' ? '요약' : '캡처'} ${index + 1}순위" `
+        + `onchange="changeMonitorModelOrder('${kind}', ${index}, this.value)">${options}</select></label>`;
+    }).join('');
+  }
+}
+
+async function changeMonitorModelOrder(kind, index, selected) {
+  const original = [...monitorModelOrders[kind]];
+  const previous = [...original];
+  const other = previous.indexOf(selected);
+  if (other !== index) {
+    [previous[index], previous[other]] = [previous[other], previous[index]];
+  }
+  monitorModelOrders[kind] = previous;
+  renderMonitorModelOrders();
+  const selects = document.querySelectorAll('.model-order-select');
+  const status = document.getElementById('model-order-status');
+  selects.forEach(el => { el.disabled = true; });
+  status.textContent = '저장 중…';
+  try {
+    const d = await (await fetch('/channels/model-orders', {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ [kind]: previous }),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    monitorModelOrders = d.model_orders;
+    status.textContent = '저장됨';
+  } catch (e) {
+    monitorModelOrders[kind] = original;
+    status.textContent = '저장 실패';
+    alert('모델 순서 저장 실패: ' + e.message);
+  } finally {
+    renderMonitorModelOrders();
+    window.setTimeout(() => { if (status.textContent === '저장됨') status.textContent = ''; }, 1400);
+  }
+}
+
 async function loadChannels() {
   const list = document.getElementById('channels-list');
   const qEl  = document.getElementById('channels-queue');
@@ -59,6 +110,8 @@ async function loadChannels() {
   try {
     const d = await (await fetch('/channels')).json();
     if (d.error) throw new Error(d.error);
+    monitorModelOrders = d.model_orders || monitorModelOrders;
+    renderMonitorModelOrders();
     const q = d.queue || {};
     const parts = [];
     if (q.pending)    parts.push(`대기 ${q.pending}`);
@@ -410,6 +463,32 @@ async function deleteCard(btn) {
   applyHistoryFilter(true);
 }
 
+/* 썸네일 폴백 — 비공개로 바뀐 영상은 i.ytimg가 404를 주면서도 본문에 회색 자리표시
+   이미지를 실어 보낸다. 그래서 onerror가 아니라 onload가 뜨고, 크기만 120x90이다.
+   따라서 '작은 이미지'도 실패로 보고 전사 때 받아둔 사본(/thumb)으로 내려간다. */
+function _thumbCheck(img) {
+  if (img.naturalWidth > 0 && img.naturalWidth <= 120) _thumbFallback(img);   // 회색 자리표시
+}
+function _thumbFallback(img) {
+  const vid = img.dataset.vid || '';
+  const step = (img.dataset.step || '0');
+  if (step === '0' && vid) {                       // 1차 실패 → 다른 해상도
+    img.dataset.step = '1';
+    img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+    return;
+  }
+  if (step === '1' && vid) {                       // 2차 실패 → 로컬 사본
+    img.dataset.step = '2';
+    img.src = `/thumb/${encodeURIComponent(vid)}`;
+    return;
+  }
+  img.onerror = null;                              // 사본도 없으면 자리표시로 교체
+  const ph = document.createElement('div');
+  ph.className = 'hist-thumb-placeholder';
+  ph.textContent = '썸네일 없음';
+  img.replaceWith(ph);
+}
+
 function _historyGoToPage(p) {
   const totalPages = Math.max(1, Math.ceil(_historyFiltered.length / HIST_PAGE_SIZE));
   _historyPage = Math.min(Math.max(1, p), totalPages);
@@ -510,8 +589,10 @@ function _renderHistoryList() {
   grid.innerHTML = pageItems.map(item => {
     const vid       = _ytVideoId(item.webpage_url);
     const thumbUrl  = vid ? `https://i.ytimg.com/vi/${vid}/mqdefault.jpg` : '';
+    // 폴백 체인: mqdefault → hqdefault → 전사 때 받아둔 로컬 사본(/thumb) → 자리표시.
+    // 비공개·멤버십 전용으로 바뀐 영상은 i.ytimg 쪽이 전부 막히므로 사본이 마지막 보루다.
     const thumbInner = thumbUrl
-      ? `<img class="hist-thumb" src="${_attrEsc(thumbUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${vid}/hqdefault.jpg'">`
+      ? `<img class="hist-thumb" src="${_attrEsc(thumbUrl)}" alt="" loading="lazy" data-vid="${_attrEsc(vid)}" onerror="_thumbFallback(this)" onload="_thumbCheck(this)">`
       : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
     const durBadge  = item.duration
       ? `<span class="hist-thumb-dur">${fmtDurKo(item.duration)}</span>` : '';
