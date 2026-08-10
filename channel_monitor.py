@@ -45,7 +45,7 @@ except Exception:
 BASE       = os.environ.get("YTS_BASE", "http://127.0.0.1:5001")
 MIN_DUR    = int(os.environ.get("MONITOR_MIN_DURATION", "180"))   # 3분 이하 제외(채널별 오버라이드 가능)
 POLL_SEC   = int(os.environ.get("MONITOR_POLL_SEC", "6"))         # /result 폴링 간격
-MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "9000"))  # 건당 전사 상한(2.5h)
+MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "18000"))  # 건당 전사 상한(5h) — 4시간대 장편(Acquired 등) 수용
 SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
 KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
 STALE_PROCESSING_SEC = int(os.environ.get("MONITOR_STALE_PROCESSING_SEC", "10800"))
@@ -122,6 +122,10 @@ def _grok_bin() -> str:
     return llm_gateway.resolve_grok_bin()
 
 
+def _gpt_bin() -> str:
+    return llm_gateway.resolve_codex_bin()
+
+
 def claude_healthy() -> tuple[bool, str]:
     """저가 프로브로 Claude CLI 가용성 확인. (정상?, 사유)."""
     try:
@@ -153,22 +157,33 @@ def grok_fallback_ready() -> tuple[bool, str]:
     return True, b
 
 
-def summarizer_gate() -> tuple[bool, str, str]:
+def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
     """큐 drain 진입 게이트.
 
     Returns:
         (proceed, mode, detail)
-        mode: "claude" | "grok" | "none"
-    Claude가 살아 있으면 claude. 아니면 Grok 폴백 준비됐을 때만 진행.
-    둘 다 안 되면 큐를 막는다(의미 없는 전사 방지).
+        mode: "opus" | "gpt" | "grok" | "none"
+    저장된 순서에서 실행 가능한 첫 모델을 고른다. 실제 요청에서는 그 모델부터
+    남은 순서를 서버에 전달해 인증·한도 오류까지 순차 폴백한다.
     """
-    ok, reason = claude_healthy()
-    if ok:
-        return True, "claude", ""
-    g_ok, g_detail = grok_fallback_ready()
-    if g_ok:
-        return True, "grok", f"Claude 불가: {reason}; Grok 폴백({g_detail})으로 진행"
-    return False, "none", f"Claude 불가: {reason}; Grok 폴백 불가({g_detail})"
+    explicit = model_order is not None
+    default = llm_gateway.MODEL_KEYS if explicit else ("opus", "grok")
+    order = llm_gateway.normalize_model_order(model_order or default, default=default)
+    failures = []
+    for key in order:
+        if key == "opus":
+            ok, detail = claude_healthy()
+        elif key == "gpt":
+            path = _gpt_bin()
+            ok, detail = os.path.exists(path), path
+        else:
+            path = _grok_bin()
+            ok = os.path.exists(path) and (explicit or GROK_FALLBACK)
+            detail = path if ok else ("GROK_FALLBACK=0" if not explicit else f"grok 없음 ({path})")
+        if ok:
+            return True, key, ("; ".join(failures) if failures else "")
+        failures.append(f"{key}: {detail}")
+    return False, "none", "; ".join(failures)
 
 
 def _notify_head(v: dict, title: str) -> str:
@@ -440,11 +455,12 @@ def _get_prompt() -> str:
         return ""
 
 
-def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
+def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
+                  summary_models=None, capture_models=None) -> dict:
     """전사→요약→캡처를 서버 엔드포인트로 순차 수행. 완료 요약 파일 경로 반환.
 
-    skip_claude: 게이트에서 Claude 불가로 판정된 경우. 요약/키프레임 모두 Claude 스킵
-    → Grok 요약. 캡처(비전)는 Claude 스킵 시 생략(비치명적).
+    summary_models/capture_models: 자동모니터 설정에서 읽은 작업별 폴백 순서.
+    skip_claude는 구버전 호출 호환용이며 명시 순서가 있으면 사용하지 않는다.
     """
     url = v["url"]
     txt_path = v.get("txt_path")
@@ -475,7 +491,9 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
     summary_err = None
     await_err = False
     sum_body = {"txt_path": txt_path, "prompt": prompt}
-    if skip_claude:
+    if summary_models is not None:
+        sum_body["models"] = llm_gateway.normalize_model_order(summary_models)
+    elif skip_claude:
         sum_body["skip_claude"] = True
         sum_body["mode"] = "grok"
     with requests.post(f"{BASE}/summarize", json=sum_body,
@@ -495,8 +513,8 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
                     summary_err = payload or "요약 실패"
                 await_err = False
     if summary_err:
-        # 요약 실패는 대부분 Claude 측(한도/장애/인증) → systemic이면 재시도 대상으로 올림
-        if _is_systemic(str(summary_err)):
+        # 모든 지정 모델이 소진됐거나 systemic 장애면 큐를 멈추고 다음 주기에 재시도한다.
+        if "모든 요약 모델 실패" in str(summary_err) or _is_systemic(str(summary_err)):
             raise ClaudeUnavailable(f"요약: {summary_err}")
         raise RuntimeError(f"요약 실패: {summary_err}")
 
@@ -504,7 +522,9 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
     kf_note, kf_systemic, kf_permanent = "", False, False
     try:
         kf_body = {"txt_path": txt_path, "url": url}
-        if skip_claude:
+        if capture_models is not None:
+            kf_body["models"] = llm_gateway.normalize_model_order(capture_models)
+        elif skip_claude:
             kf_body["skip_claude"] = True
             kf_body["mode"] = "grok"
         kf = requests.post(f"{BASE}/keyframes", json=kf_body, timeout=KF_TIMEOUT).json()
@@ -527,21 +547,22 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False) -> str:
             "kf_permanent": kf_permanent}
 
 
-def process_capture_only(txt_path: str, url: str) -> dict:
+def process_capture_only(txt_path: str, url: str, *, capture_models=None) -> dict:
     """요약이 이미 끝난 항목의 캡처(키프레임)만 재생성. 전사·요약은 스킵.
 
     반환: /keyframes 원 응답 dict — {"ok":True,"n_frames":N} 또는 {"ok":False,"reason","error"}.
     """
-    return requests.post(
-        f"{BASE}/keyframes", json={"txt_path": txt_path, "url": url}, timeout=KF_TIMEOUT
-    ).json()
+    body = {"txt_path": txt_path, "url": url}
+    if capture_models is not None:
+        body["models"] = llm_gateway.normalize_model_order(capture_models)
+    return requests.post(f"{BASE}/keyframes", json=body, timeout=KF_TIMEOUT).json()
 
 
 def drain() -> None:
     """큐 pending을 FIFO 처리 + 이전 주기에 예약된 캡처 재시도 처리.
 
-    게이트: Claude OK → 정상. Claude 다운이어도 Grok 폴백 준비되면 진행.
-    (예전: Claude 헬스만 보고 막아 Grok 요약 폴백이 호출조차 못 함.)
+    게이트: 저장된 요약 순서에서 실행 가능한 첫 모델을 찾고, 나머지는 서버 폴백으로 전달.
+    캡처 순서는 별도이며 요약 게이트와 무관하게 적용한다.
 
     캡처 재시도: 요약 성공/캡처만 일시 실패(다운로드 끊김 등, systemic 아님)한 항목은
     'done' 대신 'kf_retry'로 예약 → 다음 주기에 캡처만 1회 재생성(전사·요약 스킵).
@@ -549,24 +570,28 @@ def drain() -> None:
     """
     # 이번 주기 시작 시점의 재시도 대상 스냅샷(pending 루프에서 새로 예약될 건과 분리 → '다음 주기' 보장)
     retry_batch = db.queue_kf_retry_list()
-    if not db.queue_next_pending() and not retry_batch:
+    has_pending = bool(db.queue_next_pending())
+    if not has_pending and not retry_batch:
         return
-    proceed, mode, detail = summarizer_gate()
-    if not proceed:
-        if db.queue_next_pending():
-            notify(
-                "⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
-                f"사유: {detail}"
-            )
-        return   # 요약 경로가 없으면 캡처 재시도(비전=Claude)도 무의미 → 스냅샷 유지, 다음 주기
-    if mode == "grok":
+    orders = db.get_monitor_model_orders()
+    summary_order = orders["summary"]
+    capture_order = orders["capture"]
+    proceed, mode, detail = summarizer_gate(summary_order) if has_pending else (False, "none", "")
+    active_summary_order = summary_order
+    if has_pending and not proceed:
         notify(
-            "⚠️ Claude 사용 불가 — **Grok 폴백 모드**로 큐 처리 시작\n"
-            f"{detail}"
+            "⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
+            f"사유: {detail}"
         )
-        log(f"[drain] Grok 폴백 모드: {detail}")
+    elif proceed:
+        # 게이트가 이미 불가 판정한 앞쪽 모델은 이번 주기에는 건너뛴다.
+        active_summary_order = summary_order[summary_order.index(mode):]
+        if detail:
+            notify(
+                f"⚠️ 요약 1순위 사용 불가 — **{mode.upper()}부터 폴백 처리**\n{detail}"
+            )
     prompt = _get_prompt()
-    while True:
+    while proceed:
         v = db.queue_claim_next()
         if not v:
             break
@@ -574,11 +599,15 @@ def drain() -> None:
         head = _notify_head(v, title)   # 채널명 + 제목 블록
         log(f"[drain] 처리 시작: {title} (mode={mode})")
         try:
-            res = process_video(v, prompt, skip_claude=(mode == "grok"))
+            res = process_video(
+                v, prompt,
+                summary_models=active_summary_order,
+                capture_models=capture_order,
+            )
             kf_note = res.get("kf_note")
-            # 캡처만 일시 실패(systemic·영구사유·Grok스킵 아님) → 다음 주기 1회 재시도 예약
+            # 캡처만 일시 실패(systemic·영구사유 아님) → 다음 주기 1회 재시도 예약
             retryable = (bool(kf_note) and not res.get("kf_systemic")
-                         and not res.get("kf_permanent") and mode == "claude")
+                         and not res.get("kf_permanent"))
             if retryable and res.get("txt_path"):
                 db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
                 notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
@@ -587,26 +616,15 @@ def drain() -> None:
                 db.queue_set_status(v["id"], "done")
                 suffix = "(캡처 실패)" if kf_note else ""
                 notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
-            # 캡처 단계 Claude 한도: 요약 폴백(Grok)이 있으면 다음 건 계속(캡처는 비치명적).
-            if res.get("kf_systemic"):
-                g_ok, _ = grok_fallback_ready()
-                if g_ok:
-                    log("[drain] 캡처 systemic이지만 요약 Grok 폴백 있음 → 큐 계속")
-                else:
-                    notify(
-                        "⛔ Claude 사용 한도 감지(캡처) — 요약 폴백도 없어 큐 정지, "
-                        "다음 주기 재시도"
-                    )
-                    break
         except ClaudeUnavailable as e:
-            # summarize가 Claude+Grok 모두 실패한 경우(폴백까지 소진)
+            # 지정된 요약 모델이 모두 실패한 경우(폴백까지 소진)
             db.queue_defer(
                 v["id"], "요약 경로 재시도 대기", error_kind="llm_unavailable",
                 retry_after_seconds=_retry_delay(v.get("attempt_count")),
                 max_attempts=MAX_PIPELINE_ATTEMPTS,
             )
             notify(
-                f"⛔ 요약 실패(Claude·폴백 소진) — 큐 정지, 다음 주기 재시도\n"
+                f"⛔ 요약 실패(모든 폴백 소진) — 큐 정지, 다음 주기 재시도\n"
                 f"{head}\n{e}"
             )
             break
@@ -622,9 +640,9 @@ def drain() -> None:
                 f"{head}\n{reason}\n{v['url']}"
             )
 
-    # ── 캡처 재시도 pass (비전=Claude 필요 → Claude 정상 모드에서만) ──────────────
+    # ── 캡처 재시도 pass — 요약 게이트와 독립, 저장된 캡처 순서 사용 ─────────────
     # 스냅샷(retry_batch)만 처리 = 이전 주기 예약분. 성공·실패 무관하게 done으로 종료(정확히 1회).
-    if mode == "claude" and retry_batch:
+    if retry_batch:
         for v in retry_batch:
             title = v["title"] or v["yt_id"]
             head = _notify_head(v, title)
@@ -635,7 +653,9 @@ def drain() -> None:
             db.queue_set_status(v["id"], "processing")   # 잠금(재선택 방지)
             log(f"[kf-retry] 캡처 재시도: {title}")
             try:
-                kf = process_capture_only(txt_path, v["url"])
+                kf = process_capture_only(
+                    txt_path, v["url"], capture_models=capture_order
+                )
                 if kf.get("ok"):
                     db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
                     notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
