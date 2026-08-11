@@ -1716,15 +1716,20 @@ function _setDistillUI(d) {
     return;
   }
   const chan = d.channel ? '포함' : '제외';
+  // 자동수집 채널이 아니면 따를 채널 설정 자체가 없다 → '채널'이 아니라 '기본'으로 표기한다.
+  const reg  = d.registered !== false;
+  const src  = reg ? '채널' : '기본';
+  const srcDesc = reg ? `채널 설정을 따름 → 현재 ${chan}`
+                      : `자동수집 채널이 아니라 기본값 적용 → ${chan}`;
   if (!set) {
-    box.innerHTML = `증류 ↪ 채널 <span class="dist-eff">(${chan})</span>`;
-    box.title = `채널 설정을 따름 → 현재 ${chan}. 클릭하면 이 영상만 '포함'으로 지정`;
+    box.innerHTML = `증류 ↪ ${src} <span class="dist-eff">(${chan})</span>`;
+    box.title = `${srcDesc}. 클릭하면 이 영상만 '포함'으로 지정`;
   } else if (ov) {
     box.textContent = '증류 ✓ 포함';
-    box.title = `이 영상만 포함으로 지정됨(채널은 ${chan}). 클릭하면 '제외'로`;
+    box.title = `이 영상만 포함으로 지정됨(${src} 설정은 ${chan}). 클릭하면 '제외'로`;
   } else {
     box.textContent = '증류 ✕ 제외';
-    box.title = `이 영상만 제외로 지정됨(채널은 ${chan}). 클릭하면 '채널 따름'으로`;
+    box.title = `이 영상만 제외로 지정됨(${src} 설정은 ${chan}). 클릭하면 '${src} 따름'으로`;
   }
 }
 

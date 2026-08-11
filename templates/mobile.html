@@ -1030,16 +1030,21 @@ function _setDistillUI(d) {
   box.classList.toggle('set', set);
   if (!d) { box.textContent = '—'; box.title = ''; return; }
   const chan = d.channel ? '포함' : '제외';
+  // 자동수집 채널이 아니면 따를 채널 설정 자체가 없다 → '채널'이 아니라 '기본'으로 설명한다.
+  const reg  = d.registered !== false;
+  const src  = reg ? '채널' : '기본';
+  const srcDesc = reg ? `채널 설정을 따름 → 현재 ${chan}`
+                      : `자동수집 채널이 아니라 기본값 적용 → ${chan}`;
   if (!set) {
     // 좁은 헤더라 값만 남기고 '따름'은 ↪ 기호로 구분한다(전체 설명은 툴팁)
     box.textContent = `↪${chan}`;
-    box.title = `채널 설정을 따름 → 현재 ${chan}. 탭하면 이 영상만 '포함'으로`;
+    box.title = `${srcDesc}. 탭하면 이 영상만 '포함'으로`;
   } else if (ov) {
     box.textContent = '✓포함';
-    box.title = `이 영상만 포함(채널은 ${chan}). 탭하면 '제외'로`;
+    box.title = `이 영상만 포함(${src} 설정은 ${chan}). 탭하면 '제외'로`;
   } else {
     box.textContent = '✕제외';
-    box.title = `이 영상만 제외(채널은 ${chan}). 탭하면 '채널 따름'으로`;
+    box.title = `이 영상만 제외(${src} 설정은 ${chan}). 탭하면 '${src} 따름'으로`;
   }
 }
 
