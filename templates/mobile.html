@@ -618,17 +618,9 @@ function toggleUnreadFilter() {
   applyFilter();
 }
 
-/* 썸네일은 로컬 사본(/thumb)이 1순위 — 브라우저가 i.ytimg 로 나가지 않아 VPN 경유가 빠르다.
-   사본이 없을 때만 원본으로 내려가는데, 비공개 전환 영상은 404여도 회색 자리표시(120x90)가
-   실려와 onload가 뜨므로 크기까지 확인해 실패로 판정한다. */
-function _thumbCheck(img) {
-  if (img.naturalWidth > 0 && img.naturalWidth <= 120) _thumbFallback(img);
-}
+/* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg)로 나가는
+   요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
 function _thumbFallback(img) {
-  const vid = img.dataset.vid || '';
-  const step = img.dataset.step || '0';
-  if (step === '0' && vid) { img.dataset.step = '1'; img.src = `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`; return; }
-  if (step === '1' && vid) { img.dataset.step = '2'; img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`; return; }
   img.onerror = null;
   const ph = document.createElement('div');
   ph.className = 'hist-thumb-placeholder';
@@ -653,7 +645,7 @@ function appendPage() {
 function renderCard(item) {
   const vid = ytVideoId(item.webpage_url);
   const thumb = vid
-    ? `<img class="hist-thumb" src="/thumb/${encodeURIComponent(vid)}" alt="" loading="lazy" data-vid="${attrEsc(vid)}" onerror="_thumbFallback(this)" onload="_thumbCheck(this)">`
+    ? `<img class="hist-thumb" src="/thumb/${encodeURIComponent(vid)}" alt="" loading="lazy" data-vid="${attrEsc(vid)}" onerror="_thumbFallback(this)">`
     : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
   const dur = item.duration
     ? `<span class="hist-thumb-dur">${fmtDurBadge(item.duration)}</span>` : '';
