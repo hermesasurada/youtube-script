@@ -6,9 +6,8 @@
   <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <title>이력조회</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@400;600;700&family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Song+Myung&display=swap">
+  <!-- 웹폰트는 self-host(tools/fetch_fonts.py) — VPN 경유 시 외부 왕복을 없애기 위함 -->
+  <link rel="stylesheet" href="/static/fonts/google.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <style>
     @font-face {
@@ -619,16 +618,17 @@ function toggleUnreadFilter() {
   applyFilter();
 }
 
-/* 썸네일 폴백 — 비공개 전환 영상은 404여도 회색 자리표시(120x90)가 실려와 onload가 뜬다.
-   그래서 크기까지 확인해 작은 이미지면 전사 때 받아둔 사본(/thumb)으로 내려간다. */
+/* 썸네일은 로컬 사본(/thumb)이 1순위 — 브라우저가 i.ytimg 로 나가지 않아 VPN 경유가 빠르다.
+   사본이 없을 때만 원본으로 내려가는데, 비공개 전환 영상은 404여도 회색 자리표시(120x90)가
+   실려와 onload가 뜨므로 크기까지 확인해 실패로 판정한다. */
 function _thumbCheck(img) {
   if (img.naturalWidth > 0 && img.naturalWidth <= 120) _thumbFallback(img);
 }
 function _thumbFallback(img) {
   const vid = img.dataset.vid || '';
   const step = img.dataset.step || '0';
-  if (step === '0' && vid) { img.dataset.step = '1'; img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`; return; }
-  if (step === '1' && vid) { img.dataset.step = '2'; img.src = `/thumb/${encodeURIComponent(vid)}`; return; }
+  if (step === '0' && vid) { img.dataset.step = '1'; img.src = `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`; return; }
+  if (step === '1' && vid) { img.dataset.step = '2'; img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`; return; }
   img.onerror = null;
   const ph = document.createElement('div');
   ph.className = 'hist-thumb-placeholder';
@@ -653,7 +653,7 @@ function appendPage() {
 function renderCard(item) {
   const vid = ytVideoId(item.webpage_url);
   const thumb = vid
-    ? `<img class="hist-thumb" src="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" alt="" loading="lazy" data-vid="${attrEsc(vid)}" onerror="_thumbFallback(this)" onload="_thumbCheck(this)">`
+    ? `<img class="hist-thumb" src="/thumb/${encodeURIComponent(vid)}" alt="" loading="lazy" data-vid="${attrEsc(vid)}" onerror="_thumbFallback(this)" onload="_thumbCheck(this)">`
     : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
   const dur = item.duration
     ? `<span class="hist-thumb-dur">${fmtDurBadge(item.duration)}</span>` : '';

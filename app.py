@@ -407,17 +407,21 @@ def _set_job_error(job_id: str, stage: str, message: object) -> str:
 _THUMB_SOURCES = ("mqdefault", "hqdefault", "sddefault", "maxresdefault")
 
 
-def save_thumbnail(yt_id: str) -> str | None:
+THUMB_MAX_AGE_SEC = 24 * 3600     # 사본을 하루에 한 번 현행화
+
+
+def save_thumbnail(yt_id: str, force: bool = False) -> str | None:
     """영상 썸네일을 res/thumbs/{yt_id}.jpg 로 내려받는다(이미 있으면 그대로 둔다).
 
     나중에 비공개·멤버십 전용으로 바뀌면 원본 URL이 막히므로 그 전에 확보해 둔다.
     실패해도 파이프라인엔 영향이 없다(폴백이 없을 뿐).
+    force=True 면 기존 사본이 있어도 다시 받는다(하루 1회 현행화 경로).
     """
     yt_id = (yt_id or "").strip()
     if not yt_id or not re.fullmatch(r"[\w-]{5,20}", yt_id):
         return None
     dest = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
-    if os.path.exists(dest) and os.path.getsize(dest) > 1024:
+    if not force and os.path.exists(dest) and os.path.getsize(dest) > 1024:
         return dest
     os.makedirs(THUMB_DIR, exist_ok=True)
     for name in _THUMB_SOURCES:
@@ -748,6 +752,9 @@ def _no_store_html(resp):
     # 렌더된 HTML 페이지(/, /m)는 캐시 금지 → 템플릿 변경이 새로고침만으로 반영(모바일 캐시 방지).
     if resp.headers.get("Content-Type", "").startswith("text/html"):
         resp.headers["Cache-Control"] = "no-store"
+    # self-host 웹폰트는 내용이 불변(파일명에 해시 포함) → 1년 캐시로 재요청 자체를 없앤다.
+    elif request.path.startswith("/static/fonts/"):
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
 
 
@@ -1621,15 +1628,57 @@ def summary_content():
         return _json({"error": str(e)}, 500)
 
 
+_thumb_refreshing: set[str] = set()      # 백그라운드 갱신 중복 방지
+_thumb_lock = threading.Lock()
+
+
+def _refresh_thumb_async(yt_id: str) -> None:
+    """오래된 사본을 백그라운드로 다시 받는다(현재 요청은 기존 사본으로 즉시 응답)."""
+    with _thumb_lock:
+        if yt_id in _thumb_refreshing:
+            return
+        _thumb_refreshing.add(yt_id)
+
+    def run():
+        try:
+            if not save_thumbnail(yt_id, force=True):
+                # 비공개 전환 등으로 실패 — 기존 사본은 그대로 두되 mtime 만 올려
+                # 매 요청마다 재시도가 반복되지 않게 한다(다음 시도는 하루 뒤).
+                p = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
+                if os.path.isfile(p):
+                    os.utime(p, None)
+        except Exception as e:                       # noqa: BLE001
+            log.warning("thumbnail refresh failed: %s (%s)", yt_id, e)
+        finally:
+            with _thumb_lock:
+                _thumb_refreshing.discard(yt_id)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.route("/thumb/<yt_id>")
 def serve_thumbnail(yt_id: str):
-    """전사 때 받아둔 썸네일 사본. 원본(i.ytimg.com)이 막힌 영상의 폴백용."""
+    """썸네일 사본 서빙 — 목록의 기본 소스.
+
+    브라우저가 i.ytimg.com 으로 직접 나가지 않도록 로컬 사본을 우선 제공한다
+    (VPN 경유 시 카드 20장분 외부 왕복이 사라진다). 사본이 없으면 그 자리에서
+    한 번 받아 두고, 하루가 지난 사본은 백그라운드로 현행화한다.
+    """
     if not re.fullmatch(r"[\w-]{5,20}", yt_id or ""):
         return _json({"error": "잘못된 id"}, 400)
     p = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
-    if not os.path.isfile(p):
-        return _json({"error": "없음"}, 404)
-    return send_file(p, mimetype="image/jpeg", max_age=86400)
+    if os.path.isfile(p):
+        try:
+            if time.time() - os.path.getmtime(p) > THUMB_MAX_AGE_SEC:
+                _refresh_thumb_async(yt_id)
+        except OSError:
+            pass
+    else:
+        # 사본이 없는 영상(구 데이터·저장 실패분) — 지금 받아 두면 다음부터는 로컬이다.
+        if not save_thumbnail(yt_id):
+            return _json({"error": "없음"}, 404)
+    # 하루 단위로 현행화하므로 브라우저 캐시도 그 주기에 맞춘다.
+    return send_file(p, mimetype="image/jpeg", max_age=3600)
 
 
 @app.route("/sframe/<path:rel>")

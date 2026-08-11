@@ -21,3 +21,8 @@ reports/
 .pytest_cache/
 __pycache__/
 tests/__pycache__/
+
+# self-host 웹폰트 — tools/fetch_fonts.py 로 언제든 재생성(17MB, 725파일)
+static/fonts/webfonts/
+static/fonts/google.css
+static/fonts/pretendard.css

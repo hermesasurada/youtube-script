@@ -463,23 +463,24 @@ async function deleteCard(btn) {
   applyHistoryFilter(true);
 }
 
-/* 썸네일 폴백 — 비공개로 바뀐 영상은 i.ytimg가 404를 주면서도 본문에 회색 자리표시
-   이미지를 실어 보낸다. 그래서 onerror가 아니라 onload가 뜨고, 크기만 120x90이다.
-   따라서 '작은 이미지'도 실패로 보고 전사 때 받아둔 사본(/thumb)으로 내려간다. */
+/* 썸네일은 로컬 사본(/thumb)이 1순위다 — 브라우저가 i.ytimg.com 으로 나가지 않으므로
+   VPN 경유 시 카드 20장분 외부 왕복이 통째로 사라진다. 사본이 없을 때만 원본으로 내려간다.
+   원본은 비공개로 바뀌면 404를 주면서도 본문에 회색 자리표시 이미지를 실어 보낸다.
+   그래서 onerror가 아니라 onload가 뜨고 크기만 120x90이라, '작은 이미지'도 실패로 본다. */
 function _thumbCheck(img) {
   if (img.naturalWidth > 0 && img.naturalWidth <= 120) _thumbFallback(img);   // 회색 자리표시
 }
 function _thumbFallback(img) {
   const vid = img.dataset.vid || '';
   const step = (img.dataset.step || '0');
-  if (step === '0' && vid) {                       // 1차 실패 → 다른 해상도
+  if (step === '0' && vid) {                       // 사본 없음 → 원본
     img.dataset.step = '1';
-    img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+    img.src = `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`;
     return;
   }
-  if (step === '1' && vid) {                       // 2차 실패 → 로컬 사본
+  if (step === '1' && vid) {                       // 원본도 실패 → 다른 해상도
     img.dataset.step = '2';
-    img.src = `/thumb/${encodeURIComponent(vid)}`;
+    img.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
     return;
   }
   img.onerror = null;                              // 사본도 없으면 자리표시로 교체
@@ -588,9 +589,9 @@ function _renderHistoryList() {
 
   grid.innerHTML = pageItems.map(item => {
     const vid       = _ytVideoId(item.webpage_url);
-    const thumbUrl  = vid ? `https://i.ytimg.com/vi/${vid}/mqdefault.jpg` : '';
-    // 폴백 체인: mqdefault → hqdefault → 전사 때 받아둔 로컬 사본(/thumb) → 자리표시.
-    // 비공개·멤버십 전용으로 바뀐 영상은 i.ytimg 쪽이 전부 막히므로 사본이 마지막 보루다.
+    const thumbUrl  = vid ? `/thumb/${encodeURIComponent(vid)}` : '';
+    // 폴백 체인: 로컬 사본(/thumb) → i.ytimg mqdefault → hqdefault → 자리표시.
+    // 사본이 1순위라 평시엔 외부 요청이 없고, 비공개로 바뀐 영상도 사본으로 계속 보인다.
     const thumbInner = thumbUrl
       ? `<img class="hist-thumb" src="${_attrEsc(thumbUrl)}" alt="" loading="lazy" data-vid="${_attrEsc(vid)}" onerror="_thumbFallback(this)" onload="_thumbCheck(this)">`
       : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
