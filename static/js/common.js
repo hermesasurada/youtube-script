@@ -219,8 +219,10 @@
      반환: {html, text} — 클립보드에 text/html + text/plain 동시 적재용. */
   const _BL = {           // 블로거 본문 인라인 스타일 팔레트(테마와 무관하게 읽히도록 보수적으로)
     h2:   'margin:2em 0 .7em;padding-bottom:.35em;border-bottom:2px solid #e8e3d8;font-size:1.35em;font-weight:700;line-height:1.4;',
-    // 소제목: 위 여백을 크게 + 왼쪽 컬러 바 → 본문과 한눈에 구분되게
-    h3:   'margin:2.6em 0 .85em;padding:.1em 0 .1em .65em;border-left:4px solid #b0413e;'
+    // 소제목: 위 여백을 크게 + 왼쪽 컬러 바 + 옅은 배경 → 본문과 한눈에 구분되게.
+    // 배경을 넣는 만큼 상하·우 패딩을 줘야 글자가 띠에 끼지 않는다.
+    h3:   'margin:2.6em 0 .85em;padding:.5em .8em .5em .7em;border-left:4px solid #b0413e;'
+        + 'background-color:#faf3f1;border-radius:0 3px 3px 0;'
         + 'font-size:1.2em;font-weight:700;line-height:1.45;color:#1a1a1a;',
     // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
     // 소제목의 굵기(700)가 뒤따르는 본문까지 번지는 것을 막는다.
