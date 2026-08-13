@@ -37,7 +37,8 @@ GPT_VISION_MODEL = os.environ.get("GPT_VISION_MODEL", os.environ.get("GPT_MODEL"
 # Claude 비전 3회 실패 시 Grok 폴백(요약 폴백과 동일 기조). grok CLI는 이미지 옵션이 없지만
 # 프롬프트의 @경로를 읽어 비전이 동작한다 — 캡처를 통째로 잃는 것보다 낫다.
 GROK_VISION_FALLBACK = os.environ.get("GROK_VISION_FALLBACK", "1") != "0"
-GROK_VISION_MODEL    = os.environ.get("GROK_VISION_MODEL", os.environ.get("GROK_MODEL", "grok-4.5"))
+# 빈 값이면 -m 을 붙이지 않아 grok CLI 기본 모델을 그대로 쓴다(CLI가 올라가면 자동으로 따라감).
+GROK_VISION_MODEL    = os.environ.get("GROK_VISION_MODEL", os.environ.get("GROK_MODEL", ""))
 _LAST_VISION_ERR = ""   # 마지막 비전 호출 실패 사유(usage limit/장애 분류에 노출)
 VIDEO_MAXH      = int(os.environ.get("VIDEO_MAXH", "1080"))   # 다운로드 최대 높이(해상도)
 FRAME_WIDTH     = int(os.environ.get("FRAME_WIDTH", "1708"))  # 프레임 가로폭(이전 854의 2배)

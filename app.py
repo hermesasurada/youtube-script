@@ -138,7 +138,8 @@ GPT_TIMEOUT   = int(os.environ.get("GPT_TIMEOUT", "900"))
 
 # 요약 폴백: Claude 실패(한도/장애/오류) 시 Grok CLI로 재시도.
 GROK_BIN      = llm_gateway.resolve_grok_bin()
-GROK_MODEL    = os.environ.get("GROK_MODEL", "grok-4.5")   # 요약엔 코딩용 composer보다 범용 grok-4.5
+# 빈 값이면 -m 을 붙이지 않아 grok CLI 기본 모델을 그대로 쓴다(CLI가 올라가면 자동으로 따라감).
+GROK_MODEL    = os.environ.get("GROK_MODEL", "")
 GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"   # 폴백 활성(기본 ON)
 GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
 
@@ -1330,7 +1331,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
             # Claude 부분 출력이 이미 전송됐을 수 있으므로 클라이언트가 본문을 비우게 한다.
             yield "event: reset\ndata: \"\"\n\n"
             log.info("summarize grok 성공 (%d자)", len(gtext))
-            grok_label = _model_label(GROK_MODEL or "grok-4.5")
+            grok_label = _model_label(GROK_MODEL or "grok")
             full = (_model_line(grok_label)
                     + _compress_line(gtext, transcript_chars) + gtext)
             yield f"data: {json.dumps(full)}\n\n"

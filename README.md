@@ -40,6 +40,34 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 - 로그: `~/Library/Logs/hermes/youtube-script.{out,err}.log`
 - 원격 접속(Tailscale 등)은 **이력 모드** — 이력 조회·요약/전사 보기·읽음 표시·삭제는 허용하되, **새 전사·프롬프트 편집·키프레임 생성·로컬 파일 탐색은 차단**(허용 목록은 `app.py`의 `_REMOTE_DATA_ALLOWED`). 사설망(Tailscale, 본인 기기) 전제.
 
+### PO 토큰 공급자 (다운로드 403 방지)
+
+유튜브가 PO 토큰 없는 세션을 봇차단 실험 버킷(SABR-only·DRM·403)에 무작위 배정한다.
+걸린 세션은 `HTTP Error 403: Forbidden`으로 다운로드가 막히며, **`player_client`를 바꿔도
+우회되지 않는다**(android→SABR, tv→DRM). 이 저장소 밖 구성이라 여기 절차를 남긴다.
+
+```bash
+# 1) yt-dlp 플러그인 (이 프로젝트 venv에)
+.venv/bin/pip install bgutil-ytdlp-pot-provider
+
+# 2) 토큰 서버 (플러그인과 버전을 맞춘다 — 아래는 1.3.1 기준)
+cd ~/projects && git clone --depth 1 --branch 1.3.1 \
+  https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git bgutil-pot-provider
+cd bgutil-pot-provider/server && npm ci && npx tsc     # build/main.js 생성
+
+# 3) 상시 구동: launchd 에이전트 com.yhandhs.bgutil-pot (KeepAlive, 포트 4416)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.yhandhs.bgutil-pot.plist
+
+# 4) 확인
+curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"version":"1.3.1"}
+.venv/bin/yt-dlp -v "<영상URL>" --simulate 2>&1 | grep "PO Token Providers"
+#   → bgutil:http-1.3.1 (external) 이 보이면 정상 (script-node/deno는 unavailable이어도 무관)
+```
+
+- 서버는 Node(`~/.local/bin/node`)로 돌고 로그는 `~/Library/Logs/hermes/bgutil-pot.{out,err}.log`.
+- venv를 재생성하면 **1)을 다시 설치**해야 한다. 플러그인만 있고 서버가 죽으면 토큰을 못 받아 403이 다시 는다.
+- 토큰이 있어도 간헐적으로 걸릴 수 있어, 403이면 큐 지연 전에 **새 세션으로 즉시 1회 재시도**한다(`app.py` 전사 / `keyframe_report.py` 캡처).
+
 ## 주요 환경변수
 
 | 변수 | 기본 | 설명 |
@@ -52,7 +80,8 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 | `CLAUDE_TIMEOUT` | 900 | 요약 Claude CLI wall-clock 제한(초) |
 | `CODEX_BIN` / `GPT_MODEL` / `GPT_TIMEOUT` | (자동탐색) / gpt-5.6-sol / 900 | GPT 폴백용 Codex CLI 경로·모델·제한(초) |
 | `VISION_MODEL` | opus | 키프레임 분류·캡션 모델 (Claude) |
-| `GROK_VISION_FALLBACK` / `GROK_VISION_MODEL` | 1 / grok-4.5 | 비전 Claude 3회 실패 시 Grok 폴백(요약과 동일 기조) |
+| `GROK_MODEL` | (빈 값) | Grok 폴백 모델. **비우면 `-m` 없이 grok CLI 기본 모델**을 쓴다(CLI 업데이트를 자동으로 따라감) |
+| `GROK_VISION_FALLBACK` / `GROK_VISION_MODEL` | 1 / (빈 값) | 비전 Claude 3회 실패 시 Grok 폴백(모델은 요약과 동일 기조 — 비우면 CLI 기본) |
 | `VIDEO_MAXH` / `FRAME_WIDTH` | 1080 / 1708 | 다운로드 최대 높이 / 프레임 가로폭 |
 | `SCENE_THRESHOLD` | 0.3 | ffmpeg 장면전환 임계값([0,1] clamp) |
 | `MAX_CANDIDATES` / `MIN_GAP` | 40 / 6 | 후보 프레임 상한 / 근접 중복 제거 간격(초) |
