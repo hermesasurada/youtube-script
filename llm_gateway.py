@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import tempfile
@@ -60,6 +61,31 @@ def resolve_grok_bin() -> str:
         return found
     fallback = os.path.expanduser("~/.grok/bin/grok")
     return fallback if os.path.exists(fallback) else (env or "grok")
+
+
+_grok_default_cache: dict = {"value": None, "ts": 0.0}
+_GROK_DEFAULT_TTL = 6 * 3600      # CLI 기본 모델은 자주 안 바뀌므로 넉넉히 캐시
+
+
+def resolve_grok_default_model() -> str | None:
+    """`grok models`가 보고하는 기본 모델 id(예: 'grok-4.6'). 실패하면 None.
+
+    -m 없이 호출할 때 어떤 모델이 실제로 쓰였는지 요약 마커에 남기려고 조회한다.
+    CLI 호출이라 비싸서 캐시하고, 실패해도 라벨이 버전 없는 'Grok'이 될 뿐이다.
+    """
+    now = time.time()
+    if _grok_default_cache["value"] and now - _grok_default_cache["ts"] < _GROK_DEFAULT_TTL:
+        return _grok_default_cache["value"]
+    try:
+        r = run_command([resolve_grok_bin(), "models"], timeout=30)
+        if r.returncode == 0:
+            m = re.search(r"Default model:\s*(\S+)", r.stdout or "")
+            if m:
+                _grok_default_cache.update(value=m.group(1), ts=now)
+                return m.group(1)
+    except Exception:
+        pass
+    return _grok_default_cache["value"]      # 만료됐어도 옛 값이 없는 것보단 낫다
 
 
 def resolve_codex_bin() -> str:

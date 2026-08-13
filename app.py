@@ -1294,7 +1294,8 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             label = _model_label(GPT_MODEL or "gpt")
         else:
             body, err = _summarize_with_grok(prompt)
-            label = _model_label(GROK_MODEL or "grok")
+            # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.
+            label = _model_label(GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok")
         if not body:
             failures.append(f"{key.upper()}: {err or '빈 응답'}")
             log.warning("summarize %s 실패 → 다음 모델: %s", key, failures[-1])
@@ -1331,7 +1332,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
             # Claude 부분 출력이 이미 전송됐을 수 있으므로 클라이언트가 본문을 비우게 한다.
             yield "event: reset\ndata: \"\"\n\n"
             log.info("summarize grok 성공 (%d자)", len(gtext))
-            grok_label = _model_label(GROK_MODEL or "grok")
+            grok_label = _model_label(GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok")
             full = (_model_line(grok_label)
                     + _compress_line(gtext, transcript_chars) + gtext)
             yield f"data: {json.dumps(full)}\n\n"
