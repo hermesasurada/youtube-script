@@ -1,14 +1,19 @@
 /* youtube-script 공유 프론트엔드 유틸 (index/mobile/summary 공용).
  *
- * 로드 순서: marked.min.js → common.js
+ * marked는 작은 로컬 자원으로 선로드하고, KaTeX/본문용 웹폰트는 첫 요약 뒤에 붙인다.
  * 목적: 마크다운 렌더링·이스케이프·날짜/유튜브ID·이력 API 호출을 한 곳에 모아
  *       템플릿 간 중복(및 "한쪽만 수정됨" 류 버그)을 제거한다.
  */
 (function (global) {
   'use strict';
 
-  // ── marked.js 공통 설정: 링크는 새 탭 + noopener ──────────────────
-  if (global.marked && typeof global.marked.use === 'function') {
+  // ── 요약 뷰어 자원 지연 로딩 ─────────────────────────────────────
+  let _readerAssetsPromise = null;
+  let _markedConfigured = false;
+  let _secondaryAssetsStarted = false;
+
+  function _configureMarked() {
+    if (_markedConfigured || !global.marked || typeof global.marked.use !== 'function') return;
     const renderer = new global.marked.Renderer();
     renderer.link = function (href, title, text) {
       const h = (typeof href === 'object') ? href.href : href;
@@ -16,7 +21,63 @@
       return `<a href="${h}" target="_blank" rel="noopener noreferrer">${t}</a>`;
     };
     global.marked.use({ renderer, breaks: false, gfm: true });
+    _markedConfigured = true;
   }
+
+  function _loadStyle(href, id) {
+    if (document.getElementById(id)) return Promise.resolve();
+    return new Promise(resolve => {
+      const el = document.createElement('link');
+      el.id = id; el.rel = 'stylesheet'; el.href = href;
+      el.onload = resolve; el.onerror = resolve;
+      document.head.appendChild(el);
+    });
+  }
+
+  function _loadScript(src, id, ready) {
+    if (ready()) return Promise.resolve();
+    const existing = document.getElementById(id);
+    if (existing) return new Promise(resolve => {
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', resolve, { once: true });
+    });
+    return new Promise(resolve => {
+      const el = document.createElement('script');
+      el.id = id; el.src = src; el.async = true;
+      el.onload = resolve; el.onerror = resolve;
+      document.head.appendChild(el);
+    });
+  }
+
+  function ensureReaderAssets() {
+    if (_readerAssetsPromise) return _readerAssetsPromise;
+    const versions = global.YS_ASSET_VERSIONS || {};
+    const fontVersion = versions.googleCss ? `?v=${encodeURIComponent(versions.googleCss)}` : '';
+    const markedVersion = versions.marked ? `?v=${encodeURIComponent(versions.marked)}` : '';
+
+    // 본문 렌더에 필수인 marked만 기다린다. CDN 왕복 없이 로컬 정적 파일을 사용한다.
+    _readerAssetsPromise = _loadScript(
+      '/static/vendor/marked.min.js' + markedVersion, 'ys-marked-js', () => !!global.marked
+    ).then(() => {
+      _configureMarked();
+
+      // 폰트 CSS(944KB)와 수식 엔진은 요약 표시를 막지 않는다. 렌더 직후 시작해
+      // 폰트는 swap으로 교체하고, KaTeX 미준비 시 수식은 기존 원문 폴백을 유지한다.
+      if (!_secondaryAssetsStarted) {
+        _secondaryAssetsStarted = true;
+        setTimeout(() => {
+          void _loadStyle('/static/fonts/google.css' + fontVersion, 'ys-reader-fonts');
+          void _loadStyle('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css', 'ys-katex-css');
+          void _loadScript('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js',
+                           'ys-katex-js', () => !!global.katex);
+        }, 600);
+      }
+    });
+    return _readerAssetsPromise;
+  }
+
+  // 템플릿에서 marked를 먼저 로드한 경우 공통 renderer 설정을 즉시 적용한다.
+  _configureMarked();
 
   /**
    * 한글(CJK) 인접 강조 보정.
@@ -185,29 +246,33 @@
   }
 
   // ── 이력 관련 API 호출(엔드포인트 경로를 한 곳에서 관리) ──────────
-  async function apiMarkRead(txtPath, isRead) {
+  function _historyRef(ref, legacyKey) {
+    return Number.isInteger(ref) ? { item_id: ref } : { [legacyKey]: ref };
+  }
+
+  async function apiMarkRead(ref, isRead) {
     const r = await fetch('/history/mark_read', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txt_path: txtPath, is_read: isRead }),
+      body: JSON.stringify({ ..._historyRef(ref, 'txt_path'), is_read: isRead }),
     });
-    return r.ok;
+    return r.ok ? r.json() : null;
   }
 
-  async function apiDeleteItem(txtPath) {
+  async function apiDeleteItem(ref) {
     const r = await fetch('/history/item', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txt_path: txtPath }),
+      body: JSON.stringify(_historyRef(ref, 'txt_path')),
     });
-    return r.ok;
+    return r.ok ? r.json() : null;
   }
 
-  async function apiSummaryContent(path) {
+  async function apiSummaryContent(ref) {
     const r = await fetch('/summary/content', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify(_historyRef(ref, 'path')),
     });
     return r.json();
   }
@@ -219,11 +284,14 @@
      반환: {html, text} — 클립보드에 text/html + text/plain 동시 적재용. */
   const _BL = {           // 블로거 본문 인라인 스타일 팔레트(테마와 무관하게 읽히도록 보수적으로)
     h2:   'margin:2em 0 .7em;padding-bottom:.35em;border-bottom:2px solid #e8e3d8;font-size:1.35em;font-weight:700;line-height:1.4;',
-    // 소제목: 위 여백을 크게 + 왼쪽 컬러 바 + 옅은 배경 → 본문과 한눈에 구분되게.
-    // 배경을 넣는 만큼 상하·우 패딩을 줘야 글자가 띠에 끼지 않는다.
-    h3:   'margin:2.6em 0 .85em;padding:.5em .8em .5em .7em;border-left:4px solid #b0413e;'
-        + 'background-color:#faf3f1;border-radius:0 3px 3px 0;'
-        + 'font-size:1.2em;font-weight:700;line-height:1.45;color:#1a1a1a;',
+    // 소제목: 본문과 같은 글자 크기로 두되 굵기 + 라임색 형광펜 밑줄로 구분한다.
+    // border-bottom은 항상 글자 '아래'에만 그어져 겹칠 수 없어서, 아래쪽 일부만 칠하는
+    // 배경 그라디언트로 글자에 살짝 물리게 했다(형광펜 효과).
+    // inline-block이라 글자 길이만큼만 칠해진다. 대신 위아래 margin이 인접 문단과
+    // 상쇄되지 않으므로(블록끼리면 상쇄됨) 위 여백을 그만큼 줄여 잡았다.
+    h3:   'display:inline-block;margin:1.1em 0 .95em;padding:0 .12em .02em;'
+        + 'background-image:linear-gradient(transparent 62%, #dcf7a4 62%);'
+        + 'font-size:1em;font-weight:700;line-height:1.45;color:#1a1a1a;',
     // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
     // 소제목의 굵기(700)가 뒤따르는 본문까지 번지는 것을 막는다.
     p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;',
@@ -433,6 +501,23 @@
     };
   }
 
+  /* 외국어 제목이면 렌더된 본문의 H1을 '번역 제목 + 원문(작고 연하게)' 2단으로 바꾼다.
+     원문은 지우지 않고 아래에 남겨, 검색·대조가 되게 한다. */
+  function applyTitleTranslation(rootEl, titleKo) {
+    const ko = (titleKo || '').trim();
+    if (!rootEl || !ko) return false;
+    const h1 = rootEl.querySelector('h1');
+    if (!h1) return false;
+    const orig = h1.textContent.trim();
+    if (!orig || orig === ko) return false;
+    h1.textContent = ko;
+    const sub = document.createElement('div');
+    sub.className = 'sum-title-orig';
+    sub.textContent = orig;
+    h1.insertAdjacentElement('afterend', sub);
+    return true;
+  }
+
   global.YS = {
     renderMarkdown,
     mdToBloggerHtml,
@@ -444,6 +529,8 @@
     apiMarkRead,
     apiDeleteItem,
     apiSummaryContent,
+    ensureReaderAssets,
+    applyTitleTranslation,
   };
 
   // ── 키프레임 스트립(가로 스크롤) + 라이트박스(원본 보기) ────────────
@@ -457,6 +544,8 @@
 .kf-strip img{display:block;width:100%;height:158px;object-fit:cover;cursor:zoom-in;}
 .kf-strip figcaption{display:flex;align-items:baseline;gap:.45rem;font-size:.74rem;color:var(--muted,#666);padding:.42rem .6rem .48rem;line-height:1.45;}
 .kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;font-size:.68rem;font-weight:600;flex-shrink:0;background:var(--highlight-soft,rgba(99,102,241,.1));padding:.06rem .38rem;border-radius: 2px;}
+/* ── 외국어 제목의 원문 병기(번역 제목이 H1, 원문은 그 아래 작게) ── */
+.sum-title-orig{margin:-.55rem 0 1.15rem;font-size:.8em;font-weight:400;line-height:1.5;color:var(--muted,#8a8279);opacity:.85;word-break:keep-all;}
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
 .ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin:.4rem 0 1.4rem;padding-bottom:1.1rem;border-bottom:1px solid var(--border,#e5e5e5);}
 .ys-chip{display:inline-flex;align-items:center;gap:.35em;font-size:.78rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius: 2px;padding:.26rem .72rem;line-height:1.25;}

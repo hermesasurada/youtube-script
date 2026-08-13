@@ -1,4 +1,5 @@
 import json
+import gzip
 import logging
 import os
 import queue
@@ -63,6 +64,17 @@ except ImportError:
 app      = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _static_version(rel_path: str) -> str:
+    """정적 자원 URL 버전. 파일이 바뀔 때만 브라우저 캐시 키가 바뀐다."""
+    try:
+        return format(os.stat(os.path.join(BASE_DIR, "static", rel_path)).st_mtime_ns, "x")
+    except OSError:
+        return "0"
+
+
+app.jinja_env.globals["static_v"] = _static_version
 
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
@@ -593,20 +605,32 @@ def run_job(job_id: str, params: dict) -> None:
         elif d["status"] == "finished":
             q.put("다운로드 완료")
 
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.splitext(audio_path)[0],
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+        "ffmpeg_location": FFMPEG_LOCATION,
+        "quiet": True,
+        "progress_hooks": [_progress_hook],
+        "socket_timeout": 60,
+        "retries": 10,
+        "fragment_retries": 10,
+        "concurrent_fragment_downloads": 1,
+    }
     try:
-        with yt_dlp.YoutubeDL({
-            "format": "bestaudio/best",
-            "outtmpl": os.path.splitext(audio_path)[0],
-            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
-            "ffmpeg_location": FFMPEG_LOCATION,
-            "quiet": True,
-            "progress_hooks": [_progress_hook],
-            "socket_timeout": 60,
-            "retries": 10,
-            "fragment_retries": 10,
-            "concurrent_fragment_downloads": 1,
-        }) as ydl:
-            ydl.download([url])
+        for dl_attempt in (1, 2):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                break
+            except Exception as e:
+                # 403은 이 세션이 유튜브 봇차단 실험 버킷에 배정된 것 — 새 세션은
+                # 대개 정상 버킷에 떨어지므로 큐 지연(30분+) 전에 즉시 한 번 다시 받는다.
+                if dl_attempt == 1 and "403" in str(e) and not stop.is_set():
+                    log.info("download 403 — 새 세션으로 즉시 재시도: %s", title)
+                    q.put("403 차단 감지 — 새 세션으로 즉시 재시도")
+                    continue
+                raise
     except Exception as e:
         if stop.is_set():
             jobs[job_id]["status"] = "cancelled"
@@ -745,13 +769,37 @@ def _restrict_remote_access():
 
 
 @app.after_request
-def _no_store_html(resp):
+def _optimize_web_response(resp):
     # 렌더된 HTML 페이지(/, /m)는 캐시 금지 → 템플릿 변경이 새로고침만으로 반영(모바일 캐시 방지).
-    if resp.headers.get("Content-Type", "").startswith("text/html"):
+    content_type = resp.headers.get("Content-Type", "").lower()
+    if content_type.startswith("text/html"):
         resp.headers["Cache-Control"] = "no-store"
-    # self-host 웹폰트는 내용이 불변(파일명에 해시 포함) → 1년 캐시로 재요청 자체를 없앤다.
-    elif request.path.startswith("/static/fonts/"):
+    # 정적 URL은 템플릿의 mtime 쿼리로 버전 관리한다. 변경 전까지 재검증 요청을 없앤다.
+    elif request.path.startswith("/static/"):
         resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+    # Tailscale 구간에서 JSON/HTML/JS/CSS 전송량을 줄인다. 바이너리와 SSE는 제외한다.
+    compressible = (
+        content_type.startswith("text/")
+        or content_type.startswith("application/json")
+        or content_type.startswith("application/javascript")
+    )
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "").lower()
+    if (request.method != "HEAD" and 200 <= resp.status_code < 300
+            and accepts_gzip and compressible
+            and not resp.headers.get("Content-Encoding")
+            and not content_type.startswith("text/event-stream")):
+        resp.direct_passthrough = False
+        raw = resp.get_data()
+        if len(raw) >= 1024:
+            resp.set_data(gzip.compress(raw, compresslevel=6))
+            resp.headers["Content-Encoding"] = "gzip"
+            resp.headers["Content-Length"] = str(len(resp.get_data()))
+            resp.headers.pop("ETag", None)
+            resp.headers.pop("Content-MD5", None)
+            vary = {v.strip() for v in resp.headers.get("Vary", "").split(",") if v.strip()}
+            vary.add("Accept-Encoding")
+            resp.headers["Vary"] = ", ".join(sorted(vary))
     return resp
 
 
@@ -934,6 +982,97 @@ def _reindex_summary(save_path: str) -> None:
             db.upsert_summary_only(md)
         except Exception:
             pass
+    _translate_titles_async()      # 새 항목의 외국어 제목을 뒤이어 번역
+
+
+# ── 제목 번역 ──────────────────────────────────────────────────────────
+# 외국어 제목 영상은 목록·요약 팝업에서 무슨 내용인지 바로 안 읽힌다.
+# 제목만 한국어로 옮겨 두고(원문은 그대로 병기), 화면에서 함께 보여준다.
+
+TITLE_TR_MODEL   = os.environ.get("TITLE_TR_MODEL", "claude-sonnet-5")
+TITLE_TR_BATCH   = 40            # 한 번 호출에 묶는 제목 수
+TITLE_TR_TIMEOUT = 240
+
+_TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역한다.
+
+규칙:
+- 기업·제품·인물·기술 고유명사는 원문 표기를 그대로 둔다 (NVIDIA, ChatGPT, Sam Altman, S&P 500).
+- 직역투를 피하고 한국어 제목으로 자연스럽게 읽히게 한다.
+- 원문의 어조(질문형·감탄형 등)와 정보량을 유지한다. 내용을 더하거나 빼지 않는다.
+- 이미 한국어인 제목은 그대로 둔다.
+
+출력: 입력 순서와 같은 길이의 JSON 문자열 배열만. 설명·코드펜스 없이 배열만 출력한다.
+
+입력:
+"""
+
+
+def _parse_title_json(out: str, n: int) -> list[str] | None:
+    """모델 응답에서 JSON 배열만 건져낸다(코드펜스·군더더기 허용)."""
+    s = (out or "").strip()
+    m = re.search(r"\[.*\]", s, re.S)
+    if not m:
+        return None
+    try:
+        arr = json.loads(m.group(0))
+    except Exception:
+        return None
+    if not isinstance(arr, list) or len(arr) != n:
+        return None
+    return [str(x).strip() for x in arr]
+
+
+def _translate_titles(titles: list[str]) -> list[str] | None:
+    """제목 묶음을 번역. 실패하면 None(다음 기회에 다시 시도)."""
+    if not titles:
+        return []
+    body = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(titles))
+    r = llm_gateway.run_command(
+        [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
+         _TITLE_TR_PROMPT + body],
+        timeout=TITLE_TR_TIMEOUT)
+    if r.returncode != 0:
+        log.warning("title translate failed: rc=%s %s", r.returncode, (r.stderr or "")[:160])
+        return None
+    return _parse_title_json(r.stdout, len(titles))
+
+
+def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
+    """번역이 비어 있는 항목을 한 묶음 처리한다. 배치 스크립트와 훅이 함께 쓴다."""
+    db.mark_korean_titles()                       # 한국어 제목은 대상에서 확정 제외
+    todo = db.titles_needing_translation(limit)
+    if not todo:
+        return {"done": 0, "remaining": 0}
+    out = _translate_titles([t["title"] for t in todo])
+    if out is None:
+        return {"done": 0, "remaining": len(todo), "error": "translate failed"}
+    n = 0
+    for item, ko in zip(todo, out):
+        if ko and ko != item["title"]:
+            n += db.set_title_ko(item["yt_id"], ko)
+        else:
+            db.set_title_ko(item["yt_id"], "")     # 번역해도 같으면 병기 불필요
+    log.info("title translated: %d건", n)
+    return {"done": n, "remaining": len(db.titles_needing_translation(limit))}
+
+
+_title_tr_running = threading.Lock()
+
+
+def _translate_titles_async() -> None:
+    """요약 저장 뒤 새 제목을 조용히 번역한다(중복 실행 방지, 실패해도 무시)."""
+    if not _title_tr_running.acquire(blocking=False):
+        return
+
+    def run():
+        try:
+            translate_pending_titles()
+        except Exception as e:                      # noqa: BLE001
+            log.warning("title translate hook failed: %s", e)
+        finally:
+            _title_tr_running.release()
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 # Claude Code CLI(에이전트)가 요약을 '파일로 저장'하려다 권한 거부되면 본문 앞에
@@ -1444,13 +1583,27 @@ def distill_policy():
         return _json({"error": str(e)}, 500)
 
 
+def _history_item_from_payload(data: dict):
+    """웹용 item_id를 DB 항목으로 해석한다. 레거시 경로 요청이면 (None, None)."""
+    if "item_id" not in data:
+        return None, None
+    item = db.get_history_item(data.get("item_id"))
+    if not item:
+        return None, _json({"error": "항목을 찾을 수 없습니다."}, 404)
+    return item, None
+
+
 @app.route("/history/distill", methods=["PATCH"])
 def history_distill():
     """영상 단위 증류 설정 — distill: true(포함) / false(제외) / null(미설정=채널 따름)."""
     data = request.get_json(force=True) or {}
-    path = (data.get("path") or "").strip()
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    path = ((item.get("summary_path") or item["md_path"]) if item
+            else (data.get("path") or "").strip())
     if not path:
-        return _json({"error": "path 필요"}, 400)
+        return _json({"error": "item_id 또는 path 필요"}, 400)
     raw = data.get("distill", "__missing__")
     if raw == "__missing__":
         return _json({"error": "distill 필요(true/false/null)"}, 400)
@@ -1465,10 +1618,18 @@ def get_history():
     q = (request.args.get("q") or "").strip()
     unread_only = request.args.get("unread_only") == "1"
     try:
-        items = db.search(q, unread_only=unread_only) if q else db.list_items(unread_only=unread_only)
+        revision = db.history_revision()
+        # revision 단축 응답은 전체 목록에만 적용한다. 검색/필터 조건이 달라지면
+        # 같은 DB revision이어도 결과 집합은 다르므로 실제 쿼리를 수행해야 한다.
+        if not q and not unread_only and request.args.get("revision") == revision:
+            return _json({"revision": revision, "unchanged": True})
+        items = (db.search(q, unread_only=unread_only)
+                 if q else db.list_history_items(unread_only=unread_only))
+        revision = db.history_revision()
     except Exception:
         items = []
-    return _json({"items": items})
+        revision = ""
+    return _json({"revision": revision, "items": items})
 
 
 @app.route("/history/check")
@@ -1482,31 +1643,46 @@ def history_check():
 
 @app.route("/history/mark_read", methods=["PATCH"])
 def mark_read():
-    data = request.get_json(force=True)
-    txt_path = (data.get("txt_path") or "").strip()
+    data = request.get_json(force=True) or {}
     is_read  = bool(data.get("is_read", True))
-    abs_path, err = _check_res_path(txt_path)
+    item, err = _history_item_from_payload(data)
     if err:
         return err
-    ok = db.mark_read(abs_path, is_read)
+    if item:
+        ok = db.mark_read_by_id(item["item_id"], is_read)
+    else:
+        txt_path = (data.get("txt_path") or "").strip()
+        abs_path, err = _check_res_path(txt_path)
+        if err:
+            return err
+        ok = db.mark_read(abs_path, is_read)
     if not ok:
         return _json({"error": "항목을 찾을 수 없습니다."}, 404)
-    return _json({"ok": True, "is_read": is_read})
+    return _json({"ok": True, "is_read": is_read, "revision": db.history_revision()})
 
 
 @app.route("/history/item", methods=["DELETE"])
 def history_delete():
-    data = request.get_json(force=True)
-    txt_path = (data.get("txt_path") or "").strip()
-    abs_path, err = _check_res_path(txt_path)
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
     if err:
         return err
-    # summary 경로 계산 (DB에서 가져오거나 경로 규칙으로 유추)
-    try:
-        rel = os.path.relpath(abs_path, RES_DIR)
-        summary_path = os.path.join(SUMMARY_DIR, rel)
-    except ValueError:
-        summary_path = None
+    if item:
+        abs_path, err = _check_res_path(item["md_path"])
+        if err:
+            return err
+        summary_path = item.get("summary_path")
+    else:
+        txt_path = (data.get("txt_path") or "").strip()
+        abs_path, err = _check_res_path(txt_path)
+        if err:
+            return err
+        # 레거시 경로 호출은 기존 파일 배치 규칙으로 요약 경로를 유추한다.
+        try:
+            rel = os.path.relpath(abs_path, RES_DIR)
+            summary_path = os.path.join(SUMMARY_DIR, rel)
+        except ValueError:
+            summary_path = None
     # DB에서 먼저 제거
     db.delete(abs_path)
     # 파일 삭제
@@ -1528,12 +1704,18 @@ def history_delete():
                 deleted.append(frames_dir)
             except OSError as e:
                 errors.append(str(e))
-    return _json({"ok": True, "deleted": deleted, "errors": errors})
+    return _json({"ok": True, "deleted": deleted, "errors": errors,
+                  "revision": db.history_revision()})
 
 
 @app.route("/history/text", methods=["POST"])
 def history_text():
-    abs_path, err = _check_res_path(request.get_json(force=True).get("txt_path") or "")
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    raw_path = item["md_path"] if item else (data.get("txt_path") or "")
+    abs_path, err = _check_res_path(raw_path)
     if err:
         return err
     if not os.path.exists(abs_path):
@@ -1609,7 +1791,13 @@ def _parse_summary_title(md_path: str) -> str:
 
 @app.route("/summary/content", methods=["POST"])
 def summary_content():
-    path = (request.get_json(force=True).get("path") or "").strip()
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    path = (item.get("summary_path") if item else (data.get("path") or "").strip())
+    if not path:
+        return _json({"error": "요약 파일 없음"}, 404)
     abs_path = os.path.realpath(path)
     summary_real = os.path.realpath(SUMMARY_DIR)
     if not (abs_path.startswith(summary_real + os.sep) or abs_path == summary_real):
@@ -1620,7 +1808,8 @@ def summary_content():
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             content = f.read()
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
-        return _json({"content": content, "distill": db.get_item_distill(abs_path)})
+        return _json({"content": content, "distill": db.get_item_distill(abs_path),
+                      "title_ko": db.get_title_ko(abs_path)})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 

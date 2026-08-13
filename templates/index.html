@@ -5,15 +5,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YouTube Transcription</title>
-<!-- 웹폰트는 self-host(tools/fetch_fonts.py) — VPN 경유 시 외부 왕복을 없애기 위함 -->
-<link rel="stylesheet" href="/static/fonts/google.css">
-<link rel="stylesheet" href="/static/fonts/pretendard.css">
-
-<link rel="stylesheet" href="/static/css/index.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script src="/static/js/common.js"></script>
+<!-- 목록용 기본 글꼴과 작은 로컬 marked만 선로드. 본문 글꼴·KaTeX는 요약 뒤에 로드한다. -->
+<link rel="stylesheet" href="/static/fonts/pretendard.css?v={{ static_v('fonts/pretendard.css') }}">
+<link rel="stylesheet" href="/static/css/index.css?v={{ static_v('css/index.css') }}">
+<script>window.YS_ASSET_VERSIONS={googleCss:"{{ static_v('fonts/google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
+<script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
+<script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
 <body class="{% if remote %}remote-mode{% endif %}">
 
 <header>
@@ -204,7 +201,7 @@
         <div class="history-list-section">
           <div class="history-toolbar">
             <div class="history-filter-row">
-              <button class="btn-sm btn-ghost" onclick="loadHistory()" title="새로고침">새로고침</button>
+              <button class="btn-sm btn-ghost" onclick="loadHistory(true)" title="새로고침">새로고침</button>
               <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
                 <option value="">전체 업로더</option>
               </select>
@@ -380,6 +377,6 @@
   </div>
 </div>
 
-<script src="/static/js/index.js"></script>
+<script src="/static/js/index.js?v={{ static_v('js/index.js') }}"></script>
 </body>
 </html>

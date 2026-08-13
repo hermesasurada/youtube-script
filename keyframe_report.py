@@ -33,6 +33,7 @@ SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
 VISION_MODEL    = os.environ.get("VISION_MODEL", "opus")   # 캡션 품질 우선(요약과 동일 티어)
+GPT_VISION_MODEL = os.environ.get("GPT_VISION_MODEL", os.environ.get("GPT_MODEL", "gpt-5.6-sol"))
 # Claude 비전 3회 실패 시 Grok 폴백(요약 폴백과 동일 기조). grok CLI는 이미지 옵션이 없지만
 # 프롬프트의 @경로를 읽어 비전이 동작한다 — 캡처를 통째로 잃는 것보다 낫다.
 GROK_VISION_FALLBACK = os.environ.get("GROK_VISION_FALLBACK", "1") != "0"
@@ -170,13 +171,23 @@ def _exclude_opening_candidates(
 def download_video(url: str, out_noext: str) -> str | None:
     import yt_dlp
     log(f"[1] 영상 다운로드(≤{VIDEO_MAXH}p): {url}")
-    with yt_dlp.YoutubeDL({
+    opts = {
         "format": f"bestvideo[height<={VIDEO_MAXH}]+bestaudio/best[height<={VIDEO_MAXH}]/best",
         "outtmpl": out_noext + ".%(ext)s", "merge_output_format": "mp4",
         "ffmpeg_location": FFMPEG_DIR, "quiet": True, "no_warnings": True,
         "socket_timeout": 60, "retries": 5,
-    }) as ydl:
-        ydl.download([url])
+    }
+    for attempt in (1, 2):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            break
+        except Exception as e:
+            # 403 = 세션이 봇차단 실험 버킷에 걸린 것. 새 세션은 대개 통과하므로 즉시 1회 재시도.
+            if attempt == 1 and "403" in str(e):
+                log("[1] 403 차단 — 새 세션으로 즉시 재시도")
+                continue
+            raise
     for ext in ("mp4", "mkv", "webm", "m4v"):
         if os.path.exists(out_noext + "." + ext):
             return out_noext + "." + ext
@@ -267,9 +278,9 @@ def extract_candidates(video: str, outdir: str) -> list[tuple[float, str]]:
 # ── 비전: 자료성 판별 + 섹션 정렬 (단일 호출) ─────────────────────────
 
 def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict],
-                        *, skip_claude: bool = False) -> dict | None:
+                        *, skip_claude: bool = False, model_order=None) -> dict | None:
     global _LAST_VISION_ERR
-    if skip_claude:
+    if skip_claude and model_order is None:
         # 게이트가 Claude 불가로 판정 → 비전 폴백이 없으므로 캡처 생략(요약은 유지, 비치명적)
         _LAST_VISION_ERR = "claude skipped (게이트 판정) — 비전 폴백 없음, 캡처 생략"
         log("  비전 스킵 (skip_claude=True) — 캡처 없이 진행")
@@ -319,6 +330,18 @@ JSON 배열로만 답하라(다른 설명 금지):
         return _parse(llm_gateway.run_command(
             [_claude_bin(), "-p", "--model", VISION_MODEL, prompt], timeout=VISION_TIMEOUT))
 
+    def _call_gpt() -> tuple[list | None, str]:
+        """Codex CLI에 후보 이미지를 직접 첨부해 같은 JSON 판정을 요청한다."""
+        try:
+            return _parse(llm_gateway.run_codex_prompt(
+                prompt,
+                model=GPT_VISION_MODEL,
+                timeout=VISION_TIMEOUT,
+                images=[path for _, path in frames],
+            ))
+        except Exception as e:
+            return None, f"gpt 실행 오류: {e}"
+
     def _call_grok() -> tuple[list | None, str]:
         """요약과 같은 Grok 폴백. grok CLI는 이미지 첨부 옵션이 없지만 프롬프트의 @경로를
         읽어 비전이 동작한다(TUI가 뜨지 않도록 --prompt-file 단일턴으로 호출)."""
@@ -341,25 +364,34 @@ JSON 배열로만 답하라(다른 설명 금지):
             except OSError:
                 pass
 
-    # 최대 3회 시도(일시적 장애·형식 일탈·과부하 대비, 점증 백오프). 마지막 사유를 caller에 노출.
+    # 자동모니터가 보낸 순서대로 폴백한다. Opus는 기존 안정성 정책대로 최대 3회,
+    # GPT/Grok은 각 1회 시도해 다음 폴백이 과도하게 지연되지 않게 한다.
     _LAST_VISION_ERR = ""
     data = None
-    for attempt in range(3):
-        data, err = _call_claude()
+    legacy_default = ["opus"] + (["grok"] if GROK_VISION_FALLBACK else [])
+    order = llm_gateway.normalize_model_order(
+        legacy_default if model_order is None else model_order,
+        default=legacy_default if model_order is None else llm_gateway.MODEL_KEYS,
+    )
+    failures: list[str] = []
+    callers = {"opus": _call_claude, "gpt": _call_gpt, "grok": _call_grok}
+    for key in order:
+        attempts = 3 if key == "opus" else 1
+        for attempt in range(attempts):
+            data, err = callers[key]()
+            if data is not None:
+                log(f"  비전 {key} 성공")
+                break
+            label = f"{key} {attempt + 1}/{attempts}"
+            log(f"  비전 응답 실패({label}): {err}")
+            if attempt < attempts - 1:
+                time.sleep(3 * (attempt + 1))
         if data is not None:
             break
-        _LAST_VISION_ERR = err
-        log(f"  비전 응답 실패({attempt + 1}/3): {err}")
-        if attempt < 2:
-            time.sleep(3 * (attempt + 1))
-    if data is None and GROK_VISION_FALLBACK:
-        # Claude가 3회 다 실패 → 요약과 동일하게 Grok으로 폴백(캡처를 통째로 잃지 않게)
-        log(f"  비전 Claude 실패 → Grok 폴백 시도")
-        data, gerr = _call_grok()
-        if data is None:
-            _LAST_VISION_ERR = f"{_LAST_VISION_ERR} / grok 폴백 실패: {gerr}"
-        else:
-            log(f"  비전 Grok 폴백 성공")
+        failures.append(f"{key}: {err}")
+        log(f"  비전 {key} 실패 → 다음 모델")
+    if failures:
+        _LAST_VISION_ERR = " / ".join(failures)
     if data is None:
         # None = '비전 호출 자체 실패'. 빈 dict('자료 없음')과 구분해 호출측에 전파.
         log(f"  비전 호출 실패 — vision_failed: {_LAST_VISION_ERR}")
@@ -483,7 +515,7 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
 
 
 def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_base: str,
-                       *, skip_claude: bool = False) -> dict:
+                       *, skip_claude: bool = False, model_order=None) -> dict:
     """서버 진입점: 영상→키프레임→비전 분류·정렬→프레임 저장→요약 md 주입.
 
     반환: {"ok":bool, "n_frames":int, "reason":str?}
@@ -512,7 +544,10 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
             )
         if not cands:
             return {"ok": False, "reason": "no_frames"}    # ffmpeg 추출 실패/0장
-        verdict = classify_and_assign(cands, meta["headings"], skip_claude=skip_claude)  # 중복은 비전이 keep=false로
+        verdict = classify_and_assign(
+            cands, meta["headings"], skip_claude=skip_claude,
+            model_order=model_order,
+        )  # 중복은 비전이 keep=false로
         if verdict is None:
             # 비전 호출 실패 — 실패 사유를 error로 전달(호출측이 usage limit/장애를 분류)
             return {"ok": False, "reason": "vision_failed", "error": _LAST_VISION_ERR}

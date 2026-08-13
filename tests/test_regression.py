@@ -7,6 +7,7 @@
 주의:  conftest.py가 DB_PATH를 임시 파일로 격리한다(실제 index.db·res/ 미사용).
 """
 import json
+import gzip
 import os
 import sqlite3
 import sys
@@ -32,6 +33,11 @@ def test_clean_summary_does_not_treat_h3_as_title():
 def test_clean_summary_skips_stray_hash_before_real_title():
     dirty = "#\n\n# 실제 영상 제목\n\n## 1. 메타정보"
     assert app._clean_summary(dirty) == "# 실제 영상 제목\n\n## 1. 메타정보"
+
+
+def test_model_order_normalization_is_complete_and_unique():
+    assert llm_gateway.normalize_model_order(["grok", "opus", "gpt"]) == ["grok", "opus", "gpt"]
+    assert llm_gateway.normalize_model_order('["gpt","gpt","unknown"]') == ["gpt", "opus", "grok"]
 
 
 # ── ① 마크다운 I/O 왕복 + app·db 파서 일치(드리프트 가드) ──────────────
@@ -97,6 +103,73 @@ def test_db_upsert_search_delete(tmp_path, monkeypatch):
     db.delete(os.path.realpath(md))
     assert all(it["title"] != "파이테스트제목 QWERTY" for it in db.list_items())
     assert db.find_by_yt_id("ZZTESTID01") is None
+
+
+def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
+    """카드 목록은 본문·절대경로를 싣지 않고, 상세는 정수 ID로 조회한다."""
+    monkeypatch.setattr(db, "RES_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "SUMMARY_DIR", str(tmp_path / "summary"))
+    monkeypatch.setattr(app, "RES_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "SUMMARY_DIR", str(tmp_path / "summary"))
+    db.init()
+
+    date_dir = tmp_path / "20260813"
+    summary_dir = tmp_path / "summary" / "20260813"
+    date_dir.mkdir()
+    summary_dir.mkdir(parents=True)
+    md = date_dir / "202608131200_1m00s_web.md"
+    summary = summary_dir / md.name
+    md.write_text(
+        "---\ntitle: 경량 이력 API\nuploader: 테스트 채널\nduration: 60\n"
+        "id: LIGHTAPI01\nwebpage_url: https://youtu.be/LIGHTAPI01\n---\n\n전사 본문",
+        encoding="utf-8",
+    )
+    summary.write_text("# 경량 이력 API\n\n요약 본문", encoding="utf-8")
+    assert db.upsert(str(md))
+
+    client = app.app.test_client()
+    payload = client.get("/history").get_json()
+    item = next(i for i in payload["items"] if i["title"] == "경량 이력 API")
+    assert isinstance(item["item_id"], int)
+    assert item["has_summary"] is True
+    assert not ({"txt_path", "summary_path", "transcript", "summary", "tags", "categories"} & item.keys())
+
+    unchanged = client.get("/history?revision=" + payload["revision"]).get_json()
+    assert unchanged == {"revision": payload["revision"], "unchanged": True}
+
+    assert client.post("/history/text", json={"item_id": item["item_id"]}).get_json()["text"] == "전사 본문"
+    summary_payload = client.post("/summary/content", json={"item_id": item["item_id"]}).get_json()
+    assert "요약 본문" in summary_payload["content"]
+
+    marked = client.patch(
+        "/history/mark_read", json={"item_id": item["item_id"], "is_read": True}
+    ).get_json()
+    assert marked["ok"] is True and marked["revision"] != payload["revision"]
+
+
+def test_history_read_update_does_not_rebuild_fts():
+    db.init()
+    trigger = db._conn().execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='items_au'"
+    ).fetchone()[0]
+    normalized = " ".join(trigger.upper().split())
+    assert "AFTER UPDATE OF TITLE, UPLOADER, TRANSCRIPT, SUMMARY" in normalized
+    assert "IS_READ" not in normalized
+
+
+def test_text_responses_are_gzipped_when_requested():
+    response = app.app.test_client().get("/", headers={"Accept-Encoding": "gzip"})
+    assert response.status_code == 200
+    assert response.headers.get("Content-Encoding") == "gzip"
+    assert b"YouTube Transcription" in gzip.decompress(response.data)
+
+
+def test_summary_renderer_is_local_and_secondary_assets_are_deferred():
+    """모바일 첫 요약이 외부 marked·전체 폰트 CSS를 기다리는 회귀를 막는다."""
+    html = app.app.test_client().get("/m").get_data(as_text=True)
+    assert "/static/vendor/marked.min.js?v=" in html
+    assert "cdn.jsdelivr.net/npm/marked" not in html
+    assert '<link rel="stylesheet" href="/static/fonts/google.css' not in html
 
 
 # ── ④ 키프레임 타임스탬프 → 섹션 배정 (Tier3) ─────────────────────────
@@ -298,6 +371,37 @@ def test_item_distill_overrides_channel_setting():
         conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
 
 
+def test_monitor_model_orders_persist_independently():
+    db.init()
+    try:
+        saved = db.set_monitor_model_orders(
+            summary=["gpt", "opus", "grok"],
+            capture=["grok", "gpt", "opus"],
+        )
+        assert saved == {
+            "summary": ["gpt", "opus", "grok"],
+            "capture": ["grok", "gpt", "opus"],
+        }
+        assert db.get_monitor_model_orders() == saved
+
+        client = app.app.test_client()
+        payload = client.get("/channels").get_json()
+        assert payload["model_orders"] == saved
+        changed = client.patch(
+            "/channels/model-orders", json={"summary": ["opus", "grok", "gpt"]}
+        ).get_json()
+        assert changed["model_orders"]["summary"] == ["opus", "grok", "gpt"]
+        assert changed["model_orders"]["capture"] == ["grok", "gpt", "opus"]
+        bad = client.patch(
+            "/channels/model-orders", json={"capture": ["opus", "opus", "gpt"]}
+        )
+        assert bad.status_code == 400
+    finally:
+        db.set_monitor_model_orders(
+            summary=["opus", "gpt", "grok"], capture=["opus", "gpt", "grok"]
+        )
+
+
 def test_membership_capture_failure_is_not_retried(monkeypatch):
     """멤버십 전용으로 전환된 영상은 캡처를 다시 받아도 같은 결과 — 재시도 예약하지 않는다.
 
@@ -346,7 +450,7 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
     monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)
     monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
     monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda: (True, "claude", ""))
-    monkeypatch.setattr(channel_monitor, "process_capture_only", lambda path, url: {"ok": True, "n_frames": 2})
+    monkeypatch.setattr(channel_monitor, "process_capture_only", lambda path, url, **kwargs: {"ok": True, "n_frames": 2})
     notices = []
     monkeypatch.setattr(channel_monitor, "notify", notices.append)
 
@@ -393,6 +497,36 @@ def test_process_video_resumes_from_saved_transcript(monkeypatch):
     assert any(url.endswith("/summarize") for url in calls)
 
 
+def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
+    calls = []
+
+    class ResponseStub:
+        def __init__(self, url, body):
+            self.url, self.body = url, body
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def raise_for_status(self): return None
+        def iter_lines(self, decode_unicode=False): return iter(["event: done", "data: "])
+        def json(self): return {"ok": True, "n_frames": 1}
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs.get("json") or {}))
+        return ResponseStub(url, kwargs.get("json") or {})
+
+    monkeypatch.setattr(channel_monitor.os.path, "isfile", lambda path: path == "/tmp/existing.md")
+    monkeypatch.setattr(channel_monitor.requests, "post", post)
+    channel_monitor.process_video(
+        {"id": 1, "url": "https://youtu.be/orders", "txt_path": "/tmp/existing.md"},
+        "prompt",
+        summary_models=["gpt", "opus", "grok"],
+        capture_models=["grok", "gpt", "opus"],
+    )
+    summary_body = next(body for url, body in calls if url.endswith("/summarize"))
+    capture_body = next(body for url, body in calls if url.endswith("/keyframes"))
+    assert summary_body["models"] == ["gpt", "opus", "grok"]
+    assert capture_body["models"] == ["grok", "gpt", "opus"]
+
+
 def test_stream_command_timeout_and_stderr_drain():
     events = list(llm_gateway.stream_command(
         [sys.executable, "-c", "import sys,time; print('ready', flush=True); "
@@ -429,6 +563,51 @@ def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
     )
     assert partial_index < reset_index < grok_index
     assert 'data: ""' in output[reset_index]
+
+
+def test_ordered_summary_uses_requested_fallback_order(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        app, "_summarize_with_gpt",
+        lambda prompt: calls.append("gpt") or ("", "quota"),
+    )
+    monkeypatch.setattr(
+        app, "_summarize_with_grok",
+        lambda prompt: calls.append("grok") or ("# Grok 성공", ""),
+    )
+    monkeypatch.setattr(
+        app.llm_gateway, "stream_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Opus should not run")),
+    )
+
+    output = list(app._summarize_ordered(
+        "prompt", None, ["gpt", "grok", "opus"], transcript_chars=100,
+    ))
+    assert calls == ["gpt", "grok"]
+    bodies = [json.loads(chunk[6:].strip()) for chunk in output if chunk.startswith("data: ") and chunk[6:].strip()]
+    assert any("Grok 성공" in body for body in bodies)
+    assert output[-1].startswith("event: done")
+
+
+def test_keyframe_gpt_can_be_first_vision_model(monkeypatch):
+    result = llm_gateway.ProcessResult(
+        0, '[{"name":"a.jpg","keep":true,"section":0,"type":"chart","caption":"차트"}]', ""
+    )
+    seen = {}
+    def run_gpt(prompt, **kwargs):
+        seen["images"] = kwargs["images"]
+        return result
+    monkeypatch.setattr(keyframe_report.llm_gateway, "run_codex_prompt", run_gpt)
+    monkeypatch.setattr(
+        keyframe_report.llm_gateway, "run_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Later models should not run")),
+    )
+    verdict = keyframe_report.classify_and_assign(
+        [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}],
+        model_order=["gpt", "opus", "grok"],
+    )
+    assert verdict["a.jpg"]["keep"] is True
+    assert seen["images"] == ["/tmp/a.jpg"]
 
 
 def _make_job(job_id, meta=None):

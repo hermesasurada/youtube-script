@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -15,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any, Iterable
 
 from document_io import parse_frontmatter, read_markdown
+import llm_gateway
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 RES_DIR     = os.path.join(BASE_DIR, "res")
@@ -22,6 +24,7 @@ SUMMARY_DIR = os.path.join(RES_DIR, "summary")
 DB_PATH     = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "index.db"))
 
 _lock = threading.RLock()
+_HANGUL_RE = re.compile(r"[가-힣]")   # 제목에 한글이 있으면 번역 대상이 아니다
 _local = threading.local()
 
 
@@ -65,6 +68,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_date     ON items(date DESC);
 CREATE INDEX IF NOT EXISTS idx_items_uploader ON items(uploader);
+CREATE INDEX IF NOT EXISTS idx_items_date_stem ON items(date DESC, stem DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
     title, uploader, transcript, summary,
@@ -82,7 +86,8 @@ CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items BEGIN
   VALUES('delete', old.rowid, old.title, old.uploader, old.transcript, old.summary);
 END;
 
-CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
+CREATE TRIGGER IF NOT EXISTS items_au
+AFTER UPDATE OF title, uploader, transcript, summary ON items BEGIN
   INSERT INTO items_fts(items_fts, rowid, title, uploader, transcript, summary)
   VALUES('delete', old.rowid, old.title, old.uploader, old.transcript, old.summary);
   INSERT INTO items_fts(rowid, title, uploader, transcript, summary)
@@ -102,6 +107,13 @@ CREATE TABLE IF NOT EXISTS channels (
     last_checked  TEXT,
     added_at      TEXT,
     min_duration  INTEGER   -- 채널별 최소 길이(초) 오버라이드. NULL=전역 기본(MONITOR_MIN_DURATION)
+);
+
+CREATE TABLE IF NOT EXISTS monitor_settings (
+    id             INTEGER PRIMARY KEY CHECK(id = 1),
+    summary_models TEXT NOT NULL DEFAULT '["opus","gpt","grok"]',
+    capture_models TEXT NOT NULL DEFAULT '["opus","gpt","grok"]',
+    updated_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS watch_queue (
@@ -205,6 +217,87 @@ def init() -> None:
             if "distill" not in icols:
                 c.execute("ALTER TABLE items ADD COLUMN distill INTEGER")   # NULL 허용 = 미설정
             c.execute("PRAGMA user_version = 6")
+        if ver < 7:
+            # v7: 자동모니터의 요약/캡처 LLM 폴백 순서를 독립 저장한다.
+            c.execute(
+                "INSERT OR IGNORE INTO monitor_settings "
+                "(id, summary_models, capture_models, updated_at) VALUES (1, ?, ?, ?)",
+                ('["opus","gpt","grok"]', '["opus","gpt","grok"]', _now()),
+            )
+            c.execute("PRAGMA user_version = 7")
+        if ver < 8:
+            # v8: 외국어 제목의 한국어 번역. NULL=아직 없음, ''=번역 불필요(한국어 제목).
+            icols = {r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()}
+            if "title_ko" not in icols:
+                c.execute("ALTER TABLE items ADD COLUMN title_ko TEXT")
+            c.execute("PRAGMA user_version = 8")
+        if ver < 9:
+            # v9: 조회 정렬 인덱스 + FTS와 무관한 읽음/증류 변경 시 재색인 방지.
+            c.execute("CREATE INDEX IF NOT EXISTS idx_items_date_stem "
+                      "ON items(date DESC, stem DESC)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_items_unread_date_stem "
+                      "ON items(is_read, date DESC, stem DESC)")
+            c.execute("DROP TRIGGER IF EXISTS items_au")
+            c.executescript("""
+                CREATE TRIGGER items_au
+                AFTER UPDATE OF title, uploader, transcript, summary ON items BEGIN
+                  INSERT INTO items_fts(items_fts, rowid, title, uploader, transcript, summary)
+                  VALUES('delete', old.rowid, old.title, old.uploader, old.transcript, old.summary);
+                  INSERT INTO items_fts(rowid, title, uploader, transcript, summary)
+                  VALUES (new.rowid, new.title, new.uploader, new.transcript, new.summary);
+                END;
+            """)
+            c.execute("PRAGMA user_version = 9")
+
+
+# ── 제목 번역 ──────────────────────────────────────────────────────────
+
+def get_title_ko(path: str) -> str | None:
+    """요약/전사 경로로 번역 제목 조회. 없거나 불필요면 None."""
+    r = _conn().execute(
+        "SELECT title_ko FROM items WHERE md_path = ? OR summary_path = ? LIMIT 1",
+        (path, path)).fetchone()
+    if r is None:
+        return None
+    v = (r["title_ko"] or "").strip()
+    return v or None
+
+
+def set_title_ko(yt_id: str, value: str) -> bool:
+    """번역 제목 저장. 빈 문자열은 '번역 불필요'로 기록해 재시도를 막는다."""
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE items SET title_ko = ? WHERE yt_id = ?", (value, yt_id))
+        return cur.rowcount > 0
+
+
+def titles_needing_translation(limit: int = 500) -> list[dict]:
+    """번역이 아직 없는 항목(제목에 한글이 없는 것만) → [{yt_id, title}]."""
+    rows = _conn().execute(
+        """SELECT yt_id, title FROM items
+            WHERE title_ko IS NULL AND yt_id IS NOT NULL AND yt_id <> ''
+              AND title IS NOT NULL AND title <> ''
+            ORDER BY indexed_at DESC LIMIT ?""", (limit,)).fetchall()
+    out = []
+    for r in rows:
+        if _HANGUL_RE.search(r["title"] or ""):
+            continue                       # 한국어 제목은 번역 대상이 아니다
+        out.append({"yt_id": r["yt_id"], "title": r["title"]})
+    return out
+
+
+def mark_korean_titles() -> int:
+    """한글이 든 제목은 번역 불필요로 확정(''), 매번 후보에 다시 오르지 않게 한다."""
+    rows = _conn().execute(
+        "SELECT yt_id, title FROM items WHERE title_ko IS NULL AND yt_id IS NOT NULL"
+    ).fetchall()
+    ids = [r["yt_id"] for r in rows if _HANGUL_RE.search(r["title"] or "")]
+    if not ids:
+        return 0
+    with _lock:
+        _conn().executemany("UPDATE items SET title_ko = '' WHERE yt_id = ?",
+                            [(i,) for i in ids])
+    return len(ids)
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
@@ -353,7 +446,8 @@ def find_by_yt_id(yt_id: str) -> dict | None:
     if not yt_id:
         return None
     r = _conn().execute(
-        "SELECT * FROM items WHERE yt_id = ? ORDER BY date DESC, stem DESC LIMIT 1",
+        f"SELECT {_ITEM_COLUMNS} FROM items "
+        "WHERE yt_id = ? ORDER BY date DESC, stem DESC LIMIT 1",
         (yt_id,),
     ).fetchone()
     return _row_to_item(r) if r else None
@@ -444,6 +538,42 @@ def set_channel_distill(cid: int, enabled: bool) -> bool:
         return cur.rowcount > 0
 
 
+def get_monitor_model_orders() -> dict[str, list[str]]:
+    """자동모니터의 요약/캡처별 LLM 처리 순서."""
+    row = _conn().execute(
+        "SELECT summary_models, capture_models FROM monitor_settings WHERE id = 1"
+    ).fetchone()
+    if not row:
+        defaults = list(llm_gateway.MODEL_KEYS)
+        return {"summary": defaults.copy(), "capture": defaults.copy()}
+    return {
+        "summary": llm_gateway.normalize_model_order(row["summary_models"]),
+        "capture": llm_gateway.normalize_model_order(row["capture_models"]),
+    }
+
+
+def set_monitor_model_orders(*, summary=None, capture=None) -> dict[str, list[str]]:
+    """보낸 작업의 모델 순서만 갱신하고 정규화된 전체 설정을 반환한다."""
+    current = get_monitor_model_orders()
+    summary_order = llm_gateway.normalize_model_order(
+        current["summary"] if summary is None else summary
+    )
+    capture_order = llm_gateway.normalize_model_order(
+        current["capture"] if capture is None else capture
+    )
+    with _lock:
+        _conn().execute(
+            """INSERT INTO monitor_settings (id, summary_models, capture_models, updated_at)
+               VALUES (1, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 summary_models=excluded.summary_models,
+                 capture_models=excluded.capture_models,
+                 updated_at=excluded.updated_at""",
+            (json.dumps(summary_order), json.dumps(capture_order), _now()),
+        )
+    return {"summary": summary_order, "capture": capture_order}
+
+
 def set_item_distill(path: str, value: bool | None) -> bool:
     """영상 단위 증류 오버라이드. None=미설정(채널 설정을 따름), True=포함, False=제외.
 
@@ -458,12 +588,15 @@ def set_item_distill(path: str, value: bool | None) -> bool:
 
 
 def get_item_distill(path: str) -> dict | None:
-    """영상의 증류 설정 조회 → {override: True/False/None, channel: bool, effective: bool}.
+    """영상의 증류 설정 조회 → {override, channel, registered, effective}.
 
     effective = 영상 오버라이드가 있으면 그것, 없으면 채널 설정.
+    registered = 자동수집 채널로 등록돼 있는지. 미등록이면 따를 채널 설정이 없어
+    channel 값은 기본값(포함)이며, UI가 그 차이를 구분해 표기한다.
     """
     r = _conn().execute(
-        """SELECT i.distill AS ov, i.channel_url, COALESCE(c.distill, 1) AS ch
+        """SELECT i.distill AS ov, i.channel_url, COALESCE(c.distill, 1) AS ch,
+                  c.channel_id AS cid
              FROM items i
              LEFT JOIN channels c ON i.channel_url LIKE '%' || c.channel_id
             WHERE i.md_path = ? OR i.summary_path = ? LIMIT 1""",
@@ -473,6 +606,7 @@ def get_item_distill(path: str) -> dict | None:
     override = None if r["ov"] is None else bool(r["ov"])
     channel = bool(r["ch"])
     return {"override": override, "channel": channel,
+            "registered": r["cid"] is not None,
             "effective": channel if override is None else override}
 
 
@@ -709,6 +843,18 @@ def close_conn() -> None:
 
 # ── 조회 ───────────────────────────────────────────────────────────────
 
+_ITEM_COLUMNS = """
+    date, upload_date, stem, title, uploader, channel, duration, webpage_url,
+    categories_json, tags_json, channel_url, has_txt, md_path, summary_path, is_read
+"""
+
+_HISTORY_COLUMNS = """
+    rowid AS item_id, date, upload_date, stem, title, uploader, channel,
+    duration, webpage_url, channel_url, has_txt,
+    CASE WHEN summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
+    is_read
+"""
+
 def _row_to_item(r: sqlite3.Row) -> dict:
     return {
         "date":         r["date"],           # 전사 처리일(res/{date}/ 기준)
@@ -728,12 +874,68 @@ def _row_to_item(r: sqlite3.Row) -> dict:
     }
 
 
+def _row_to_history_item(r: sqlite3.Row) -> dict:
+    """웹 목록용 최소 projection. 파일 경로와 본문/태그는 상세 요청에서만 조회한다."""
+    return {
+        "item_id":       int(r["item_id"]),
+        "date":          r["date"],
+        "upload_date":   r["upload_date"] or "",
+        "stem":          r["stem"],
+        "title":         r["title"] or r["stem"],
+        "uploader":      r["uploader"] or r["channel"] or "—",
+        "duration":      float(r["duration"] or 0),
+        "webpage_url":   r["webpage_url"] or "",
+        "channel_url":   r["channel_url"] or "",
+        "has_txt":       bool(r["has_txt"]),
+        "has_summary":   bool(r["has_summary"]),
+        "is_read":       bool(r["is_read"]),
+    }
+
+
 def list_items(unread_only: bool = False) -> list[dict]:
     where = "WHERE is_read = 0" if unread_only else ""
     rows = _conn().execute(
-        f"SELECT * FROM items {where} ORDER BY date DESC, stem DESC"
+        f"SELECT {_ITEM_COLUMNS} FROM items {where} ORDER BY date DESC, stem DESC"
     ).fetchall()
     return [_row_to_item(r) for r in rows]
+
+
+def list_history_items(unread_only: bool = False) -> list[dict]:
+    """웹 카드 목록. 큰 transcript/summary 및 내부 절대경로를 읽거나 전송하지 않는다."""
+    where = "WHERE is_read = 0" if unread_only else ""
+    rows = _conn().execute(
+        f"SELECT {_HISTORY_COLUMNS} FROM items {where} ORDER BY date DESC, stem DESC"
+    ).fetchall()
+    return [_row_to_history_item(r) for r in rows]
+
+
+def history_revision() -> str:
+    """목록 표시값이 달라질 때 바뀌는 저비용 revision 토큰."""
+    r = _conn().execute(
+        """SELECT COUNT(*) AS n,
+                  COALESCE(MAX(indexed_at), 0) AS indexed,
+                  COALESCE(SUM(rowid), 0) AS ids,
+                  COALESCE(SUM(CASE WHEN is_read != 0 THEN rowid ELSE 0 END), 0) AS reads,
+                  COALESCE(SUM(CASE WHEN summary_path IS NOT NULL THEN rowid ELSE 0 END), 0) AS summaries
+             FROM items"""
+    ).fetchone()
+    return f'{r["n"]}:{float(r["indexed"]):.6f}:{r["ids"]}:{r["reads"]}:{r["summaries"]}'
+
+
+def get_history_item(item_id: int) -> dict | None:
+    """정수 ID를 상세 파일 경로로 해석한다. 경로는 목록 응답에 노출하지 않는다."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None
+    if item_id <= 0:
+        return None
+    r = _conn().execute(
+        """SELECT rowid AS item_id, md_path, summary_path, title, has_txt
+             FROM items WHERE rowid = ?""",
+        (item_id,),
+    ).fetchone()
+    return dict(r) if r else None
 
 
 def search(q: str, limit: int = 500, unread_only: bool = False) -> list[dict]:
@@ -751,7 +953,12 @@ def search(q: str, limit: int = 500, unread_only: bool = False) -> list[dict]:
     unread_clause = "AND i.is_read = 0" if unread_only else ""
     rows = _conn().execute(
         f"""
-        SELECT i.* FROM items i
+        SELECT i.rowid AS item_id, i.date, i.upload_date, i.stem, i.title,
+               i.uploader, i.channel, i.duration, i.webpage_url, i.channel_url,
+               i.has_txt,
+               CASE WHEN i.summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
+               i.is_read
+          FROM items i
           JOIN items_fts f ON f.rowid = i.rowid
         WHERE items_fts MATCH ?
         {unread_clause}
@@ -760,7 +967,7 @@ def search(q: str, limit: int = 500, unread_only: bool = False) -> list[dict]:
         """,
         (expr, limit),
     ).fetchall()
-    return [_row_to_item(r) for r in rows]
+    return [_row_to_history_item(r) for r in rows]
 
 
 def mark_read(md_path: str, is_read: bool = True) -> bool:
@@ -770,6 +977,20 @@ def mark_read(md_path: str, is_read: bool = True) -> bool:
         cur = _conn().execute(
             "UPDATE items SET is_read = ? WHERE md_path = ?",
             (1 if is_read else 0, md_path),
+        )
+        return cur.rowcount > 0
+
+
+def mark_read_by_id(item_id: int, is_read: bool = True) -> bool:
+    """웹 목록의 정수 ID로 읽음 상태를 갱신한다."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return False
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE items SET is_read = ? WHERE rowid = ?",
+            (1 if is_read else 0, item_id),
         )
         return cur.rowcount > 0
 

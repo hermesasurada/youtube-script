@@ -7,10 +7,12 @@ and guarantees child cleanup when a streaming client disconnects.
 from __future__ import annotations
 
 import glob
+import json
 import os
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -58,6 +60,94 @@ def resolve_grok_bin() -> str:
         return found
     fallback = os.path.expanduser("~/.grok/bin/grok")
     return fallback if os.path.exists(fallback) else (env or "grok")
+
+
+def resolve_codex_bin() -> str:
+    """Resolve the Codex CLI used for the GPT model option."""
+    env = os.environ.get("CODEX_BIN")
+    if env and os.path.exists(env):
+        return env
+    found = shutil.which("codex")
+    if found:
+        return found
+    fallback = os.path.expanduser("~/.local/bin/codex")
+    return fallback if os.path.exists(fallback) else (env or "codex")
+
+
+MODEL_KEYS = ("opus", "gpt", "grok")
+
+
+def normalize_model_order(value, *, default: Sequence[str] = MODEL_KEYS) -> list[str]:
+    """Return a complete, duplicate-free model order.
+
+    HTTP callers send JSON arrays, while persisted or environment-backed values may be
+    JSON strings or comma-separated strings. Unknown values are ignored and omitted
+    choices are appended in the supplied default order.
+    """
+    raw = value
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+            raw = decoded if isinstance(decoded, list) else raw.split(",")
+        except (TypeError, ValueError):
+            raw = raw.split(",")
+    if not isinstance(raw, (list, tuple)):
+        raw = []
+    order: list[str] = []
+    for item in list(raw) + list(default):
+        key = str(item or "").strip().lower()
+        if key in MODEL_KEYS and key not in order:
+            order.append(key)
+    return order
+
+
+def run_codex_prompt(
+    prompt: str,
+    *,
+    model: str,
+    timeout: float,
+    images: Sequence[str] = (),
+) -> ProcessResult:
+    """Run one non-interactive GPT turn through the authenticated Codex CLI.
+
+    ``--output-last-message`` separates the final answer from JSON/progress events and
+    ``--ephemeral`` avoids leaving an automation thread behind. The model is sandboxed
+    read-only; images are attached explicitly instead of asking the agent to open files.
+    """
+    codex = resolve_codex_bin()
+    if not (codex and os.path.exists(codex)):
+        return ProcessResult(127, "", f"codex 실행파일 없음 ({codex})")
+    output = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
+    output.close()
+    try:
+        command = [
+            codex, "exec", "--ephemeral", "--ignore-rules",
+            "--skip-git-repo-check", "--sandbox", "read-only",
+            "-C", tempfile.gettempdir(), "--output-last-message", output.name,
+        ]
+        if model:
+            command += ["-m", model]
+        for path in images:
+            command += ["-i", path]
+        command.append("-")
+        result = run_command(command, input_text=prompt, timeout=timeout)
+        final = ""
+        try:
+            with open(output.name, encoding="utf-8", errors="replace") as handle:
+                final = handle.read()
+        except OSError:
+            pass
+        return ProcessResult(
+            result.returncode,
+            final or result.stdout,
+            result.stderr,
+            timed_out=result.timed_out,
+        )
+    finally:
+        try:
+            os.remove(output.name)
+        except OSError:
+            pass
 
 
 def run_command(

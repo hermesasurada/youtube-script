@@ -6,13 +6,11 @@
   <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <title>이력조회</title>
-  <!-- 웹폰트는 self-host(tools/fetch_fonts.py) — VPN 경유 시 외부 왕복을 없애기 위함 -->
-  <link rel="stylesheet" href="/static/fonts/google.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <!-- 작은 로컬 marked는 선로드하고, 본문용 웹폰트·KaTeX는 요약 뒤에 로딩한다. -->
   <style>
     @font-face {
       font-family: "Chosunilbo_myungjo";
-      src: url("/static/fonts/ChosunilboNM.woff") format("woff");
+      src: url("/static/fonts/ChosunilboNM.woff?v={{ static_v('fonts/ChosunilboNM.woff') }}") format("woff");
       font-weight: normal;
       font-style: normal;
       font-display: swap;
@@ -496,9 +494,9 @@
     <div class="modal-body" id="modal-body"></div>
   </div>
 
-<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script src="/static/js/common.js"></script>
+<script>window.YS_ASSET_VERSIONS={googleCss:"{{ static_v('fonts/google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
+<script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
+<script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
 <script>
 const SVG = {
   summary:    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3V2z"/><path d="M10 2v3h3"/><path d="M5.5 8h5M5.5 10.5h5M5.5 6h2.5"/></svg>',
@@ -510,7 +508,7 @@ const SVG = {
 };
 
 const PAGE = 20;
-let ALL = [], FILTERED = [], shownCount = 0;
+let ALL = [], FILTERED = [], shownCount = 0, HISTORY_REVISION = '';
 /* 미읽음만 보기 — 데스크톱과 같은 'histFilter' 키를 공유해 기기 간 상태가 이어진다 */
 function _savedFilter() {
   try { return JSON.parse(localStorage.getItem('histFilter') || 'null') || {}; }
@@ -555,9 +553,12 @@ async function loadHistory(force) {
   btn.classList.add('spin');
   $('state').textContent = '로드 중…';
   try {
-    const r = await fetch('/history', { cache: force ? 'no-store' : 'default' });
+    const url = (!force && HISTORY_REVISION)
+      ? '/history?revision=' + encodeURIComponent(HISTORY_REVISION) : '/history';
+    const r = await fetch(url, { cache: force ? 'no-store' : 'default' });
     const d = await r.json();
-    ALL = d.items || [];
+    if (!d.unchanged) ALL = d.items || [];
+    if (d.revision) HISTORY_REVISION = d.revision;
   } catch (e) {
     $('state').textContent = '오류: ' + e.message;
     btn.classList.remove('spin');
@@ -654,28 +655,28 @@ function renderCard(item) {
         ? `<a class="hist-card-uploader" href="${attrEsc(item.channel_url)}" target="_blank" rel="noopener">${esc(item.uploader)}</a>`
         : `<span class="hist-card-uploader">${esc(item.uploader)}</span>`)
     : '';
-  const sumBtn = item.summary_path
-    ? `<button class="hist-icon-btn hist-icon-btn-summary" data-path="${attrEsc(item.summary_path)}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openSummary(this.dataset.path,this.dataset.title)" aria-label="요약">${SVG.summary}</button>`
+  const sumBtn = item.has_summary
+    ? `<button class="hist-icon-btn hist-icon-btn-summary" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openSummary(Number(this.dataset.id),this.dataset.title)" aria-label="요약">${SVG.summary}</button>`
     : `<button class="hist-icon-btn hist-icon-btn-summary" disabled aria-label="요약 없음">${SVG.summary}</button>`;
   const txtBtn = item.has_txt
-    ? `<button class="hist-icon-btn" data-path="${attrEsc(item.txt_path)}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openTranscript(this.dataset.path,this.dataset.title)" aria-label="전사">${SVG.transcript}</button>`
+    ? `<button class="hist-icon-btn" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openTranscript(Number(this.dataset.id),this.dataset.title)" aria-label="전사">${SVG.transcript}</button>`
     : `<button class="hist-icon-btn" disabled aria-label="전사 없음">${SVG.transcript}</button>`;
   const ytBtn = item.webpage_url
     ? `<a class="hist-icon-btn hist-icon-btn-youtube" href="${attrEsc(item.webpage_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" aria-label="YouTube">${SVG.youtube}</a>`
     : `<button class="hist-icon-btn hist-icon-btn-youtube" disabled aria-label="URL 없음">${SVG.youtube}</button>`;
   const readBtn = `<button class="hist-icon-btn hist-icon-btn-read${item.is_read ? ' is-read' : ''}"
-    data-path="${attrEsc(item.txt_path)}" data-read="${item.is_read ? '1' : '0'}"
+    data-id="${item.item_id}" data-read="${item.is_read ? '1' : '0'}"
     onclick="event.stopPropagation();toggleRead(this)"
     aria-label="${item.is_read ? '읽음' : '안읽음'}">${item.is_read ? SVG.eye_off : SVG.eye}</button>`;
   const delBtn = `<button class="hist-icon-btn hist-icon-btn-delete"
-    data-path="${attrEsc(item.txt_path)}" data-title="${attrEsc(item.title)}"
+    data-id="${item.item_id}" data-title="${attrEsc(item.title)}"
     onclick="event.stopPropagation();deleteCard(this)"
     aria-label="삭제">${SVG.delete}</button>`;
 
   const unreadDot = !item.is_read ? '<span class="hist-unread-dot"></span>' : '';
   const unreadClass = !item.is_read ? ' hist-card-unread' : '';
-  const clickable = item.summary_path
-    ? ` hist-card-clickable" data-sum-path="${attrEsc(item.summary_path)}" data-title="${attrEsc(item.title)}" onclick="openSummary(this.dataset.sumPath,this.dataset.title)`
+  const clickable = item.has_summary
+    ? ` hist-card-clickable" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="openSummary(Number(this.dataset.id),this.dataset.title)`
     : '';
   return `<article class="hist-card${unreadClass}${clickable}">
     <div class="hist-thumb-wrap">${thumb}${dur}</div>
@@ -691,15 +692,17 @@ function renderCard(item) {
 }
 
 async function toggleRead(btn) {
-  const mdPath  = btn.dataset.path;
+  const itemId  = Number(btn.dataset.id);
   const wasRead = btn.dataset.read === '1';
   const newRead = !wasRead;
   try {
-    if (!(await YS.apiMarkRead(mdPath, newRead))) return;
+    const result = await YS.apiMarkRead(itemId, newRead);
+    if (!result) return;
+    if (result.revision) HISTORY_REVISION = result.revision;
   } catch { return; }
 
   // ALL 배열 내 항목 업데이트
-  const item = ALL.find(i => i.txt_path === mdPath);
+  const item = ALL.find(i => i.item_id === itemId);
   if (item) item.is_read = newRead;
 
   // 버튼 즉시 갱신
@@ -723,17 +726,19 @@ async function toggleRead(btn) {
 }
 
 async function deleteCard(btn) {
-  const mdPath = btn.dataset.path;
+  const itemId = Number(btn.dataset.id);
   const title  = btn.dataset.title || '이 항목';
   if (!confirm(`"${title}" 을(를) 삭제하시겠습니까?\n\n전사 파일과 요약 파일이 모두 삭제됩니다.`)) return;
 
   btn.disabled = true;
   try {
-    if (!(await YS.apiDeleteItem(mdPath))) { btn.disabled = false; return; }
+    const result = await YS.apiDeleteItem(itemId);
+    if (!result) { btn.disabled = false; return; }
+    if (result.revision) HISTORY_REVISION = result.revision;
   } catch { btn.disabled = false; return; }
 
   // ALL 배열에서 제거 후 다시 필터 적용
-  const idx = ALL.findIndex(i => i.txt_path === mdPath);
+  const idx = ALL.findIndex(i => i.item_id === itemId);
   if (idx !== -1) ALL.splice(idx, 1);
   applyFilter();
 }
@@ -958,26 +963,30 @@ function setReaderFont(key) {
 
 let _summaryMd = '';   // 현재 열린 요약 원문 — 텔레그램용 복사에 사용
 
-async function openSummary(path, title) {
+async function openSummary(itemId, title) {
   openModal(title);
   $('fs-ctrl').hidden = false;   // 요약에서만 글자크기 조절 노출
   $('font-ctrl').hidden = false;
   _applyReaderFs();
   _applyReaderFont();
   _summaryMd = '';
-  _summaryPath = path;
+  _summaryItemId = itemId;
   $('tg-btn').hidden = true;
   $('blg-btn').hidden = true;
   $('distill-ctrl').hidden = true;
   _setDistillUI(null);
   try {
-    const d = await YS.apiSummaryContent(path);
+    const [d] = await Promise.all([
+      YS.apiSummaryContent(itemId),
+      YS.ensureReaderAssets(),
+    ]);
     if (d.error) {
       $('modal-body').textContent = '오류: ' + d.error;
     } else {
       _summaryMd = d.content || '';
       $('modal-body').className = 'modal-body markdown';
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
+      YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
       $('blg-btn').hidden = !_summaryMd;
       $('distill-ctrl').hidden = !_summaryMd;
@@ -1016,7 +1025,7 @@ function _copyHtmlLegacy(html, text) {
   return ok;
 }
 
-let _summaryPath = '';   // 현재 열린 요약 경로 — 증류 설정 대상
+let _summaryItemId = 0;  // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
 
 let _distill = null;   // 현재 영상의 증류 상태 {override, channel, effective}
 
@@ -1056,11 +1065,11 @@ function cycleItemDistill() {
 
 /* 영상 단위 증류 설정 — null=미설정(채널 따름), true=포함, false=제외 */
 async function setItemDistill(value) {
-  if (!_summaryPath) return;
+  if (!_summaryItemId) return;
   try {
     const r = await fetch('/history/distill', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: _summaryPath, distill: value }),
+      body: JSON.stringify({ item_id: _summaryItemId, distill: value }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
@@ -1096,7 +1105,7 @@ async function _copyExport(btn, icon, build) {
 const copyForTelegram = (btn) => _copyExport(btn, '✈️', YS.mdToTelegram);
 const copyForBlogger  = (btn) => _copyExport(btn, '📋', YS.mdToBloggerHtml);
 
-async function openTranscript(path, title) {
+async function openTranscript(itemId, title) {
   openModal(title);
   $('fs-ctrl').hidden = true;   // 전사 보기엔 글자크기 조절 숨김(요약 전용)
   $('font-ctrl').hidden = true;
@@ -1107,7 +1116,7 @@ async function openTranscript(path, title) {
   try {
     const r = await fetch('/history/text', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ txt_path: path })
+      body: JSON.stringify({ item_id: itemId })
     });
     const d = await r.json();
     if (d.error) {
@@ -1171,7 +1180,7 @@ let lastRefresh = Date.now();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && Date.now() - lastRefresh > 60_000) {
     lastRefresh = Date.now();
-    loadHistory(true);
+    loadHistory(false);
   }
 });
 </script>

@@ -250,7 +250,7 @@ function switchTab(name) {
   });
   if (name === 'result')  document.getElementById('result-badge').classList.remove('visible');
   if (name === 'summary') document.getElementById('summary-badge').classList.remove('visible');
-  if (name === 'history') loadHistory();   // 이력 탭 진입 시 매번 자동 새로고침
+  if (name === 'history') loadHistory();   // revision만 확인하고 바뀐 경우에만 목록 재수신
 }
 
 /* ── History ── */
@@ -259,6 +259,7 @@ let _historyItems    = [];
 let _historyFiltered = [];
 let _historySelIdx   = -1;
 let _historyPage     = 1;
+let _historyRevision = '';
 let _histUnreadOnly  = false;
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
 let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일
@@ -302,15 +303,18 @@ let _histRestorePage = 1;
 
 loadHistory();
 
-async function loadHistory() {
+async function loadHistory(force = false) {
   _historyLoaded = true;
   document.getElementById('history-count').textContent = '로드 중...';
   try {
-    const r = await fetch('/history');
+    const url = (!force && _historyRevision)
+      ? '/history?revision=' + encodeURIComponent(_historyRevision) : '/history';
+    const r = await fetch(url, { cache: force ? 'no-store' : 'default' });
     const d = await r.json();
-    _historyItems = d.items || [];
+    if (!d.unchanged) _historyItems = d.items || [];
+    if (d.revision) _historyRevision = d.revision;
   } catch {
-    _historyItems = [];
+    if (!_historyItems.length) _historyItems = [];
   }
   _populateUploaderOptions();
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
@@ -412,16 +416,18 @@ function toggleUnreadFilter() {
 }
 
 async function toggleRead(btn) {
-  const mdPath  = btn.dataset.path;
+  const itemId  = Number(btn.dataset.id);
   const wasRead = btn.dataset.read === '1';
   const newRead = !wasRead;
 
   try {
-    if (!(await YS.apiMarkRead(mdPath, newRead))) return;
+    const result = await YS.apiMarkRead(itemId, newRead);
+    if (!result) return;
+    if (result.revision) _historyRevision = result.revision;
   } catch { return; }
 
   // _historyItems 내 해당 항목 업데이트
-  const item = _historyItems.find(i => i.txt_path === mdPath);
+  const item = _historyItems.find(i => i.item_id === itemId);
   if (item) item.is_read = newRead;
 
   // 버튼 즉시 갱신 (파란점 제거/추가)
@@ -446,17 +452,19 @@ async function toggleRead(btn) {
 }
 
 async function deleteCard(btn) {
-  const mdPath = btn.dataset.path;
+  const itemId = Number(btn.dataset.id);
   const title  = btn.dataset.title || '이 항목';
   if (!confirm(`"${title}" 을(를) 삭제하시겠습니까?\n\n전사 파일과 요약 파일이 모두 삭제됩니다.`)) return;
 
   btn.disabled = true;
   try {
-    if (!(await YS.apiDeleteItem(mdPath))) { btn.disabled = false; return; }
+    const result = await YS.apiDeleteItem(itemId);
+    if (!result) { btn.disabled = false; return; }
+    if (result.revision) _historyRevision = result.revision;
   } catch { btn.disabled = false; return; }
 
   // _historyItems에서 제거
-  const idx = _historyItems.findIndex(i => i.txt_path === mdPath);
+  const idx = _historyItems.findIndex(i => i.item_id === itemId);
   if (idx !== -1) _historyItems.splice(idx, 1);
 
   // 카드 DOM 제거 후 목록 다시 렌더(현재 페이지 유지)
@@ -539,9 +547,9 @@ const ICON_EYE_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none
 function _onHistCardClick(e) {
   if (e.target.closest('a, button')) return;
   const card = e.currentTarget;
-  const sumPath = card.dataset.sumPath;
+  const itemId = Number(card.dataset.id);
   const title   = card.dataset.title;
-  if (sumPath) openSummaryModal(sumPath, title);
+  if (itemId) openSummaryModal(itemId, title);
 }
 
 function _renderHistoryList() {
@@ -589,28 +597,28 @@ function _renderHistoryList() {
     const titleAttr = _attrEsc(item.title);
     const titleHtml = `<h3 class="hist-card-title" title="${titleAttr}">${esc(item.title)}</h3>`;
 
-    const sumBtn  = item.summary_path
-      ? `<button class="hist-icon-btn hist-icon-btn-summary" data-path="${_attrEsc(item.summary_path)}" data-title="${titleAttr}" onclick="openSummaryModal(this.dataset.path,this.dataset.title)" title="요약 보기">${ICON_SUMMARY}</button>`
+    const sumBtn  = item.has_summary
+      ? `<button class="hist-icon-btn hist-icon-btn-summary" data-id="${item.item_id}" data-title="${titleAttr}" onclick="openSummaryModal(Number(this.dataset.id),this.dataset.title)" title="요약 보기">${ICON_SUMMARY}</button>`
       : `<button class="hist-icon-btn hist-icon-btn-summary" disabled title="요약 없음">${ICON_SUMMARY}</button>`;
     const txtBtn  = item.has_txt
-      ? `<button class="hist-icon-btn" data-path="${_attrEsc(item.txt_path)}" data-title="${titleAttr}" onclick="openTranscriptModal(this.dataset.path,this.dataset.title)" title="전사 보기">${ICON_TRANSCRIPT}</button>`
+      ? `<button class="hist-icon-btn" data-id="${item.item_id}" data-title="${titleAttr}" onclick="openTranscriptModal(Number(this.dataset.id),this.dataset.title)" title="전사 보기">${ICON_TRANSCRIPT}</button>`
       : `<button class="hist-icon-btn" disabled title="전사 없음">${ICON_TRANSCRIPT}</button>`;
     const ytBtn   = item.webpage_url
       ? `<a class="hist-icon-btn hist-icon-btn-youtube" href="${_attrEsc(item.webpage_url)}" target="_blank" rel="noopener" title="YouTube에서 열기">${ICON_YOUTUBE}</a>`
       : `<button class="hist-icon-btn hist-icon-btn-youtube" disabled title="URL 없음">${ICON_YOUTUBE}</button>`;
     const readBtn = `<button class="hist-icon-btn hist-icon-btn-read${item.is_read ? ' is-read' : ''}"
-      data-path="${_attrEsc(item.txt_path)}" data-read="${item.is_read ? '1' : '0'}"
+      data-id="${item.item_id}" data-read="${item.is_read ? '1' : '0'}"
       onclick="toggleRead(this)" title="${item.is_read ? '읽음 (클릭 시 안읽음으로)' : '안읽음 (클릭 시 읽음으로)'}"
       >${item.is_read ? ICON_EYE_OFF : ICON_EYE}</button>`;
     const delBtn  = `<button class="hist-icon-btn hist-icon-btn-delete"
-      data-path="${_attrEsc(item.txt_path)}" data-title="${titleAttr}"
+      data-id="${item.item_id}" data-title="${titleAttr}"
       onclick="deleteCard(this)" title="삭제"
       >${ICON_DELETE}</button>`;
 
     const unreadDot = !item.is_read ? '<span class="hist-unread-dot"></span>' : '';
-    const clickable = item.summary_path ? ' hist-card-clickable" onclick="_onHistCardClick(event)' : '';
-    const cardData  = item.summary_path
-      ? ` data-sum-path="${_attrEsc(item.summary_path)}" data-title="${titleAttr}"` : '';
+    const clickable = item.has_summary ? ' hist-card-clickable" onclick="_onHistCardClick(event)' : '';
+    const cardData  = item.has_summary
+      ? ` data-id="${item.item_id}" data-title="${titleAttr}"` : '';
     const unreadClass = !item.is_read ? ' hist-card-unread' : '';
 
     return `<div class="hist-card${unreadClass}${clickable}"${cardData}>
@@ -1143,6 +1151,7 @@ async function generateSummary() {
       document.getElementById('copy-summary-btn').style.display = '';
       // 완료 시 마크다운 렌더(** 굵게/표/리스트 등). raw 텍스트는 pre에 남겨 복사에 사용.
       const rendered = document.getElementById('summary-rendered');
+      await YS.ensureReaderAssets();
       rendered.innerHTML = YS.renderMarkdown(area.textContent);
       area.style.display = 'none';
       rendered.style.display = '';
@@ -1171,6 +1180,7 @@ async function runKeyframes(capPath, renderedEl) {
     const d = await r.json();
     if (!here()) return;   // 다른 항목으로 이동함 → 저장은 됐으니 이력에서 확인 가능
     if (d.ok && d.n_frames > 0 && d.summary_md) {
+      await YS.ensureReaderAssets();
       renderedEl.innerHTML = YS.renderMarkdown(d.summary_md);
       statusEl.textContent = `✓ 완료 · 자료 캡처 ${d.n_frames}장`;
     } else if (d.reason === 'download_failed') {
@@ -1697,7 +1707,8 @@ async function copyUrl() {
 
 /* ── Summary Modal ── (marked.js 설정은 공유 모듈 common.js에서 일원화) */
 let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성·블로거 복사에 사용
-let _summaryPath = '';    // 현재 열린 요약 경로 — 증류 설정 변경 대상
+let _titleKo = '';        // 현재 열린 요약의 번역 제목(외국어 제목일 때만 값이 있다)
+let _summaryItemId = 0;   // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
 
 let _distill = null;      // 현재 영상의 증류 상태 {override, channel, effective}
 
@@ -1742,11 +1753,11 @@ function cycleItemDistill() {
 
 /* 영상 단위 증류 설정 변경 — null=미설정(채널 따름), true=포함, false=제외 */
 async function setItemDistill(value) {
-  if (!_summaryPath) return;
+  if (!_summaryItemId) return;
   try {
     const r = await fetch('/history/distill', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: _summaryPath, distill: value }),
+      body: JSON.stringify({ item_id: _summaryItemId, distill: value }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
@@ -1941,11 +1952,11 @@ function _injectToc(container) {
   }));
 }
 
-async function openSummaryModal(summaryPath, title) {
+async function openSummaryModal(itemId, title) {
   const overlay  = document.getElementById('sum-overlay');
   const bodyEl   = document.getElementById('sum-panel-body');
 
-  _summaryPath = summaryPath;                            // 증류 설정 변경 대상
+  _summaryItemId = itemId;                              // 증류 설정 변경 대상
   _setDistillUI(null);                                   // 값 로드 전에는 기본 표시
   bodyEl.innerHTML    = '<p class="sum-loading">불러오는 중…</p>';
   overlay.hidden      = false;
@@ -1956,11 +1967,16 @@ async function openSummaryModal(summaryPath, title) {
   document.getElementById('sum-immersive-btn').hidden = true;
 
   try {
-    const data = await YS.apiSummaryContent(summaryPath);
+    const [data] = await Promise.all([
+      YS.apiSummaryContent(itemId),
+      YS.ensureReaderAssets(),
+    ]);
     if (data.error) throw new Error(data.error);
     _summaryMd = data.content || '';
+    _titleKo   = data.title_ko || '';                      // 외국어 제목의 한국어 번역
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
+    YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     _injectToc(bodyEl);                                    // 목차 삽입(일반 보기)
     bodyEl.scrollTop = 0;
     _updateSumProgress(bodyEl);
@@ -1996,6 +2012,7 @@ function _setImmersive(on) {
 
   const tmp = document.createElement('div');
   tmp.innerHTML = YS.renderMarkdown(_summaryMd);
+  YS.applyTitleTranslation(tmp, _titleKo);                      // 몰입형에서도 제목은 번역본
   const figs = [...tmp.querySelectorAll('.kf-strip figure')];   // 모든 캡처 수집(좌측으로)
   tmp.querySelectorAll('.kf-strip').forEach(s => s.remove());   // 본문에선 스트립 제거
   // 이미지가 모두 좌측으로 이동했으니 빈 '기타 자료 캡처' 부록 제목 제거
@@ -2024,7 +2041,7 @@ function handleSumOverlayClick(e) {
   if (e.target === document.getElementById('sum-overlay')) closeSummaryModal();
 }
 
-async function openTranscriptModal(txtPath, title) {
+async function openTranscriptModal(itemId, title) {
   const overlay  = document.getElementById('trans-overlay');
   const titleEl  = document.getElementById('trans-panel-title');
   const bodyEl   = document.getElementById('trans-panel-body');
@@ -2038,7 +2055,7 @@ async function openTranscriptModal(txtPath, title) {
     const res  = await fetch('/history/text', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ txt_path: txtPath }),
+      body:    JSON.stringify({ item_id: itemId }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
