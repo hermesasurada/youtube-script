@@ -277,6 +277,11 @@
     <div class="sum-panel-hdr">
       <span class="sum-panel-badge sum-panel-badge-alt">전사</span>
       <span class="sum-panel-title" id="trans-panel-title"></span>
+      <!-- 외국어 영상만: 원문 / 한국어 전문 번역 전환(번역이 있을 때만 노출) -->
+      <div class="trans-tabs" id="trans-tabs" hidden>
+        <button class="trans-tab on" id="trans-tab-orig" onclick="switchTranscriptTab('orig')">원문</button>
+        <button class="trans-tab" id="trans-tab-ko" onclick="switchTranscriptTab('ko')">번역</button>
+      </div>
       <button class="sum-panel-close" onclick="closeTranscriptModal()" title="닫기">×</button>
     </div>
     <div class="sum-panel-body trans-body" id="trans-panel-body"></div>

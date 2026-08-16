@@ -2041,6 +2041,11 @@ function handleSumOverlayClick(e) {
   if (e.target === document.getElementById('sum-overlay')) closeSummaryModal();
 }
 
+/* 전사 원문과 한국어 전문 번역. 번역은 별도 작업(transcript_translator)이 만들어
+   두는 것이라, 없으면 탭 자체를 감추고 원문만 보여준다. */
+let _transOrig = '';
+let _transKo   = null;      // {status, done, total, text} | null
+
 async function openTranscriptModal(itemId, title) {
   const overlay  = document.getElementById('trans-overlay');
   const titleEl  = document.getElementById('trans-panel-title');
@@ -2049,6 +2054,7 @@ async function openTranscriptModal(itemId, title) {
   titleEl.textContent = title;
   bodyEl.textContent  = '불러오는 중…';
   overlay.hidden      = false;
+  document.getElementById('trans-tabs').hidden = true;
   document.body.style.overflow = 'hidden';
 
   try {
@@ -2059,10 +2065,32 @@ async function openTranscriptModal(itemId, title) {
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    bodyEl.textContent = data.text || '(내용 없음)';
+    _transOrig = data.text || '(내용 없음)';
+    _transKo   = data.translation || null;
+    const hasKo = !!(_transKo && _transKo.text);
+    document.getElementById('trans-tabs').hidden = !hasKo;
+    switchTranscriptTab('orig');
   } catch (e) {
     bodyEl.textContent = '오류: ' + e.message;
   }
+}
+
+function switchTranscriptTab(which) {
+  const bodyEl = document.getElementById('trans-panel-body');
+  const oBtn = document.getElementById('trans-tab-orig');
+  const kBtn = document.getElementById('trans-tab-ko');
+  oBtn.classList.toggle('on', which === 'orig');
+  kBtn.classList.toggle('on', which === 'ko');
+  if (which === 'ko' && _transKo) {
+    // 아직 번역 중이면 어디까지 됐는지 알려준다(청크 단위로 저장돼 부분 열람 가능)
+    const partial = _transKo.status === 'processing'
+      ? `⏳ 번역 중 ${_transKo.done}/${_transKo.total} — 아래는 지금까지 번역된 부분입니다.\n\n`
+      : '';
+    bodyEl.textContent = partial + _transKo.text;
+  } else {
+    bodyEl.textContent = _transOrig;
+  }
+  bodyEl.scrollTop = 0;
 }
 
 function closeTranscriptModal() {

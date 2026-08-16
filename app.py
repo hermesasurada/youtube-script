@@ -1724,9 +1724,38 @@ def history_text():
         return _json({"error": "파일 없음"}, 404)
     try:
         _, transcript = _parse_md(abs_path)
-        return _json({"text": transcript})
+        return _json({"text": transcript, "translation": _translation_payload(abs_path)})
     except Exception as e:
         return _json({"error": str(e)}, 500)
+
+
+def _translation_payload(md_path: str) -> dict | None:
+    """전사 전문 번역 상태 + 본문. 별도 작업(transcript_translator.py)의 결과물.
+
+    아직 진행 중이어도 지금까지 번역된 부분은 보여준다(청크마다 저장되므로).
+    """
+    try:
+        st = db.get_translation_for_path(md_path)
+    except Exception:
+        return None
+    if not st:
+        return None
+    out = {"status": st.get("status"), "done": st.get("chunks_done") or 0,
+           "total": st.get("chunks_total") or 0, "text": ""}
+    p = st.get("out_path") or ""
+    if p and os.path.isfile(p):
+        try:
+            raw = open(p, encoding="utf-8").read()
+            # 머리부(프론트매터)와 마커 주석을 모두 걷어내고 본문만 넘긴다
+            seps = [i for i, l in enumerate(raw.splitlines()) if l.strip() == "---"]
+            if len(seps) >= 2:
+                raw = "\n".join(raw.splitlines()[seps[1] + 1:])
+            body = re.sub(r"<!--.*?-->", "", raw, flags=re.S).strip()
+            # 제목은 모달 헤더에 이미 있으므로 본문 H1은 뺀다
+            out["text"] = re.sub(r"\A#\s+.*?\n+", "", body, count=1).strip()
+        except Exception:
+            pass
+    return out
 
 
 def _reveal_in_file_manager(abs_path: str) -> None:

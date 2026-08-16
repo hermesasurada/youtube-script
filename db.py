@@ -248,6 +248,21 @@ def init() -> None:
                 END;
             """)
             c.execute("PRAGMA user_version = 9")
+        if ver < 10:
+            # v10: 전사 전문 번역(요약과 무관한 별도 작업)의 진행 상태.
+            # 청크 단위로 이어할 수 있게 done/total을 남긴다.
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS transcript_translation (
+                    yt_id        TEXT PRIMARY KEY,
+                    md_path      TEXT,
+                    out_path     TEXT,
+                    status       TEXT NOT NULL DEFAULT 'pending',
+                    chunks_done  INTEGER NOT NULL DEFAULT 0,
+                    chunks_total INTEGER NOT NULL DEFAULT 0,
+                    error        TEXT,
+                    updated_at   TEXT
+                )""")
+            c.execute("PRAGMA user_version = 10")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -298,6 +313,77 @@ def mark_korean_titles() -> int:
         _conn().executemany("UPDATE items SET title_ko = '' WHERE yt_id = ?",
                             [(i,) for i in ids])
     return len(ids)
+
+
+# ── 전사 전문 번역 (요약 파이프라인과 별개) ────────────────────────────
+
+def set_translation_state(yt_id: str, md_path: str, out_path: str, status: str,
+                          done: int, total: int, error: str = "") -> None:
+    if not yt_id:
+        return
+    with _lock:
+        _conn().execute(
+            """INSERT INTO transcript_translation
+                 (yt_id, md_path, out_path, status, chunks_done, chunks_total, error, updated_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(yt_id) DO UPDATE SET
+                 md_path=excluded.md_path, out_path=excluded.out_path,
+                 status=excluded.status, chunks_done=excluded.chunks_done,
+                 chunks_total=excluded.chunks_total, error=excluded.error,
+                 updated_at=excluded.updated_at""",
+            (yt_id, md_path, out_path, status, done, total, error or "", _now()))
+
+
+def get_translation_state(yt_id: str) -> dict | None:
+    r = _conn().execute("SELECT * FROM transcript_translation WHERE yt_id = ?",
+                        (yt_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def get_translation_for_path(path: str) -> dict | None:
+    """전사(md_path) 또는 요약(summary_path) 경로로 번역 상태를 찾는다."""
+    r = _conn().execute(
+        """SELECT t.* FROM transcript_translation t
+             JOIN items i ON i.yt_id = t.yt_id
+            WHERE i.md_path = ? OR i.summary_path = ? LIMIT 1""",
+        (path, path)).fetchone()
+    return dict(r) if r else None
+
+
+def yt_id_for_md(md_path: str) -> str | None:
+    r = _conn().execute("SELECT yt_id FROM items WHERE md_path = ? LIMIT 1",
+                        (md_path,)).fetchone()
+    return r["yt_id"] if r else None
+
+
+def translation_candidates(limit: int = 40) -> list[dict]:
+    """최근 영상부터, 아직 번역이 끝나지 않은 전사 목록.
+
+    실패분은 여기서 제외한다(무한 재시도 방지). 중간에 끊긴 processing 건은
+    다시 후보에 올려 이어서 처리한다.
+    """
+    rows = _conn().execute(
+        """SELECT i.yt_id, i.md_path, i.title, i.indexed_at
+             FROM items i
+             LEFT JOIN transcript_translation t ON t.yt_id = i.yt_id
+            WHERE i.yt_id IS NOT NULL AND i.yt_id <> ''
+              AND i.md_path IS NOT NULL AND i.md_path <> ''
+              AND (t.status IS NULL OR t.status = 'processing')
+            ORDER BY i.indexed_at DESC LIMIT ?""", (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def translation_status_counts() -> list[dict]:
+    rows = _conn().execute(
+        "SELECT status, COUNT(*) n FROM transcript_translation GROUP BY status").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_translation_inflight() -> dict | None:
+    r = _conn().execute(
+        "SELECT * FROM transcript_translation WHERE status='processing' "
+        "ORDER BY updated_at DESC LIMIT 1").fetchone()
+    return dict(r) if r else None
 
 
 # ── Markdown 파서 (app._parse_md와 동일 동작; 모듈 독립성 위해 복제) ────
