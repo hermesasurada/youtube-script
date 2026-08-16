@@ -298,6 +298,13 @@
     li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
+    // 한눈 요약 박스 — 화면의 callout(왼쪽 컬러 바 + 연한 배경 + 라벨)을 인라인으로 옮긴 것.
+    // 블로거는 ::before·gradient를 못 살리므로 border-left와 단색 배경으로 대체한다.
+    tldr:      'margin:0 0 2.2em;padding:1.05em 1.3em 1.1em;background-color:#faf6f2;'
+             + 'border:1px solid #ecdfd6;border-left:4px solid #b0413e;border-radius:0 3px 3px 0;',
+    tldrLabel: 'margin:0 0 .6em;font-size:.78em;font-weight:700;letter-spacing:.13em;color:#b0413e;',
+    tldrUl:    'margin:0;padding-left:1.15em;font-weight:400;',
+    tldrLi:    'margin:0 0 .5em;line-height:1.75;font-weight:400;',
   };
 
   /* 요약 md → 내보내기용 본문 DOM. 블로거·텔레그램이 같은 범위를 쓰도록 여기서 한 번만 추린다.
@@ -326,7 +333,7 @@
     // 3) 섹션 정리: 본문(핵심 내용의 소제목+본문)만 남긴다.
     //    메타정보 표는 출처 URL만 뽑아 쓰고 제거, 한눈 요약·목차 섹션은 통째로 제거,
     //    '핵심 내용' 헤더는 그 아래 소제목만 남기면 되므로 헤더만 제거.
-    let title = '', url = '';
+    let title = '', url = '', brief = null;   // brief = 한눈 요약 불릿(블로거 복사용으로 보관)
     const h1 = root.querySelector('h1');
     if (h1) { title = h1.textContent.trim(); h1.remove(); }     // 제목은 블로거 '제목' 칸에 넣도록 본문에선 제외
     root.querySelectorAll('details').forEach(d => d.remove());  // 접이식 목차(있을 경우)
@@ -348,8 +355,15 @@
         h.remove();
       } else if (DROP_SEC.test(t)) {
         let n = h.nextElementSibling;                            // 다음 h2 전까지가 그 섹션
+        const isTldr = /한눈\s*요약|TL;?DR/i.test(t);
         h.remove();
-        while (n && n.tagName !== 'H2') { const nx = n.nextElementSibling; n.remove(); n = nx; }
+        while (n && n.tagName !== 'H2') {
+          const nx = n.nextElementSibling;
+          // 한눈 요약의 불릿은 버리지 않고 따로 보관한다(블로거 복사에서 상단 박스로 쓴다).
+          if (isTldr && !brief && (n.tagName === 'UL' || n.tagName === 'OL')) brief = n.cloneNode(true);
+          n.remove();
+          n = nx;
+        }
       } else if (/핵심\s*내용/.test(t)) {
         h.remove();                                              // 헤더만 제거, 하위 소제목·본문은 유지
       }
@@ -364,11 +378,11 @@
       if (m) h.textContent = m[1].trim();
     });
     root.querySelectorAll('img,figure,figcaption').forEach(el => el.remove());   // 잔여 이미지 방어
-    return { root, title, url };
+    return { root, title, url, brief };
   }
 
   function mdToBloggerHtml(md) {
-    const { root, title, url } = _summaryBodyDom(md);
+    const { root, title, url, brief } = _summaryBodyDom(md);
 
     // 블로거는 외부 CSS/클래스가 안 먹으므로 모든 서식을 인라인 style로 준다.
     root.querySelectorAll('h2').forEach(h => h.setAttribute('style', _BL.h2));
@@ -394,8 +408,26 @@
     // 섹션 제거로 남은 앞뒤 빈 텍스트 노드 정리(붙여넣기 시 불필요한 빈 줄 방지)
     while (body.firstChild && body.firstChild.nodeType === 3 && !body.firstChild.textContent.trim()) body.firstChild.remove();
     while (body.lastChild && body.lastChild.nodeType === 3 && !body.lastChild.textContent.trim()) body.lastChild.remove();
-    const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거
+    const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거 (박스 삽입 전에 잡는다)
     if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .85em;'));
+
+    // 한눈 요약은 본문 맨 앞에 색상 박스로 넣는다(화면의 callout과 같은 역할).
+    if (brief && brief.children.length) {
+      brief.setAttribute('style', _BL.tldrUl);
+      brief.querySelectorAll('li').forEach(li => li.setAttribute('style', _BL.tldrLi));
+      brief.querySelectorAll('strong,b').forEach(s => s.setAttribute('style', 'font-weight:700;'));
+      brief.querySelectorAll('code').forEach(c => c.setAttribute('style',
+        'background:#f0ece4;padding:.1em .35em;border-radius:3px;font-size:.92em;'));
+      const box = document.createElement('div');
+      box.setAttribute('style', _BL.tldr);
+      const label = document.createElement('div');
+      label.setAttribute('style', _BL.tldrLabel);
+      label.textContent = '한눈 요약';
+      box.appendChild(label);
+      box.appendChild(brief);
+      body.insertBefore(box, body.firstChild);
+    }
+
     if (url) {                                     // 출처는 원본 영상 링크만 남긴다
       const foot = document.createElement('div');
       foot.setAttribute('style', _BL.foot);
