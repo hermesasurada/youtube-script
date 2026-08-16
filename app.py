@@ -728,7 +728,26 @@ _REMOTE_DATA_ALLOWED = {
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
 }
-_MOBILE_UA = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.I)
+_PHONE_UA  = re.compile(r"iPhone|iPod|Windows Phone", re.I)
+_TABLET_UA = re.compile(r"iPad|Tablet|PlayBook|Kindle|Silk", re.I)
+_MOBI_UA   = re.compile(r"Mobi", re.I)
+
+
+def _is_phone_ua(ua: str) -> bool:
+    """폰만 모바일 UI(/m)로 보낸다. 태블릿은 화면이 넓어 PC UI가 더 맞다.
+
+    Android는 폰·태블릿이 같은 토큰을 쓰므로 'Mobile' 유무로 가른다(구글 권고).
+    iPadOS 13+ Safari는 기본이 데스크톱 모드라 UA에 iPad가 없고, 그 경우엔
+    자연히 PC UI로 간다.
+    """
+    ua = ua or ""
+    if _PHONE_UA.search(ua):
+        return True
+    if _TABLET_UA.search(ua):
+        return False
+    if re.search(r"Android", ua, re.I):
+        return bool(re.search(r"Mobile", ua, re.I))
+    return bool(_MOBI_UA.search(ua))
 
 
 def _is_remote() -> bool:
@@ -757,7 +776,7 @@ def _restrict_remote_access():
             or p.startswith("/sframe/")
             or p.startswith("/thumb/")):   # 썸네일 사본(비공개 전환 영상 폴백)
         return
-    is_mobile = bool(_MOBILE_UA.search(request.headers.get("User-Agent", "")))
+    is_mobile = _is_phone_ua(request.headers.get("User-Agent", ""))
     # 이력 페이지: 디바이스에 맞는 쪽으로 정규화
     if p in ("/", "/m"):
         if p == "/" and is_mobile:
