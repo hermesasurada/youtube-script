@@ -619,19 +619,26 @@ def run_job(job_id: str, params: dict) -> None:
         "concurrent_fragment_downloads": 1,
     }
     try:
-        for dl_attempt in (1, 2):
+        # 403 재시도: 1차는 즉시(다른 실험 버킷 기대), 2차는 75초 뒤(차단 강한 시간대엔
+        # 즉시 재시도도 같이 막히는 일이 잦아, 잠깐 물러났다 새 세션·새 토큰으로 받는다).
+        _dl_retry_wait = {1: 0, 2: 75}
+        for dl_attempt in (1, 2, 3):
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
                 break
             except Exception as e:
-                # 403은 이 세션이 유튜브 봇차단 실험 버킷에 배정된 것 — 새 세션은
-                # 대개 정상 버킷에 떨어지므로 큐 지연(30분+) 전에 즉시 한 번 다시 받는다.
-                if dl_attempt == 1 and "403" in str(e) and not stop.is_set():
-                    log.info("download 403 — 새 세션으로 즉시 재시도: %s", title)
-                    q.put("403 차단 감지 — 새 세션으로 즉시 재시도")
-                    continue
-                raise
+                wait = _dl_retry_wait.get(dl_attempt)
+                if wait is None or "403" not in str(e) or stop.is_set():
+                    raise
+                log.info("download 403 — %s 후 새 세션으로 재시도(%d/2): %s",
+                         f"{wait}초" if wait else "즉시", dl_attempt, title)
+                q.put(f"403 차단 감지 — {f'{wait}초 뒤 ' if wait else ''}새 세션으로 재시도")
+                if wait:
+                    for _ in range(wait):
+                        if stop.is_set():
+                            raise
+                        time.sleep(1)
     except Exception as e:
         if stop.is_set():
             jobs[job_id]["status"] = "cancelled"

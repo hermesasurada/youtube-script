@@ -49,7 +49,10 @@ MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "18000"))  # 건당 전�
 SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
 KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
 STALE_PROCESSING_SEC = int(os.environ.get("MONITOR_STALE_PROCESSING_SEC", "10800"))
-MAX_PIPELINE_ATTEMPTS = int(os.environ.get("MONITOR_MAX_PIPELINE_ATTEMPTS", "3"))
+# 403 차단은 저녁 시간대(15~23시)에 몰리는데, 3회 예산은 백오프(30분→1h→2h)가
+# 전부 한 차단 구간 안에 떨어져 소진되는 일이 있었다. 5회면 마지막 시도가
+# 첫 실패로부터 ~13시간 뒤라 다른 시간대에 걸린다.
+MAX_PIPELINE_ATTEMPTS = int(os.environ.get("MONITOR_MAX_PIPELINE_ATTEMPTS", "5"))
 # 파이프라인 실패 재시도 간격 — 지수 백오프(30분 → 1시간 → 2시간, 상한 6시간).
 # YouTube 403이나 LLM 한도처럼 '한동안 지속되는' 장애가 대부분이라, 짧게 몰아 재시도하면
 # 오히려 차단이 길어진다. 시간을 두고 드물게 두드리는 편이 복구율이 높다.
