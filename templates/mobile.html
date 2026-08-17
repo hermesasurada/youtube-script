@@ -315,6 +315,11 @@
     .modal[data-reader-font="serif"] .modal-body.markdown {
       font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
     }
+    /* Pretendard — self-host 가변 폰트(자간이 촘촘해 좁은 화면에서 특히 잘 읽힌다) */
+    .modal[data-reader-font="pretendard"] .modal-body.markdown {
+      font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", -apple-system, sans-serif;
+      letter-spacing: -.003em; word-break: keep-all;
+    }
     .modal[data-reader-font="chosun"] .modal-body.markdown {
       font-family: "Chosunilbo_myungjo", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
       letter-spacing: -.01em; word-break: keep-all;
@@ -466,6 +471,7 @@
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
         <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
           <option value="sans">Noto Sans KR</option>
+          <option value="pretendard">Pretendard</option>
           <option value="chosun">조선일보명조</option>
           <option value="serif">Noto Serif KR</option>
           <option value="gowun">고운바탕</option>
@@ -494,7 +500,7 @@
     <div class="modal-body" id="modal-body"></div>
   </div>
 
-<script>window.YS_ASSET_VERSIONS={googleCss:"{{ static_v('fonts/google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
+<script>window.YS_ASSET_VERSIONS={googleCss:"{{ static_v('fonts/google.css') }}",pretendardCss:"{{ static_v('fonts/pretendard.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
 <script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
 <script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
 <script>
@@ -944,13 +950,25 @@ function adjustFs(delta) {
 
 // 데스크톱과 같은 본문 글꼴 설정을 공유하고 로컬에 기억한다.
 const _READER_FONTS = {
-  sans: 'Noto Sans KR', chosun: '조선일보명조', serif: 'Noto Serif KR',
+  sans: 'Noto Sans KR', pretendard: 'Pretendard', chosun: '조선일보명조', serif: 'Noto Serif KR',
   gowun: '고운바탕', nanum: '나눔명조', song: '송명', system: '시스템', mono: '고정폭',
 };
 let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
 if (_readerFont === 'news') _readerFont = 'gowun';
 if (!_READER_FONTS[_readerFont]) _readerFont = 'sans';
+/* Pretendard 가변 폰트는 2MB라 항상 받지 않고, 고른 사람에게만 그때 로드한다.
+   나머지 글꼴은 요약 렌더 직후 지연 로딩되는 google.css에 들어 있다. */
+function _ensurePretendard() {
+  if (document.getElementById('ys-pretendard-css')) return;
+  const v = (window.YS_ASSET_VERSIONS || {}).pretendardCss;
+  const l = document.createElement('link');
+  l.id = 'ys-pretendard-css';
+  l.rel = 'stylesheet';
+  l.href = '/static/fonts/pretendard.css' + (v ? '?v=' + encodeURIComponent(v) : '');
+  document.head.appendChild(l);
+}
 function _applyReaderFont() {
+  if (_readerFont === 'pretendard') _ensurePretendard();
   $('modal').dataset.readerFont = _readerFont;
   if ($('font-select').value !== _readerFont) $('font-select').value = _readerFont;
 }

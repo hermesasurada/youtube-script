@@ -1876,7 +1876,8 @@ function adjustReaderFs(dir) {
 
 /* ── 본문 글꼴 선택 — 일반/몰입 공통, localStorage 기억 ── */
 const _READER_FONTS = {
-  sans:   'Noto Sans KR',
+  sans:       'Noto Sans KR',
+  pretendard: 'Pretendard',
   chosun: '조선일보명조',
   serif:  'Noto Serif KR',
   gowun:  '고운바탕',

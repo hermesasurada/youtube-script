@@ -1919,6 +1919,12 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .sum-panel[data-reader-font="serif"] .sum-md {
   font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
 }
+/* Pretendard — 이미 self-host 중인 가변 폰트(한글 자간이 촘촘해 본문 가독성이 좋다) */
+.sum-panel[data-reader-font="pretendard"] .sum-md {
+  font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", var(--font-sans);
+  letter-spacing: -0.003em;
+  word-break: keep-all;
+}
 /* 조선일보명조 — self-host 원본(신문 본문 명조) */
 .sum-panel[data-reader-font="chosun"] .sum-md {
   font-family: "Chosunilbo_myungjo", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;

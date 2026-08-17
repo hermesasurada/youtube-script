@@ -426,6 +426,12 @@
       box.appendChild(label);
       box.appendChild(brief);
       body.insertBefore(box, body.firstChild);
+      // 박스와 본문 사이에 빈 줄 한 칸. margin만으로는 편집기가 여백을 줄일 수 있어
+      // 실제 빈 단락을 넣어 붙여넣기 결과에서도 한 줄이 확실히 남게 한다.
+      const gap = document.createElement('p');
+      gap.setAttribute('style', 'margin:0 0 1.2em;line-height:1.6;');
+      gap.innerHTML = '&nbsp;';
+      box.insertAdjacentElement('afterend', gap);
     }
 
     if (url) {                                     // 출처는 원본 영상 링크만 남긴다
