@@ -427,16 +427,15 @@ def test_membership_capture_failure_is_not_retried(monkeypatch):
     assert bool(channel_monitor._META_PERMANENT_RE.search(emsg)) is True
 
 
-def test_retry_delay_backs_off_exponentially():
-    """403·LLM 한도처럼 한동안 지속되는 장애는 간격을 벌려야 복구율이 높다."""
+def test_retry_delay_is_constant_30min():
+    """재시도 간격은 30분 고정(2026-08-17 사용자 지정 — 지수 백오프에서 변경).
+
+    예산 5회 × 30분이라 2시간 안에 소진된다. 저녁 차단 구간을 통째로 넘기지는
+    못하지만, 회복이 빠른 일시 장애를 빨리 따라잡는 쪽을 택했다.
+    """
     d = channel_monitor._retry_delay
-    assert d(1) == 1800          # 30분
-    assert d(2) == 3600          # 1시간
-    assert d(3) == 7200          # 2시간
-    assert d(1) < d(2) < d(3)
-    assert d(99) == channel_monitor.RETRY_MAX_SEC   # 상한에서 멈춘다
-    assert d(0) == d(1)          # attempt 미기록(0/None)도 최소 간격 보장
-    assert d(None) == d(1)
+    assert [d(i) for i in (1, 2, 3, 4, 5)] == [1800] * 5
+    assert d(0) == d(None) == 1800   # attempt 미기록(0/None)도 동일
 
 
 def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch):
