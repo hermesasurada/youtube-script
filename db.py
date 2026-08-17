@@ -356,21 +356,26 @@ def yt_id_for_md(md_path: str) -> str | None:
     return r["yt_id"] if r else None
 
 
-def translation_candidates(limit: int = 40) -> list[dict]:
+def translation_candidates(limit: int = 40, since_ts: float | None = None) -> list[dict]:
     """최근 영상부터, 아직 번역이 끝나지 않은 전사 목록.
 
     실패분은 여기서 제외한다(무한 재시도 방지). 중간에 끊긴 processing 건은
     다시 후보에 올려 이어서 처리한다.
+    since_ts를 주면 그보다 오래된 전사는 아예 후보에서 뺀다(자동 처리 하한).
     """
-    rows = _conn().execute(
-        """SELECT i.yt_id, i.md_path, i.title, i.indexed_at
-             FROM items i
-             LEFT JOIN transcript_translation t ON t.yt_id = i.yt_id
-            WHERE i.yt_id IS NOT NULL AND i.yt_id <> ''
-              AND i.md_path IS NOT NULL AND i.md_path <> ''
-              AND (t.status IS NULL OR t.status = 'processing')
-            ORDER BY i.indexed_at DESC LIMIT ?""", (limit,)).fetchall()
-    return [dict(r) for r in rows]
+    sql = """SELECT i.yt_id, i.md_path, i.title, i.indexed_at
+               FROM items i
+               LEFT JOIN transcript_translation t ON t.yt_id = i.yt_id
+              WHERE i.yt_id IS NOT NULL AND i.yt_id <> ''
+                AND i.md_path IS NOT NULL AND i.md_path <> ''
+                AND (t.status IS NULL OR t.status = 'processing')"""
+    args: list = []
+    if since_ts is not None:
+        sql += " AND i.indexed_at >= ?"
+        args.append(since_ts)
+    sql += " ORDER BY i.indexed_at DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in _conn().execute(sql, args).fetchall()]
 
 
 def translation_status_counts() -> list[dict]:

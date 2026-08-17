@@ -34,6 +34,11 @@ QWEN_TIMEOUT = int(os.environ.get("QWEN_TIMEOUT", "900"))
 # 청크가 크면 호출 오버헤드가 줄지만 출력이 길어져 중단 위험이 커진다.
 # 실측(16 tok/s)상 4천자 내외가 한 번에 안정적으로 나오는 크기다.
 CHUNK_CHARS   = int(os.environ.get("TRANSLATE_CHUNK_CHARS", "4000"))
+
+# 자동 처리 하한(전사일). 이보다 과거 영상은 큐에 올리지 않는다 — 오래된 것까지
+# 전부 훑으면 몇 주가 걸리는데 실효가 낮다. 필요하면 --path 로 개별 지정해 돌린다
+# (수동 지정은 이 하한을 무시한다).
+TRANSLATE_SINCE = os.environ.get("TRANSLATE_SINCE", "2026-08-01")
 CTX_TAIL_CHARS = 240      # 직전 청크 꼬리를 문맥으로 물려 용어·화자를 잇는다
 MAX_TOKENS    = 6144
 
@@ -241,9 +246,21 @@ def _assemble(head: str, parts: list[str], total: int, final: bool = False) -> s
     return f"{head}\n<!--TRANSLATED_BY:{QWEN_MODEL}-->{note}\n{body}\n"
 
 
+def _since_ts() -> float | None:
+    """TRANSLATE_SINCE(YYYY-MM-DD) → unix timestamp. 비우면 하한 없음."""
+    s = (TRANSLATE_SINCE or "").strip()
+    if not s:
+        return None
+    try:
+        return time.mktime(time.strptime(s, "%Y-%m-%d"))
+    except ValueError:
+        log(f"TRANSLATE_SINCE 형식 오류({s!r}) — 하한 없이 진행")
+        return None
+
+
 def pick_next() -> dict | None:
-    """최근 영상부터, 아직 번역 안 된 외국어 전사 1건."""
-    rows = db.translation_candidates(limit=40)
+    """최근 영상부터, 아직 번역 안 된 외국어 전사 1건(전사일 하한 적용)."""
+    rows = db.translation_candidates(limit=40, since_ts=_since_ts())
     for r in rows:
         p = r["md_path"]
         if not p or not os.path.isfile(p):
@@ -291,6 +308,11 @@ def main() -> int:
         cur = db.get_translation_inflight()
         if cur:
             print(f"  진행중: {cur['chunks_done']}/{cur['chunks_total']} — {cur['md_path']}")
+        since = _since_ts()
+        print(f"  자동 처리 하한: 전사일 {TRANSLATE_SINCE} 이후"
+              if since else "  자동 처리 하한: 없음(전체)")
+        print(f"  남은 후보: {len(db.translation_candidates(9999, since))}건"
+              " (한국어 포함 — 실제 번역 대상은 이보다 적다)")
         return 0
 
     # 실제 번역을 돌리는 경로는 모두 같은 잠금을 쓴다. 한 건이 런처 주기(30분)를
