@@ -178,17 +178,20 @@ def download_video(url: str, out_noext: str) -> str | None:
         "ffmpeg_location": FFMPEG_DIR, "quiet": True, "no_warnings": True,
         "socket_timeout": 60, "retries": 5,
     }
-    for attempt in (1, 2):
+    # 403 재시도: 1차 즉시, 2차 75초 뒤(차단 강한 시간대엔 즉시 재시도도 같이 막힌다).
+    retry_wait = {1: 0, 2: 75}
+    for attempt in (1, 2, 3):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
             break
         except Exception as e:
-            # 403 = 세션이 봇차단 실험 버킷에 걸린 것. 새 세션은 대개 통과하므로 즉시 1회 재시도.
-            if attempt == 1 and "403" in str(e):
-                log("[1] 403 차단 — 새 세션으로 즉시 재시도")
-                continue
-            raise
+            wait = retry_wait.get(attempt)
+            if wait is None or "403" not in str(e):
+                raise
+            log(f"[1] 403 차단 — {f'{wait}초 뒤 ' if wait else ''}새 세션으로 재시도({attempt}/2)")
+            if wait:
+                time.sleep(wait)
     for ext in ("mp4", "mkv", "webm", "m4v"):
         if os.path.exists(out_noext + "." + ext):
             return out_noext + "." + ext
