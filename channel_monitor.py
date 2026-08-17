@@ -53,16 +53,16 @@ STALE_PROCESSING_SEC = int(os.environ.get("MONITOR_STALE_PROCESSING_SEC", "10800
 # 전부 한 차단 구간 안에 떨어져 소진되는 일이 있었다. 5회면 마지막 시도가
 # 첫 실패로부터 ~13시간 뒤라 다른 시간대에 걸린다.
 MAX_PIPELINE_ATTEMPTS = int(os.environ.get("MONITOR_MAX_PIPELINE_ATTEMPTS", "5"))
-# 파이프라인 실패 재시도 간격 — 지수 백오프(30분 → 1시간 → 2시간, 상한 6시간).
-# YouTube 403이나 LLM 한도처럼 '한동안 지속되는' 장애가 대부분이라, 짧게 몰아 재시도하면
-# 오히려 차단이 길어진다. 시간을 두고 드물게 두드리는 편이 복구율이 높다.
+# 파이프라인 실패 재시도 간격 — 30분 고정(사용자 지정).
+# 예산 5회 × 30분 = 첫 실패로부터 2시간 안에 전부 소진되므로, 저녁 차단
+# 구간(15~23시)을 통째로 건너뛰지는 못한다. 대신 회복이 빠른 일시 장애를
+# 빨리 따라잡고, 구간을 넘겨야 하는 건은 실패 후 수동 재처리한다.
 RETRY_BASE_SEC = int(os.environ.get("MONITOR_RETRY_BASE_SEC", "1800"))
-RETRY_MAX_SEC  = int(os.environ.get("MONITOR_RETRY_MAX_SEC", "21600"))
 
 
 def _retry_delay(attempt: int) -> int:
-    """다음 재시도까지 대기 초. attempt는 지금까지 시도한 횟수(1부터)."""
-    return min(RETRY_MAX_SEC, RETRY_BASE_SEC * (2 ** max(0, int(attempt or 1) - 1)))
+    """다음 재시도까지 대기 초 — 시도 횟수와 무관하게 일정하다."""
+    return RETRY_BASE_SEC
 LOCK_PATH  = os.environ.get("MONITOR_LOCK", os.path.expanduser("~/.hermes/youtube-monitor.lock"))
 OUTBOX     = os.environ.get("MONITOR_OUTBOX", os.path.expanduser("~/.hermes/youtube-monitor.outbox"))
 ENV_PATH   = os.path.expanduser("~/.hermes/youtube-monitor.env")
