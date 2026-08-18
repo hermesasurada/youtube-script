@@ -178,18 +178,23 @@ def download_video(url: str, out_noext: str) -> str | None:
         "ffmpeg_location": FFMPEG_DIR, "quiet": True, "no_warnings": True,
         "socket_timeout": 60, "retries": 5,
     }
-    # 403 재시도: 1차 즉시, 2차 75초 뒤(차단 강한 시간대엔 즉시 재시도도 같이 막힌다).
+    # 403 재시도: 1차 즉시 → 2차 75초 뒤 → 3차 대체 클라이언트(tv_simply·web_embedded).
+    # IP 단위 차단으로 웹 계열이 전부 막혀도 이 둘은 통과한다(2026-08-18 실측).
     retry_wait = {1: 0, 2: 75}
     for attempt in (1, 2, 3):
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            o = dict(opts)
+            if attempt == 3:
+                o["extractor_args"] = {"youtube": {"player_client": ["tv_simply", "web_embedded"]}}
+            with yt_dlp.YoutubeDL(o) as ydl:
                 ydl.download([url])
             break
         except Exception as e:
             wait = retry_wait.get(attempt)
             if wait is None or "403" not in str(e):
                 raise
-            log(f"[1] 403 차단 — {f'{wait}초 뒤 ' if wait else ''}새 세션으로 재시도({attempt}/2)")
+            nxt = "대체 클라이언트" if attempt == 2 else "새 세션"
+            log(f"[1] 403 차단 — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도({attempt}/2)")
             if wait:
                 time.sleep(wait)
     for ext in ("mp4", "mkv", "webm", "m4v"):

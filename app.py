@@ -619,21 +619,27 @@ def run_job(job_id: str, params: dict) -> None:
         "concurrent_fragment_downloads": 1,
     }
     try:
-        # 403 재시도: 1차는 즉시(다른 실험 버킷 기대), 2차는 75초 뒤(차단 강한 시간대엔
-        # 즉시 재시도도 같이 막히는 일이 잦아, 잠깐 물러났다 새 세션·새 토큰으로 받는다).
+        # 403 재시도: 1차 즉시(다른 실험 버킷 기대) → 2차 75초 뒤(새 세션·새 토큰) →
+        # 3차는 대체 클라이언트(tv_simply·web_embedded)로 전환. IP 단위 차단으로
+        # 웹 계열이 전부 막혀도 이 둘은 통과하는 것이 실측으로 확인됐다(2026-08-18).
         _dl_retry_wait = {1: 0, 2: 75}
         for dl_attempt in (1, 2, 3):
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                opts = dict(ydl_opts)
+                if dl_attempt == 3:
+                    opts["extractor_args"] = {
+                        "youtube": {"player_client": ["tv_simply", "web_embedded"]}}
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([url])
                 break
             except Exception as e:
                 wait = _dl_retry_wait.get(dl_attempt)
                 if wait is None or "403" not in str(e) or stop.is_set():
                     raise
-                log.info("download 403 — %s 후 새 세션으로 재시도(%d/2): %s",
-                         f"{wait}초" if wait else "즉시", dl_attempt, title)
-                q.put(f"403 차단 감지 — {f'{wait}초 뒤 ' if wait else ''}새 세션으로 재시도")
+                nxt = "대체 클라이언트" if dl_attempt == 2 else "새 세션"
+                log.info("download 403 — %s 후 %s으로 재시도(%d/2): %s",
+                         f"{wait}초" if wait else "즉시", nxt, dl_attempt, title)
+                q.put(f"403 차단 감지 — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도")
                 if wait:
                     for _ in range(wait):
                         if stop.is_set():
