@@ -268,9 +268,9 @@ def test_queue_claim_and_stale_recovery(monkeypatch):
     claimed = db.queue_claim_one()
     assert claimed and claimed["yt_id"] == "claim-test"
     assert claimed["status"] == "processing"
-    assert claimed["claimed_from"] == "pending"
     assert claimed["attempt_count"] == 1
     assert db.queue_claim_one() is None
+    assert db.queue_claim_kf_retry() is None   # 캡처 큐는 비어 있다
 
     old = (datetime.now() - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
@@ -444,9 +444,9 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
         "id": 1, "yt_id": "retry-test", "title": "retry", "url": "https://youtu.be/retry-test",
         "channel_id": "UC1", "txt_path": "/tmp/retry.md",
     }
-    # 단일 인출구: kf_retry 건이 claim_one으로 나온다
-    monkeypatch.setattr(channel_monitor.db, "queue_claim_one",
-                        lambda: {**retry, "claimed_from": "kf_retry"})
+    # 캡처 재시도는 본편(pending)과 분리된 전용 인출구로 나온다
+    monkeypatch.setattr(channel_monitor.db, "queue_claim_one", lambda: None)
+    monkeypatch.setattr(channel_monitor.db, "queue_claim_kf_retry", lambda: retry)
     monkeypatch.setattr(channel_monitor.db, "get_monitor_model_orders",
                         lambda: {"summary": ["opus"], "capture": ["opus"]})
     monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)

@@ -562,58 +562,68 @@ def process_capture_only(txt_path: str, url: str, *, capture_models=None) -> dic
 
 
 def drain() -> None:
-    """주기당 정확히 한 건만 처리한다 — 단일 큐, 단일 인출구.
+    """주기당 '본편 1건 + 캡처 재시도 1건'까지 처리한다.
 
-    신규(pending)든 캡처 재시도(kf_retry)든 모두 watch_queue 한 줄에 서고,
-    들어온 순서(id)대로 가장 오래된 한 건을 꺼내 그 종류에 맞게 처리한다.
-    나머지는 전부 다음 주기(30분 뒤)로 — 짧은 시간에 유튜브를 연타해 차단을
-    키우는 일이 구조적으로 불가능해진다. deferred는 due가 되면 poll 단계에서
-    pending으로 복귀해 같은 줄에 선다.
-
-    게이트: 저장된 요약 순서에서 실행 가능한 첫 모델을 찾고, 나머지는 서버 폴백으로 전달.
-    캡처 순서는 별도이며 요약 게이트와 무관하게 적용한다.
+    본편(pending: 전사→요약→캡처)과 캡처 재시도(kf_retry: 캡처만 재생성)는
+    별도 큐로 서고, 각자 들어온 순서대로 한 건씩만 나온다. 캡처 재시도가
+    본편 처리 순서를 차지하지 않으면서도, 캡처 역시 유튜브에서 영상을 새로
+    받는 작업이라 주기당 1건으로 제한된다. deferred는 due가 되면 poll 단계에서
+    pending으로 복귀한다.
     """
+    orders = db.get_monitor_model_orders()
+    capture_order = orders["capture"]
+    _drain_main_one(orders, capture_order)
+    _drain_kf_retry_one(capture_order)
+
+
+def _drain_kf_retry_one(capture_order) -> None:
+    """캡처 재시도 큐에서 1건 — 본편과 별도 슬롯(주기당 본편 1 + 캡처 1).
+
+    캡처도 유튜브에서 저해상도 영상을 새로 받으므로 무제한으로 풀 수는 없다.
+    캡처만 1회 재생성(전사·요약 스킵)하고 성공·실패 무관하게 종료한다.
+    """
+    v = db.queue_claim_kf_retry()
+    if not v:
+        return
+    title = v["title"] or v["yt_id"]
+    head = _notify_head(v, title)
+    txt_path = v.get("txt_path")
+    if not txt_path:
+        db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
+        return
+    log(f"[kf-retry] 캡처 재시도: {title}")
+    try:
+        kf = process_capture_only(txt_path, v["url"], capture_models=capture_order)
+        if kf.get("ok"):
+            db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
+            notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
+            log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
+        else:
+            rz = str(kf.get("reason") or "실패")
+            emsg = str(kf.get("error") or "")
+            # 재시도 사이에 멤버십 전용으로 바뀌었을 수 있다 — 사유를 구분해 알린다
+            if _META_PERMANENT_RE.search(emsg):
+                db.queue_set_status(v["id"], "done", reason="캡처 불가(멤버십/비공개 전환)")
+                log(f"[kf-retry] 캡처 불가(영구 사유): {emsg[:110]}")
+                notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
+            else:
+                db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
+                log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {emsg[:120]}")
+                notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
+    except Exception as e:
+        db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
+        log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")
+        notify(f"⚠️ 캡처 재시도 오류(포기)\n{head}\n{e}\n{v['url']}")
+    return
+
+
+def _drain_main_one(orders, capture_order) -> None:
+    """본편 큐(pending)에서 1건 — 전사→요약→캡처 전체 파이프라인."""
     v = db.queue_claim_one()
     if not v:
         return
-    kind = v.get("claimed_from") or "pending"
     title = v["title"] or v["yt_id"]
     head = _notify_head(v, title)
-    orders = db.get_monitor_model_orders()
-    capture_order = orders["capture"]
-
-    # ── 캡처 재시도 건: 캡처만 1회 재생성(전사·요약 스킵), 성공·실패 무관 종료 ──
-    if kind == "kf_retry":
-        txt_path = v.get("txt_path")
-        if not txt_path:
-            db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
-            return
-        log(f"[kf-retry] 캡처 재시도: {title}")
-        try:
-            kf = process_capture_only(txt_path, v["url"], capture_models=capture_order)
-            if kf.get("ok"):
-                db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
-                notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
-                log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
-            else:
-                rz = str(kf.get("reason") or "실패")
-                emsg = str(kf.get("error") or "")
-                # 재시도 사이에 멤버십 전용으로 바뀌었을 수 있다 — 사유를 구분해 알린다
-                if _META_PERMANENT_RE.search(emsg):
-                    db.queue_set_status(v["id"], "done", reason="캡처 불가(멤버십/비공개 전환)")
-                    log(f"[kf-retry] 캡처 불가(영구 사유): {emsg[:110]}")
-                    notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
-                else:
-                    db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
-                    log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {emsg[:120]}")
-                    notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
-        except Exception as e:
-            db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
-            log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")
-            notify(f"⚠️ 캡처 재시도 오류(포기)\n{head}\n{e}\n{v['url']}")
-        return
-
-    # ── 신규/재처리 건: 전사→요약→캡처 전체 파이프라인 ──────────────────────
     summary_order = orders["summary"]
     proceed, mode, detail = summarizer_gate(summary_order)
     if not proceed:

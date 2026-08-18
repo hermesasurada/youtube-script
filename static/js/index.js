@@ -886,13 +886,17 @@ async function refreshQueueModal() {
           <div class="q-sub">${_attrEsc(ch)}${ch && extra ? ' · ' : ''}${extra}</div>
         </div>${ctl}</div>`;
     };
-    let n = 0;
-    const waiting = d.waiting.map(v => row(v, ++n,
-      v.status === 'pending' || v.status === 'kf_retry')).join('');
+    // 본편 큐와 캡처 재시도 큐는 분리돼 있다(주기당 본편 1건 + 캡처 1건)
+    const main = d.waiting.filter(v => v.status !== 'kf_retry');
+    const kf   = d.waiting.filter(v => v.status === 'kf_retry');
+    let n = 0, k = 0;
+    const mainRows = main.map(v => row(v, ++n, v.status === 'pending')).join('');
+    const kfRows   = kf.map(v => row(v, ++k, true)).join('');
     const recent = d.recent.map(v => row(v, '', false)).join('');
     body.innerHTML =
-      `<div class="q-sec">대기 · ${d.waiting.length}건 <span class="q-hint">30분에 1건 처리</span></div>`
-      + (waiting || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
+      `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">30분에 1건 처리</span></div>`
+      + (mainRows || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
+      + (kf.length ? `<div class="q-sec">캡처 재시도 대기 · ${kf.length}건 <span class="q-hint">본편과 별도 슬롯</span></div>${kfRows}` : '')
       + (recent ? `<div class="q-sec">최근 처리</div>${recent}` : '');
   } catch (e) {
     body.innerHTML = `<div class="q-empty">불러오기 실패: ${_attrEsc(e.message)}</div>`;

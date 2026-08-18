@@ -350,6 +350,27 @@
     .modal[data-reader-font="mono"] .modal-body.markdown {
       font-family: var(--font-mono); letter-spacing: -.01em;
     }
+    /* ── 처리 큐(모달 내) ── */
+    .mq-sec { margin: .9rem 0 .4rem; font-size: 11.5px; font-weight: 700; color: var(--muted); }
+    .mq-row { display: flex; align-items: center; gap: .5rem; padding: .5rem .55rem;
+              border: 1px solid var(--border); border-radius: var(--radius-sm);
+              margin-bottom: .35rem; background: var(--surface); }
+    .mq-st { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: .12rem .42rem;
+             border-radius: 2px; border: 1px solid var(--border); color: var(--muted); }
+    .mq-processing { color: #2563eb; border-color: currentColor; }
+    .mq-deferred   { color: #b45309; border-color: currentColor; }
+    .mq-done       { color: #16a34a; border-color: currentColor; }
+    .mq-failed     { color: #dc2626; border-color: currentColor; }
+    .mq-main { flex: 1; min-width: 0; }
+    .mq-title { font-size: 12px; line-height: 1.35; overflow: hidden;
+                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .mq-sub { font-size: 10.5px; color: var(--muted); margin-top: .1rem; }
+    .mq-ctl { display: inline-flex; gap: .25rem; flex-shrink: 0; }
+    .mq-ctl button { width: 28px; height: 28px; border: 1px solid var(--border);
+                     border-radius: 2px; background: var(--surface2); color: var(--text);
+                     font-size: 13px; line-height: 1; }
+    .mq-del { color: #dc2626; }
+
     /* ── 채널 자동 모니터(모달 내) ── */
     .modal-body.channels { padding: 1rem; display: flex; flex-direction: column; gap: .6rem; }
     .ch-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
@@ -436,6 +457,9 @@
   <header class="topbar">
     <h1>이력조회</h1>
     <span class="count" id="count">—</span>
+    <button class="icon-btn" id="queue-btn" onclick="openQueueM()" aria-label="처리 큐">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </button>
     <button class="icon-btn" id="channels-btn" onclick="openChannels()" aria-label="채널 자동 모니터">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a10 10 0 0 0 10 10"/><path d="M22 12a10 10 0 0 0-10-10"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
@@ -785,6 +809,64 @@ function closeModal() {
     _modalPushed = false;
     history.back(); // 열 때 push한 state를 다시 pop
   }
+}
+
+/* ── 처리 큐(본편/캡처 대기 목록 · 순서 변경) ── */
+const _Q_ST = {
+  processing: '처리 중', pending: '대기', kf_retry: '캡처 재시도',
+  deferred: '재시도 예약', done: '완료', failed: '실패',
+};
+async function openQueueM() {
+  $('fs-ctrl').hidden = true;
+  $('font-ctrl').hidden = true;
+  openModal('처리 큐');
+  $('modal-body').className = 'modal-body queue';
+  await loadQueueM();
+}
+async function loadQueueM() {
+  const body = $('modal-body');
+  body.innerHTML = '<div class="ch-empty">불러오는 중…</div>';
+  try {
+    const d = await (await fetch('/queue/items')).json();
+    const row = (v, i, movable) => {
+      const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
+      const extra = v.status === 'deferred' && v.next_retry_at
+        ? `${v.next_retry_at.slice(5, 16)} 재시도`
+        : (v.attempt_count > 1 ? `시도 ${v.attempt_count}` : '');
+      const ctl = movable ? `<span class="mq-ctl">
+          <button onclick="mqMove(${v.id},'up')">↑</button>
+          <button onclick="mqMove(${v.id},'down')">↓</button>
+          <button class="mq-del" onclick="mqCancel(${v.id})">×</button></span>` : '';
+      return `<div class="mq-row">
+        <span class="mq-st mq-${v.status}">${i ? i + ' · ' : ''}${_Q_ST[v.status] || v.status}</span>
+        <div class="mq-main"><div class="mq-title">${attrEsc(v.title || v.yt_id)}</div>
+          <div class="mq-sub">${attrEsc([ch, extra].filter(Boolean).join(' · '))}</div></div>${ctl}</div>`;
+    };
+    const main = d.waiting.filter(v => v.status !== 'kf_retry');
+    const kf = d.waiting.filter(v => v.status === 'kf_retry');
+    let n = 0, k = 0;
+    body.innerHTML =
+      `<p class="ch-hint">30분에 본편 1건 + 캡처 1건씩 처리됩니다.</p>`
+      + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
+      + (main.map(v => row(v, ++n, v.status === 'pending')).join('')
+         || '<div class="ch-empty">대기 중인 영상이 없습니다.</div>')
+      + (kf.length ? `<div class="mq-sec">캡처 재시도 · ${kf.length}건</div>`
+         + kf.map(v => row(v, ++k, true)).join('') : '')
+      + (d.recent.length ? `<div class="mq-sec">최근 처리</div>`
+         + d.recent.map(v => row(v, '', false)).join('') : '');
+  } catch (e) {
+    body.innerHTML = `<div class="ch-empty">불러오기 실패: ${attrEsc(e.message)}</div>`;
+  }
+}
+async function mqMove(id, direction) {
+  await fetch(`/queue/items/${id}/move`, {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({direction})});
+  loadQueueM();
+}
+async function mqCancel(id) {
+  if (!confirm('이 영상을 큐에서 취소할까요?')) return;
+  await fetch(`/queue/items/${id}`, {method: 'DELETE'});
+  loadQueueM();
 }
 
 /* ── 채널 자동 모니터(원격 관리) ── */

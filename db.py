@@ -779,30 +779,29 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
 
 
 def queue_claim_one() -> dict | None:
-    """단일 파이프라인의 유일한 인출구 — 신규(pending)든 캡처 재시도(kf_retry)든
-    들어온 순서(id)대로 가장 오래된 '한 건'만 원자적으로 집는다.
+    """본편 파이프라인(전사→요약→캡처)의 인출구 — pending 중 가장 오래된 한 건.
 
-    주기당 1건 처리 원칙의 핵심. 반환 dict의 원래 상태는 'claimed_from'에 담는다.
-    pending만 attempt_count를 올린다(kf_retry는 캡처 1회 재시도 의미라 종전대로 유지).
+    주기당 1건 처리 원칙의 핵심. 캡처 재시도(kf_retry)는 본편 순서를 차지하지
+    않도록 별도 인출구(queue_claim_kf_retry)로 분리돼 있다 — 같은 주기에
+    '본편 1건 + 캡처 1건'까지 처리된다.
     """
     with _lock:
         conn = _conn()
         conn.execute("BEGIN IMMEDIATE")
         try:
             row = conn.execute(
-                "SELECT * FROM watch_queue WHERE status IN ('pending', 'kf_retry') "
+                "SELECT * FROM watch_queue WHERE status = 'pending' "
                 "ORDER BY COALESCE(position, id), id LIMIT 1").fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 return None
             now = _now()
-            bump = 1 if row["status"] == "pending" else 0
             cur = conn.execute(
                 """UPDATE watch_queue
                       SET status = 'processing', claimed_at = ?, updated_at = ?,
-                          attempt_count = attempt_count + ?, next_retry_at = NULL
-                    WHERE id = ? AND status = ?""",
-                (now, now, bump, row["id"], row["status"]),
+                          attempt_count = attempt_count + 1, next_retry_at = NULL
+                    WHERE id = ? AND status = 'pending'""",
+                (now, now, row["id"]),
             )
             if cur.rowcount != 1:
                 conn.execute("ROLLBACK")
@@ -810,9 +809,40 @@ def queue_claim_one() -> dict | None:
             claimed = conn.execute("SELECT * FROM watch_queue WHERE id = ?",
                                    (row["id"],)).fetchone()
             conn.execute("COMMIT")
-            out = dict(claimed)
-            out["claimed_from"] = row["status"]
-            return out
+            return dict(claimed)
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
+def queue_claim_kf_retry() -> dict | None:
+    """캡처 재시도 전용 인출구 — kf_retry 중 가장 오래된 한 건.
+
+    캡처도 유튜브에서 저해상도 영상을 새로 받으므로(전사 오디오는 삭제됨)
+    무제한으로 풀 수는 없고, 주기당 1건씩 본편과 별도로 처리한다.
+    """
+    with _lock:
+        conn = _conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT * FROM watch_queue WHERE status = 'kf_retry' "
+                "ORDER BY COALESCE(position, id), id LIMIT 1").fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            now = _now()
+            cur = conn.execute(
+                "UPDATE watch_queue SET status = 'processing', claimed_at = ?, "
+                "updated_at = ? WHERE id = ? AND status = 'kf_retry'",
+                (now, now, row["id"]))
+            if cur.rowcount != 1:
+                conn.execute("ROLLBACK")
+                return None
+            claimed = conn.execute("SELECT * FROM watch_queue WHERE id = ?",
+                                   (row["id"],)).fetchone()
+            conn.execute("COMMIT")
+            return dict(claimed)
         except Exception:
             conn.execute("ROLLBACK")
             raise
@@ -865,23 +895,26 @@ def queue_overview(recent: int = 10) -> dict:
 
 
 def queue_move(qid: int, direction: str) -> bool:
-    """대기(pending·kf_retry) 항목을 한 칸 위/아래로 — 이웃과 position 맞바꿈."""
+    """대기 항목을 한 칸 위/아래로 — 같은 큐(같은 status)의 이웃과 position 교환.
+
+    본편(pending)과 캡처 재시도(kf_retry)는 별도 큐라 서로 순서를 넘나들지 않는다.
+    """
     if direction not in ("up", "down"):
         return False
     with _lock:
         conn = _conn()
         me = conn.execute(
-            "SELECT id, COALESCE(position, id) AS pos FROM watch_queue "
+            "SELECT id, status, COALESCE(position, id) AS pos FROM watch_queue "
             "WHERE id = ? AND status IN ('pending', 'kf_retry')", (qid,)).fetchone()
         if me is None:
             return False
         cmp_, order = ("<", "DESC") if direction == "up" else (">", "ASC")
         other = conn.execute(
             f"""SELECT id, COALESCE(position, id) AS pos FROM watch_queue
-                 WHERE status IN ('pending', 'kf_retry')
+                 WHERE status = ?
                    AND (COALESCE(position, id), id) {cmp_} (?, ?)
                  ORDER BY COALESCE(position, id) {order}, id {order} LIMIT 1""",
-            (me["pos"], me["id"])).fetchone()
+            (me["status"], me["pos"], me["id"])).fetchone()
         if other is None:
             return False                            # 이미 맨 위/맨 아래
         conn.execute("UPDATE watch_queue SET position = ? WHERE id = ?",
