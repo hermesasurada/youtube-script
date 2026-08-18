@@ -562,123 +562,108 @@ def process_capture_only(txt_path: str, url: str, *, capture_models=None) -> dic
 
 
 def drain() -> None:
-    """큐 pending을 FIFO 처리 + 이전 주기에 예약된 캡처 재시도 처리.
+    """주기당 정확히 한 건만 처리한다 — 단일 큐, 단일 인출구.
+
+    신규(pending)든 캡처 재시도(kf_retry)든 모두 watch_queue 한 줄에 서고,
+    들어온 순서(id)대로 가장 오래된 한 건을 꺼내 그 종류에 맞게 처리한다.
+    나머지는 전부 다음 주기(30분 뒤)로 — 짧은 시간에 유튜브를 연타해 차단을
+    키우는 일이 구조적으로 불가능해진다. deferred는 due가 되면 poll 단계에서
+    pending으로 복귀해 같은 줄에 선다.
 
     게이트: 저장된 요약 순서에서 실행 가능한 첫 모델을 찾고, 나머지는 서버 폴백으로 전달.
     캡처 순서는 별도이며 요약 게이트와 무관하게 적용한다.
-
-    캡처 재시도: 요약 성공/캡처만 일시 실패(다운로드 끊김 등, systemic 아님)한 항목은
-    'done' 대신 'kf_retry'로 예약 → 다음 주기에 캡처만 1회 재생성(전사·요약 스킵).
-    이번 주기의 pending 처리 중 새로 예약된 건은 스냅샷에서 빠져 다음 주기로 미뤄진다.
     """
-    # 이번 주기 시작 시점의 재시도 대상 스냅샷(pending 루프에서 새로 예약될 건과 분리 → '다음 주기' 보장)
-    retry_batch = db.queue_kf_retry_list()
-    has_pending = bool(db.queue_next_pending())
-    if not has_pending and not retry_batch:
+    v = db.queue_claim_one()
+    if not v:
         return
+    kind = v.get("claimed_from") or "pending"
+    title = v["title"] or v["yt_id"]
+    head = _notify_head(v, title)
     orders = db.get_monitor_model_orders()
-    summary_order = orders["summary"]
     capture_order = orders["capture"]
-    proceed, mode, detail = summarizer_gate(summary_order) if has_pending else (False, "none", "")
-    active_summary_order = summary_order
-    if has_pending and not proceed:
-        notify(
-            "⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
-            f"사유: {detail}"
-        )
-    elif proceed:
-        # 게이트가 이미 불가 판정한 앞쪽 모델은 이번 주기에는 건너뛴다.
-        active_summary_order = summary_order[summary_order.index(mode):]
-        if detail:
-            notify(
-                f"⚠️ 요약 1순위 사용 불가 — **{mode.upper()}부터 폴백 처리**\n{detail}"
-            )
-    prompt = _get_prompt()
-    while proceed:
-        v = db.queue_claim_next()
-        if not v:
-            break
-        title = v["title"] or v["yt_id"]
-        head = _notify_head(v, title)   # 채널명 + 제목 블록
-        log(f"[drain] 처리 시작: {title} (mode={mode})")
-        try:
-            res = process_video(
-                v, prompt,
-                summary_models=active_summary_order,
-                capture_models=capture_order,
-            )
-            kf_note = res.get("kf_note")
-            # 캡처만 일시 실패(systemic·영구사유 아님) → 다음 주기 1회 재시도 예약
-            retryable = (bool(kf_note) and not res.get("kf_systemic")
-                         and not res.get("kf_permanent"))
-            if retryable and res.get("txt_path"):
-                db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
-                notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
-                log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
-            else:
-                db.queue_set_status(v["id"], "done")
-                suffix = "(캡처 실패)" if kf_note else ""
-                notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
-        except ClaudeUnavailable as e:
-            # 지정된 요약 모델이 모두 실패한 경우(폴백까지 소진)
-            db.queue_defer(
-                v["id"], "요약 경로 재시도 대기", error_kind="llm_unavailable",
-                retry_after_seconds=_retry_delay(v.get("attempt_count")),
-                max_attempts=MAX_PIPELINE_ATTEMPTS,
-            )
-            notify(
-                f"⛔ 요약 실패(모든 폴백 소진) — 큐 정지, 다음 주기 재시도\n"
-                f"{head}\n{e}"
-            )
-            break
-        except Exception as e:
-            reason = str(e)[:120]
-            state = db.queue_defer(
-                v["id"], reason, error_kind="pipeline_transient",
-                retry_after_seconds=_retry_delay(v.get("attempt_count")),
-                max_attempts=MAX_PIPELINE_ATTEMPTS,
-            )
-            notify(
-                f"⚠️ 자동 처리 실패 — {'재시도 예약' if state == 'deferred' else '재시도 소진'}\n"
-                f"{head}\n{reason}\n{v['url']}"
-            )
 
-    # ── 캡처 재시도 pass — 요약 게이트와 독립, 저장된 캡처 순서 사용 ─────────────
-    # 스냅샷(retry_batch)만 처리 = 이전 주기 예약분. 성공·실패 무관하게 done으로 종료(정확히 1회).
-    if retry_batch:
-        for v in retry_batch:
-            title = v["title"] or v["yt_id"]
-            head = _notify_head(v, title)
-            txt_path = v.get("txt_path")
-            if not txt_path:
-                db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
-                continue
-            db.queue_set_status(v["id"], "processing")   # 잠금(재선택 방지)
-            log(f"[kf-retry] 캡처 재시도: {title}")
-            try:
-                kf = process_capture_only(
-                    txt_path, v["url"], capture_models=capture_order
-                )
-                if kf.get("ok"):
-                    db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
-                    notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
-                    log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
+    # ── 캡처 재시도 건: 캡처만 1회 재생성(전사·요약 스킵), 성공·실패 무관 종료 ──
+    if kind == "kf_retry":
+        txt_path = v.get("txt_path")
+        if not txt_path:
+            db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
+            return
+        log(f"[kf-retry] 캡처 재시도: {title}")
+        try:
+            kf = process_capture_only(txt_path, v["url"], capture_models=capture_order)
+            if kf.get("ok"):
+                db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
+                notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
+                log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
+            else:
+                rz = str(kf.get("reason") or "실패")
+                emsg = str(kf.get("error") or "")
+                # 재시도 사이에 멤버십 전용으로 바뀌었을 수 있다 — 사유를 구분해 알린다
+                if _META_PERMANENT_RE.search(emsg):
+                    db.queue_set_status(v["id"], "done", reason="캡처 불가(멤버십/비공개 전환)")
+                    log(f"[kf-retry] 캡처 불가(영구 사유): {emsg[:110]}")
+                    notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
                 else:
-                    rz = str(kf.get("reason") or "실패")
-                    emsg = str(kf.get("error") or "")
-                    # 재시도 사이에 멤버십 전용으로 바뀌었을 수 있다 — 사유를 구분해 알린다
-                    if _META_PERMANENT_RE.search(emsg):
-                        db.queue_set_status(v["id"], "done", reason="캡처 불가(멤버십/비공개 전환)")
-                        log(f"[kf-retry] 캡처 불가(영구 사유): {emsg[:110]}")
-                        notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
-                    else:
-                        db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
-                        log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {emsg[:120]}")
-                        notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
-            except Exception as e:
-                db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
-                log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")
-                notify(f"⚠️ 캡처 재시도 오류(포기)\n{head}\n{e}\n{v['url']}")
+                    db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
+                    log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {emsg[:120]}")
+                    notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
+        except Exception as e:
+            db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
+            log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")
+            notify(f"⚠️ 캡처 재시도 오류(포기)\n{head}\n{e}\n{v['url']}")
+        return
+
+    # ── 신규/재처리 건: 전사→요약→캡처 전체 파이프라인 ──────────────────────
+    summary_order = orders["summary"]
+    proceed, mode, detail = summarizer_gate(summary_order)
+    if not proceed:
+        # 요약 경로가 없으면 시도 자체를 안 한 것 — 예산을 태우지 않고 되돌린다.
+        db.queue_unclaim(v["id"])
+        notify("⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
+               f"사유: {detail}")
+        return
+    active_summary_order = summary_order[summary_order.index(mode):]
+    if detail:
+        notify(f"⚠️ 요약 1순위 사용 불가 — **{mode.upper()}부터 폴백 처리**\n{detail}")
+
+    log(f"[drain] 처리 시작: {title} (mode={mode})")
+    try:
+        res = process_video(
+            v, _get_prompt(),
+            summary_models=active_summary_order,
+            capture_models=capture_order,
+        )
+        kf_note = res.get("kf_note")
+        # 캡처만 일시 실패(systemic·영구사유 아님) → 큐 뒤에 kf_retry로 다시 세운다
+        retryable = (bool(kf_note) and not res.get("kf_systemic")
+                     and not res.get("kf_permanent"))
+        if retryable and res.get("txt_path"):
+            db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
+            notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
+            log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
+        else:
+            db.queue_set_status(v["id"], "done")
+            suffix = "(캡처 실패)" if kf_note else ""
+            notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
+    except ClaudeUnavailable as e:
+        # 지정된 요약 모델이 모두 실패한 경우(폴백까지 소진)
+        db.queue_defer(
+            v["id"], "요약 경로 재시도 대기", error_kind="llm_unavailable",
+            retry_after_seconds=_retry_delay(v.get("attempt_count")),
+            max_attempts=MAX_PIPELINE_ATTEMPTS,
+        )
+        notify(f"⛔ 요약 실패(모든 폴백 소진) — 다음 주기 재시도\n{head}\n{e}")
+    except Exception as e:
+        reason = str(e)[:120]
+        state = db.queue_defer(
+            v["id"], reason, error_kind="pipeline_transient",
+            retry_after_seconds=_retry_delay(v.get("attempt_count")),
+            max_attempts=MAX_PIPELINE_ATTEMPTS,
+        )
+        notify(
+            f"⚠️ 자동 처리 실패 — {'재시도 예약' if state == 'deferred' else '재시도 소진'}\n"
+            f"{head}\n{reason}\n{v['url']}"
+        )
 
 
 # ── 단일 인스턴스 락 + 진입점 ──────────────────────────────────────────

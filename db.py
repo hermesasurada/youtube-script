@@ -766,42 +766,59 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
         return cur.rowcount > 0
 
 
-def queue_next_pending() -> dict | None:
-    r = _conn().execute(
-        "SELECT * FROM watch_queue WHERE status = 'pending' ORDER BY id LIMIT 1"
-    ).fetchone()
-    return dict(r) if r else None
+def queue_claim_one() -> dict | None:
+    """단일 파이프라인의 유일한 인출구 — 신규(pending)든 캡처 재시도(kf_retry)든
+    들어온 순서(id)대로 가장 오래된 '한 건'만 원자적으로 집는다.
 
-
-def queue_claim_next() -> dict | None:
-    """Atomically claim the oldest pending item for the single pipeline worker."""
+    주기당 1건 처리 원칙의 핵심. 반환 dict의 원래 상태는 'claimed_from'에 담는다.
+    pending만 attempt_count를 올린다(kf_retry는 캡처 1회 재시도 의미라 종전대로 유지).
+    """
     with _lock:
         conn = _conn()
         conn.execute("BEGIN IMMEDIATE")
         try:
             row = conn.execute(
-                "SELECT * FROM watch_queue WHERE status = 'pending' ORDER BY id LIMIT 1"
-            ).fetchone()
+                "SELECT * FROM watch_queue WHERE status IN ('pending', 'kf_retry') "
+                "ORDER BY id LIMIT 1").fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 return None
             now = _now()
+            bump = 1 if row["status"] == "pending" else 0
             cur = conn.execute(
                 """UPDATE watch_queue
                       SET status = 'processing', claimed_at = ?, updated_at = ?,
-                          attempt_count = attempt_count + 1, next_retry_at = NULL
-                    WHERE id = ? AND status = 'pending'""",
-                (now, now, row["id"]),
+                          attempt_count = attempt_count + ?, next_retry_at = NULL
+                    WHERE id = ? AND status = ?""",
+                (now, now, bump, row["id"], row["status"]),
             )
             if cur.rowcount != 1:
                 conn.execute("ROLLBACK")
                 return None
-            claimed = conn.execute("SELECT * FROM watch_queue WHERE id = ?", (row["id"],)).fetchone()
+            claimed = conn.execute("SELECT * FROM watch_queue WHERE id = ?",
+                                   (row["id"],)).fetchone()
             conn.execute("COMMIT")
-            return dict(claimed)
+            out = dict(claimed)
+            out["claimed_from"] = row["status"]
+            return out
         except Exception:
             conn.execute("ROLLBACK")
             raise
+
+
+def queue_unclaim(qid: int) -> None:
+    """claim을 되돌린다 — 처리를 시작하지 못한 경우(요약 게이트 불가 등).
+
+    claim_one이 올린 attempt_count도 함께 되돌려, 시도하지 않은 주기가
+    재시도 예산을 갉아먹지 않게 한다.
+    """
+    with _lock:
+        _conn().execute(
+            """UPDATE watch_queue
+                  SET status = 'pending', claimed_at = NULL, updated_at = ?,
+                      attempt_count = MAX(0, attempt_count - 1)
+                WHERE id = ? AND status = 'processing'""",
+            (_now(), qid))
 
 
 def queue_set_status(qid: int, status: str, reason: str = "") -> None:
@@ -904,14 +921,6 @@ def queue_mark_kf_retry(qid: int, txt_path: str, reason: str = "") -> None:
             "WHERE id = ?",
             (txt_path, reason, _now(), qid),
         )
-
-
-def queue_kf_retry_list() -> list[dict]:
-    """캡처 재시도 대기(status='kf_retry') 항목 전체(id 순). drain 시작 시 스냅샷 용도."""
-    rows = _conn().execute(
-        "SELECT * FROM watch_queue WHERE status = 'kf_retry' ORDER BY id"
-    ).fetchall()
-    return [dict(r) for r in rows]
 
 
 def queue_counts() -> dict:

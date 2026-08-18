@@ -265,11 +265,12 @@ def test_queue_claim_and_stale_recovery(monkeypatch):
     conn.execute("DELETE FROM watch_queue")
     assert db.enqueue_video("claim-test", "https://youtu.be/claim-test", "claim", "UC1")
 
-    claimed = db.queue_claim_next()
+    claimed = db.queue_claim_one()
     assert claimed and claimed["yt_id"] == "claim-test"
     assert claimed["status"] == "processing"
+    assert claimed["claimed_from"] == "pending"
     assert claimed["attempt_count"] == 1
-    assert db.queue_claim_next() is None
+    assert db.queue_claim_one() is None
 
     old = (datetime.now() - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
@@ -443,9 +444,11 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
         "id": 1, "yt_id": "retry-test", "title": "retry", "url": "https://youtu.be/retry-test",
         "channel_id": "UC1", "txt_path": "/tmp/retry.md",
     }
-    monkeypatch.setattr(channel_monitor.db, "queue_kf_retry_list", lambda: [retry])
-    monkeypatch.setattr(channel_monitor.db, "queue_next_pending", lambda: None)
-    monkeypatch.setattr(channel_monitor.db, "queue_claim_next", lambda: None)
+    # 단일 인출구: kf_retry 건이 claim_one으로 나온다
+    monkeypatch.setattr(channel_monitor.db, "queue_claim_one",
+                        lambda: {**retry, "claimed_from": "kf_retry"})
+    monkeypatch.setattr(channel_monitor.db, "get_monitor_model_orders",
+                        lambda: {"summary": ["opus"], "capture": ["opus"]})
     monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)
     monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
     monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda: (True, "claude", ""))
