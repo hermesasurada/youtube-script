@@ -830,9 +830,13 @@ async function loadQueueM() {
     const d = await (await fetch('/queue/items')).json();
     const row = (v, i, movable) => {
       const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
-      const extra = v.status === 'deferred' && v.next_retry_at
-        ? `${v.next_retry_at.slice(5, 16)} 재시도`
-        : (v.attempt_count > 1 ? `시도 ${v.attempt_count}` : '');
+      const fmtEta = t => { const d = new Date(t * 1000);
+        return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+      const bits = [];
+      if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
+      if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
+      if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
+      const extra = bits.join(' · ');
       const ctl = movable ? `<span class="mq-ctl">
           <button onclick="mqMove(${v.id},'up')">↑</button>
           <button onclick="mqMove(${v.id},'down')">↓</button>

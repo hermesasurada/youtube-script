@@ -869,9 +869,13 @@ async function refreshQueueModal() {
     const row = (v, i, movable) => {
       const [label, cls] = _Q_STATUS[v.status] || [v.status, ''];
       const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
-      const extra = v.status === 'deferred' && v.next_retry_at
-        ? `<span class="q-extra">${_attrEsc(v.next_retry_at.slice(5, 16))} 재시도</span>`
-        : (v.attempt_count > 1 ? `<span class="q-extra">시도 ${v.attempt_count}</span>` : '');
+      const fmtEta = t => { const d = new Date(t * 1000);
+        return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+      const bits = [];
+      if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
+      if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
+      if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
+      const extra = bits.length ? `<span class="q-extra">${_attrEsc(bits.join(' · '))}</span>` : '';
       const ctl = movable ? `
         <span class="q-ctl">
           <button onclick="moveQueueItem(${v.id},'up')" title="위로">↑</button>

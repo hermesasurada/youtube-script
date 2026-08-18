@@ -1578,9 +1578,40 @@ def _oembed_title(url: str) -> str:
         return ""
 
 
+_MONITOR_LOCK  = os.path.expanduser(
+    os.environ.get("MONITOR_LOCK", "~/.hermes/youtube-monitor.lock"))
+_QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "1800"))
+
+
+def _attach_queue_eta(overview: dict) -> dict:
+    """대기 항목에 예정 시작 시각(eta, epoch초)을 붙인다.
+
+    모니터는 launchd 30분 주기라, 마지막 실행 시각(잠금 파일 mtime) + 주기의
+    배수로 다음 발화를 추정한다. 본편(pending)과 캡처(kf_retry)는 슬롯이
+    분리돼 있어 각자 순번 × 주기로 계산한다. deferred는 복귀 시점이 due에
+    달려 있어 예정을 확정할 수 없으므로 붙이지 않는다(재시도 시각만 표시).
+    """
+    now = time.time()
+    try:
+        base = os.path.getmtime(_MONITOR_LOCK)
+    except OSError:
+        base = now
+    while base <= now:
+        base += _QUEUE_CYCLE_SEC
+    n_main = n_kf = 0
+    for v in overview.get("waiting", []):
+        if v.get("status") == "pending":
+            v["eta"] = base + n_main * _QUEUE_CYCLE_SEC
+            n_main += 1
+        elif v.get("status") == "kf_retry":
+            v["eta"] = base + n_kf * _QUEUE_CYCLE_SEC
+            n_kf += 1
+    return overview
+
+
 @app.route("/queue/items")
 def queue_items():
-    return _json(db.queue_overview())
+    return _json(_attach_queue_eta(db.queue_overview()))
 
 
 @app.route("/queue/items", methods=["POST"])
