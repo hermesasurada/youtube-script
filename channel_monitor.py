@@ -354,6 +354,12 @@ def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
     for item in db.queue_due_deferred():
         channel = by_channel.get(item.get("channel_id"))
         if channel is not None and not channel.get("enabled"):
+            # 채널을 끄면 신규 감지만 멈추는 게 아니라 대기분도 정리한다 — 조용히
+            # 건너뛰면 항목이 영원히 deferred로 남는다(실례: NVIDIA Developer OFF 후
+            # 라이브 예정 건이 6일간 잔류). 다시 처리하려면 큐 팝업에서 재등록하면 된다.
+            log(f"[deferred] 채널 비활성 → 정리: {item['title'][:50]}")
+            if not dry:
+                db.queue_set_status(item["id"], "skipped", "채널 비활성(대기 중 정리)")
             continue
         if db.find_by_yt_id(item["yt_id"]):
             if not dry:
