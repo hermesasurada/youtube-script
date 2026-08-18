@@ -124,14 +124,30 @@ def chunk_body(body: str) -> list[str]:
 
 
 def _call(client, user: str, temperature: float, rep_penalty: float) -> tuple[str, str]:
-    r = client.chat.completions.create(
-        model=QWEN_MODEL,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                  {"role": "user", "content": user}],
-        max_tokens=MAX_TOKENS, temperature=temperature,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False},
-                    "repetition_penalty": rep_penalty},
-    )
+    # 네트워크 오류는 서버 재시작·일시 무응답이 대부분이라 잠깐 물러났다 다시 시도한다.
+    # (한 번의 connection error로 영상 전체가 영구 실패 처리된 사례가 있었다)
+    last = None
+    for i in range(3):
+        try:
+            r = client.chat.completions.create(
+                model=QWEN_MODEL,
+                messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                          {"role": "user", "content": user}],
+                max_tokens=MAX_TOKENS, temperature=temperature,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False},
+                            "repetition_penalty": rep_penalty},
+            )
+            break
+        except Exception as e:                       # noqa: BLE001
+            msg = str(e)
+            if i < 2 and ("Connection" in msg or "timeout" in msg.lower()):
+                log(f"  ↻ 서버 연결 실패 — 30초 뒤 재시도({i + 1}/2)")
+                time.sleep(30)
+                last = e
+                continue
+            raise
+    else:
+        raise last
     out = (r.choices[0].message.content or "").strip()
     if out.startswith("```"):                     # 가끔 코드펜스로 감싼다
         out = re.sub(r"^```[a-z]*\n?", "", out)

@@ -363,12 +363,17 @@ def translation_candidates(limit: int = 40, since_ts: float | None = None) -> li
     다시 후보에 올려 이어서 처리한다.
     since_ts를 주면 그보다 오래된 전사는 아예 후보에서 뺀다(자동 처리 하한).
     """
+    # failed 중에서도 연결 계열(서버 일시 무응답)은 6시간 뒤 후보로 복귀시킨다.
+    # 진짜 영구 오류(파싱 불가 등)는 계속 제외 — 무한 재시도를 막는다.
     sql = """SELECT i.yt_id, i.md_path, i.title, i.indexed_at
                FROM items i
                LEFT JOIN transcript_translation t ON t.yt_id = i.yt_id
               WHERE i.yt_id IS NOT NULL AND i.yt_id <> ''
                 AND i.md_path IS NOT NULL AND i.md_path <> ''
-                AND (t.status IS NULL OR t.status = 'processing')"""
+                AND (t.status IS NULL OR t.status = 'processing'
+                     OR (t.status = 'failed'
+                         AND (t.error LIKE '%Connection%' OR t.error LIKE '%timeout%')
+                         AND t.updated_at < datetime('now', '-6 hours')))"""
     args: list = []
     if since_ts is not None:
         sql += " AND i.indexed_at >= ?"
