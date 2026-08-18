@@ -631,14 +631,23 @@ def run_job(job_id: str, params: dict) -> None:
                         "youtube": {"player_client": ["tv_simply", "web_embedded"]}}
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([url])
+                # 스트림을 중간에 끊는 차단 변형은 yt-dlp가 예외 없이 끝난다
+                # (실례: 68분 영상이 6회 연속 5~7분에서 잘림). 길이가 크게 모자라면
+                # 잘린 파일을 지우고 403과 동일하게 다음 단계로 넘긴다.
+                if total > 0 and os.path.exists(audio_path):
+                    actual = get_file_duration(audio_path)
+                    if actual > 0 and actual < total * MIN_AUDIO_RATIO:
+                        os.remove(audio_path)
+                        raise Exception(
+                            f"HTTP Error 403(스트림 잘림): {actual:.0f}/{total:.0f}s")
                 break
             except Exception as e:
                 wait = _dl_retry_wait.get(dl_attempt)
                 if wait is None or "403" not in str(e) or stop.is_set():
                     raise
                 nxt = "대체 클라이언트" if dl_attempt == 2 else "새 세션"
-                log.info("download 403 — %s 후 %s으로 재시도(%d/2): %s",
-                         f"{wait}초" if wait else "즉시", nxt, dl_attempt, title)
+                log.info("download 403 — %s 후 %s으로 재시도(%d/2): %s (%s)",
+                         f"{wait}초" if wait else "즉시", nxt, dl_attempt, title, e)
                 q.put(f"403 차단 감지 — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도")
                 if wait:
                     for _ in range(wait):
