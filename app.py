@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime
@@ -793,6 +794,7 @@ def _restrict_remote_access():
     # 데이터/정적 엔드포인트는 그대로 허용 (/sframe = 요약 키프레임 이미지)
     if (p in _REMOTE_DATA_ALLOWED
             or p.startswith("/channels")   # 채널 자동 모니터 조회/토글(모바일 원격 관리)
+            or p.startswith("/queue/")     # 처리 큐 조회/추가/순서변경(원격 관리 허용)
             or p.startswith("/m/")
             or p.startswith("/static/")
             or p.startswith("/sframe/")
@@ -1553,6 +1555,70 @@ def save_prompt():
 
 
 # ── 채널 자동 모니터링(로컬 전용 — 원격은 before_request에서 차단) ──────
+# ── 처리 큐 (단일 파이프라인 관리) ────────────────────────────────────
+# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(30분에 1건 처리).
+
+_YT_ID_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?[^#]*v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
+
+
+def _extract_yt_id(url: str) -> str | None:
+    m = _YT_ID_RE.search(url or "")
+    return m.group(1) if m else None
+
+
+def _oembed_title(url: str) -> str:
+    """oEmbed로 제목만 가볍게 조회(실패해도 무방 — 처리 시점에 실제 메타로 채워진다)."""
+    try:
+        with urllib.request.urlopen(
+                "https://www.youtube.com/oembed?format=json&url="
+                + urllib.parse.quote(url, safe=""), timeout=8) as r:
+            return (json.loads(r.read()).get("title") or "").strip()
+    except Exception:
+        return ""
+
+
+@app.route("/queue/items")
+def queue_items():
+    return _json(db.queue_overview())
+
+
+@app.route("/queue/items", methods=["POST"])
+def queue_add():
+    url = (request.get_json(force=True) or {}).get("url", "").strip()
+    yt_id = _extract_yt_id(url)
+    if not yt_id:
+        return _json({"error": "유튜브 URL이 아닙니다."}, 400)
+    if db.get_item_by_yt_id(yt_id):
+        return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
+    title = _oembed_title(url) or url
+    added = db.enqueue_video(yt_id, f"https://www.youtube.com/watch?v={yt_id}",
+                             title, "manual")
+    if not added:
+        # 이미 큐에 있음 — 종료 상태(done/failed/skipped)면 재처리 요청으로 보고 되살린다
+        st = db.queue_status_of(yt_id)
+        if st in ("pending", "processing", "kf_retry", "deferred"):
+            return _json({"error": "이미 큐에 대기 중입니다.", "duplicate": "queue"}, 409)
+        db.queue_requeue(yt_id)
+    waiting = len(db.queue_overview()["waiting"])
+    return _json({"ok": True, "yt_id": yt_id, "title": title, "waiting": waiting})
+
+
+@app.route("/queue/items/<int:qid>/move", methods=["POST"])
+def queue_item_move(qid: int):
+    d = (request.get_json(force=True) or {}).get("direction", "")
+    if not db.queue_move(qid, d):
+        return _json({"error": "이동 불가(대기 항목이 아니거나 끝)"}, 400)
+    return _json({"ok": True})
+
+
+@app.route("/queue/items/<int:qid>", methods=["DELETE"])
+def queue_item_cancel(qid: int):
+    if not db.queue_cancel(qid):
+        return _json({"error": "취소 불가(대기 중이 아님)"}, 400)
+    return _json({"ok": True})
+
+
 @app.route("/channels")
 def channels_list():
     """모니터링 채널 목록 + 큐 요약(모달용)."""

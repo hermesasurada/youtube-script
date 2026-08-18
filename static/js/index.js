@@ -845,8 +845,118 @@ function copySummary() {
   });
 }
 
+/* ── 처리 큐 팝업 — 대기 목록 조회·순서 변경·취소 ── */
+const _Q_STATUS = {
+  processing: ['처리 중', 'q-st-run'], pending: ['대기', 'q-st-wait'],
+  kf_retry: ['캡처 재시도', 'q-st-wait'], deferred: ['재시도 예약', 'q-st-defer'],
+  done: ['완료', 'q-st-done'], failed: ['실패', 'q-st-fail'],
+};
+
+function openQueueModal() {
+  document.getElementById('queue-overlay').hidden = false;
+  document.body.style.overflow = 'hidden';
+  refreshQueueModal();
+}
+function closeQueueModal() {
+  document.getElementById('queue-overlay').hidden = true;
+  document.body.style.overflow = '';
+}
+
+async function refreshQueueModal() {
+  const body = document.getElementById('queue-modal-body');
+  try {
+    const d = await (await fetch('/queue/items')).json();
+    const row = (v, i, movable) => {
+      const [label, cls] = _Q_STATUS[v.status] || [v.status, ''];
+      const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
+      const extra = v.status === 'deferred' && v.next_retry_at
+        ? `<span class="q-extra">${_attrEsc(v.next_retry_at.slice(5, 16))} 재시도</span>`
+        : (v.attempt_count > 1 ? `<span class="q-extra">시도 ${v.attempt_count}</span>` : '');
+      const ctl = movable ? `
+        <span class="q-ctl">
+          <button onclick="moveQueueItem(${v.id},'up')" title="위로">↑</button>
+          <button onclick="moveQueueItem(${v.id},'down')" title="아래로">↓</button>
+          <button class="q-del" onclick="cancelQueueItem(${v.id})" title="취소">×</button>
+        </span>` : '';
+      return `<div class="q-row">
+        <span class="q-no">${i}</span>
+        <span class="q-st ${cls}">${label}</span>
+        <div class="q-main">
+          <div class="q-title">${_attrEsc(v.title || v.yt_id)}</div>
+          <div class="q-sub">${_attrEsc(ch)}${ch && extra ? ' · ' : ''}${extra}</div>
+        </div>${ctl}</div>`;
+    };
+    let n = 0;
+    const waiting = d.waiting.map(v => row(v, ++n,
+      v.status === 'pending' || v.status === 'kf_retry')).join('');
+    const recent = d.recent.map(v => row(v, '', false)).join('');
+    body.innerHTML =
+      `<div class="q-sec">대기 · ${d.waiting.length}건 <span class="q-hint">30분에 1건 처리</span></div>`
+      + (waiting || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
+      + (recent ? `<div class="q-sec">최근 처리</div>${recent}` : '');
+  } catch (e) {
+    body.innerHTML = `<div class="q-empty">불러오기 실패: ${_attrEsc(e.message)}</div>`;
+  }
+}
+
+async function moveQueueItem(id, direction) {
+  await fetch(`/queue/items/${id}/move`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({direction}),
+  });
+  refreshQueueModal();
+}
+
+async function cancelQueueItem(id) {
+  if (!confirm('이 영상을 큐에서 취소할까요?')) return;
+  await fetch(`/queue/items/${id}`, {method: 'DELETE'});
+  refreshQueueModal();
+}
+
 /* ── Start transcription ── */
+/* URL 전사는 서버 큐(watch_queue)에 줄을 선다 — 자동 모니터와 같은 파이프라인이
+   30분에 한 건씩 처리한다. 입력창 URL + 사이드바 대기열의 대기 항목을 전부 적재.
+   (파일 업로드는 유튜브와 무관하므로 종전대로 즉시 처리) */
+async function enqueueUrls() {
+  clearError();
+  const input = document.getElementById('url-input');
+  const urls = [];
+  if (input.value.trim()) urls.push(input.value.trim());
+  urlQueue.filter(i => i.status === 'waiting').forEach(i => {
+    if (!urls.includes(i.url)) urls.push(i.url);
+  });
+  if (!urls.length) { showError('URL을 입력해주세요.'); return; }
+
+  const logEl = document.getElementById('log-area');
+  switchTab('log');
+  const lines = [];
+  for (const u of urls) {
+    try {
+      const r = await fetch('/queue/items', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: u}),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        lines.push(`✅ 큐 등록 (대기 ${d.waiting}번째): ${d.title}`);
+        const qi = urlQueue.find(i => i.url === u);
+        if (qi) { urlQueue.splice(urlQueue.indexOf(qi), 1); }
+        if (input.value.trim() === u) input.value = '';
+      } else {
+        lines.push(`⚠️ ${d.error || '등록 실패'}: ${u}`);
+      }
+    } catch (e) {
+      lines.push(`⚠️ 서버 연결 실패: ${e.message}`);
+    }
+    logEl.textContent = lines.join('\n') +
+      '\n\n큐는 30분에 한 건씩 자동 처리됩니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
+  }
+  renderQueue();
+  openQueueModal();          // 등록 직후 현재 대기 순서를 바로 보여준다
+}
+
 async function startTranscription() {
+  if (currentSource === 'url') { await enqueueUrls(); return; }
   if (_queueLaunchTimer) {
     clearTimeout(_queueLaunchTimer);
     _queueLaunchTimer = null;

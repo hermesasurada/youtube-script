@@ -216,6 +216,8 @@
                 미읽음만
               </button>
               <button class="btn-sm btn-ghost" onclick="resetHistoryFilter()" title="검색 초기화">초기화</button>
+              <button class="btn-sm btn-ghost" onclick="openQueueModal()"
+                      title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
               <!-- 원격(이력 모드) 전용: 사이드바가 숨겨져 채널 관리 진입점이 없으므로 툴바에 노출 -->
               <button class="btn-sm btn-ghost remote-channels-btn" onclick="openChannelsModal()"
                       title="신규 영상 자동 전사·요약 채널 관리">📡 채널 모니터</button>
@@ -273,6 +275,19 @@
 </div>
 
 <!-- ═══ Transcript modal ═══ -->
+<!-- ═══ 처리 큐 modal ═══ -->
+<div class="sum-overlay" id="queue-overlay" hidden
+     onclick="if (event.target === this) closeQueueModal()">
+  <div class="sum-panel queue-panel">
+    <div class="sum-panel-hdr">
+      <span class="sum-panel-badge sum-panel-badge-alt">처리 큐</span>
+      <button class="btn-sm btn-ghost" onclick="refreshQueueModal()" title="새로고침">↻</button>
+      <button class="sum-panel-close" onclick="closeQueueModal()" title="닫기">×</button>
+    </div>
+    <div class="sum-panel-body" id="queue-modal-body"></div>
+  </div>
+</div>
+
 <div class="sum-overlay" id="trans-overlay" hidden onclick="handleTransOverlayClick(event)">
   <div class="sum-panel" id="trans-panel">
     <div class="sum-panel-hdr">

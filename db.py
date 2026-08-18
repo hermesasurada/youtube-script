@@ -263,6 +263,14 @@ def init() -> None:
                     updated_at   TEXT
                 )""")
             c.execute("PRAGMA user_version = 10")
+        if ver < 11:
+            # v11: 큐 순서 조정용 position. 기본은 id와 동일(FIFO)이며, 사용자가
+            # 순서를 바꾸면 position끼리 맞바꾼다. 인출은 position 오름차순.
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            if "position" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN position REAL")
+            c.execute("UPDATE watch_queue SET position = id WHERE position IS NULL")
+            c.execute("PRAGMA user_version = 11")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -755,7 +763,8 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
     with _lock:
         now = _now()
         next_retry_at = _after(retry_after_seconds) if retry_after_seconds is not None else None
-        cur = _conn().execute(
+        conn = _conn()
+        cur = conn.execute(
             """INSERT OR IGNORE INTO watch_queue
                  (yt_id, url, title, channel_id, status, reason, added_at, updated_at,
                   next_retry_at, error_kind)
@@ -763,6 +772,9 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
             (yt_id, url, title, channel_id, status, reason, now, now,
              next_retry_at, error_kind),
         )
+        if cur.rowcount > 0:                       # 새 행의 position = id (FIFO 기본)
+            conn.execute("UPDATE watch_queue SET position = id "
+                         "WHERE yt_id = ? AND position IS NULL", (yt_id,))
         return cur.rowcount > 0
 
 
@@ -779,7 +791,7 @@ def queue_claim_one() -> dict | None:
         try:
             row = conn.execute(
                 "SELECT * FROM watch_queue WHERE status IN ('pending', 'kf_retry') "
-                "ORDER BY id LIMIT 1").fetchone()
+                "ORDER BY COALESCE(position, id), id LIMIT 1").fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -804,6 +816,90 @@ def queue_claim_one() -> dict | None:
         except Exception:
             conn.execute("ROLLBACK")
             raise
+
+
+def get_item_by_yt_id(yt_id: str) -> dict | None:
+    r = _conn().execute("SELECT md_path, title FROM items WHERE yt_id = ? LIMIT 1",
+                        (yt_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def queue_status_of(yt_id: str) -> str | None:
+    r = _conn().execute("SELECT status FROM watch_queue WHERE yt_id = ?",
+                        (yt_id,)).fetchone()
+    return r["status"] if r else None
+
+
+def queue_requeue(yt_id: str) -> None:
+    """종료 상태(done/failed/skipped) 항목을 줄 맨 뒤 pending으로 되살린다(수동 재처리)."""
+    with _lock:
+        conn = _conn()
+        conn.execute(
+            """UPDATE watch_queue
+                  SET status = 'pending', reason = '', error_kind = NULL,
+                      attempt_count = 0, next_retry_at = NULL, claimed_at = NULL,
+                      position = (SELECT COALESCE(MAX(COALESCE(position, id)), 0) + 1
+                                    FROM watch_queue),
+                      updated_at = ?
+                WHERE yt_id = ? AND status IN ('done', 'failed', 'skipped')""",
+            (_now(), yt_id))
+
+
+def queue_overview(recent: int = 10) -> dict:
+    """큐 팝업용 스냅샷 — 대기·진행 전체(처리 순서대로) + 최근 종료 몇 건."""
+    conn = _conn()
+    waiting = [dict(r) for r in conn.execute(
+        """SELECT q.*, c.title AS channel_name FROM watch_queue q
+             LEFT JOIN channels c ON c.channel_id = q.channel_id
+            WHERE q.status IN ('processing', 'pending', 'kf_retry', 'deferred')
+            ORDER BY CASE q.status WHEN 'processing' THEN 0
+                                   WHEN 'pending' THEN 1
+                                   WHEN 'kf_retry' THEN 1 ELSE 2 END,
+                     COALESCE(q.position, q.id), q.id""")]
+    finished = [dict(r) for r in conn.execute(
+        """SELECT q.*, c.title AS channel_name FROM watch_queue q
+             LEFT JOIN channels c ON c.channel_id = q.channel_id
+            WHERE q.status IN ('done', 'failed')
+            ORDER BY q.updated_at DESC LIMIT ?""", (recent,))]
+    return {"waiting": waiting, "recent": finished}
+
+
+def queue_move(qid: int, direction: str) -> bool:
+    """대기(pending·kf_retry) 항목을 한 칸 위/아래로 — 이웃과 position 맞바꿈."""
+    if direction not in ("up", "down"):
+        return False
+    with _lock:
+        conn = _conn()
+        me = conn.execute(
+            "SELECT id, COALESCE(position, id) AS pos FROM watch_queue "
+            "WHERE id = ? AND status IN ('pending', 'kf_retry')", (qid,)).fetchone()
+        if me is None:
+            return False
+        cmp_, order = ("<", "DESC") if direction == "up" else (">", "ASC")
+        other = conn.execute(
+            f"""SELECT id, COALESCE(position, id) AS pos FROM watch_queue
+                 WHERE status IN ('pending', 'kf_retry')
+                   AND (COALESCE(position, id), id) {cmp_} (?, ?)
+                 ORDER BY COALESCE(position, id) {order}, id {order} LIMIT 1""",
+            (me["pos"], me["id"])).fetchone()
+        if other is None:
+            return False                            # 이미 맨 위/맨 아래
+        conn.execute("UPDATE watch_queue SET position = ? WHERE id = ?",
+                     (other["pos"], me["id"]))
+        conn.execute("UPDATE watch_queue SET position = ? WHERE id = ?",
+                     (me["pos"], other["id"]))
+        return True
+
+
+def queue_cancel(qid: int) -> bool:
+    """대기 중(pending·kf_retry·deferred) 항목만 취소 표시. 진행 중은 못 건드린다."""
+    with _lock:
+        cur = _conn().execute(
+            """UPDATE watch_queue
+                  SET status = 'skipped', reason = '사용자 취소', updated_at = ?
+                WHERE id = ? AND status IN ('pending', 'kf_retry', 'deferred')""",
+            (_now(), qid))
+        return cur.rowcount > 0
 
 
 def queue_unclaim(qid: int) -> None:
