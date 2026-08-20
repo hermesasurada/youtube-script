@@ -330,6 +330,11 @@ _META_PERMANENT_RE = re.compile(
 )
 
 
+# 다운로드 단계에서야 드러나는 '아직 방송 전' 신호(수동 추가 건은 사전 메타 확인이 없다)
+_LIVE_PENDING_RE = re.compile(
+    r"Premieres in|live event will begin|This live event|is upcoming|Scheduled for", re.I)
+
+
 def _defer_policy(reason: str) -> tuple[bool, int, int, str]:
     """Return retryable, delay seconds, max checks, normalized error kind."""
     if reason.startswith("live:is_upcoming"):
@@ -489,7 +494,8 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
                 txt_path = res.get("txt_path")
                 break
             if st in ("error", "cancelled"):
-                raise RuntimeError(f"전사 {st}")
+                detail = (res.get("error_message") or "").strip()
+                raise RuntimeError(f"전사 {st}" + (f": {detail[:160]}" if detail else ""))
         if not txt_path:
             raise RuntimeError("전사 시간초과")
         db.queue_set_txt_path(v["id"], txt_path)
@@ -675,7 +681,20 @@ def _drain_main_one(orders, capture_order) -> None:
         )
         notify(f"⛔ 요약 실패(모든 폴백 소진) — 다음 주기 재시도\n{head}\n{e}")
     except Exception as e:
-        reason = str(e)[:120]
+        reason = str(e)[:160]
+        # 라이브·프리미어 예정은 실패가 아니다 — 재시도 예산을 태우지 않고
+        # 방송 시작을 기다리는 라이브 재확인 경로로 보낸다(사용자 알림도 구분).
+        if _LIVE_PENDING_RE.search(reason):
+            db.queue_defer(
+                v["id"], reason, error_kind="live_upcoming",
+                retry_after_seconds=3600, max_attempts=None,
+            )
+            db.queue_bump_attempt(v["id"], -1)   # claim이 올린 시도 횟수 되돌림
+            notify(
+                f"📡 라이브/프리미어 예정 영상 — 방송 후 자동 처리 예정\n"
+                f"{head}\n{reason}\n{v['url']}"
+            )
+            return
         state = db.queue_defer(
             v["id"], reason, error_kind="pipeline_transient",
             retry_after_seconds=_retry_delay(v.get("attempt_count")),

@@ -963,6 +963,14 @@ def queue_move(qid: int, direction: str) -> bool:
         return True
 
 
+def queue_bump_attempt(qid: int, delta: int) -> None:
+    """attempt_count 보정 — 라이브 예정처럼 '시도로 치지 않을' 경우 claim의 +1을 되돌린다."""
+    with _lock:
+        _conn().execute(
+            "UPDATE watch_queue SET attempt_count = MAX(0, attempt_count + ?) WHERE id = ?",
+            (delta, qid))
+
+
 def queue_row(qid: int) -> dict | None:
     r = _conn().execute("SELECT * FROM watch_queue WHERE id = ?", (qid,)).fetchone()
     return dict(r) if r else None
