@@ -131,11 +131,15 @@ async function loadChannels() {
         : (c.min_duration != null
           ? ` <span class="channel-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
       const dis = c.distill == null ? true : !!c.distill;   // 기본은 증류 대상
+      const cap = c.capture == null ? true : !!c.capture;   // 기본은 캡처 포함
       return `<li class="channel-row">
         <div class="channel-meta">
           <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
           <span class="channel-sub">${esc(sub)}</span>
         </div>
+        <button class="channel-distill ${cap ? 'on' : ''}" role="switch" aria-checked="${cap}"
+                title="영상 캡처(키프레임) 포함 — 끄면 이 채널 영상은 요약만"
+                onclick="toggleChannelCapture(${c.id}, ${cap ? 'false' : 'true'}, this)">캡처</button>
         <button class="channel-distill ${dis ? 'on' : ''}" role="switch" aria-checked="${dis}"
                 title="지식증류(옵시디언 볼트) 대상 — 끄면 증류에서 제외"
                 onclick="toggleChannelDistill(${c.id}, ${dis ? 'false' : 'true'}, this)">증류</button>
@@ -150,6 +154,22 @@ async function loadChannels() {
     list.innerHTML = `<li class="channels-empty">오류: ${esc(e.message)}</li>`;
   }
 }
+async function toggleChannelCapture(id, enable, btn) {
+  btn.disabled = true;
+  try {
+    const d = await (await fetch('/channels/' + id, {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({capture: enable}),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    btn.classList.toggle('on', d.capture);
+    btn.setAttribute('aria-checked', String(d.capture));
+    btn.setAttribute('onclick', `toggleChannelCapture(${id}, ${d.capture ? 'false' : 'true'}, this)`);
+  } catch (e) {
+    alert('변경 실패: ' + e.message);
+  } finally { btn.disabled = false; }
+}
+
 async function toggleChannel(id, enable, btn) {
   btn.disabled = true;
   try {
@@ -917,7 +937,8 @@ async function qAddToQueue() {
   const r = await fetch('/queue/items', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _qPreview.yt_id,
-                          title: _qPreview.title}),
+                          title: _qPreview.title,
+                          capture: document.getElementById('q-add-capture').checked}),
   });
   const d = await r.json();
   const pv = document.getElementById('q-add-preview');
@@ -947,6 +968,7 @@ async function refreshQueueModal() {
       const bits = [];
       if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
       if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
+      if (v.capture === 0) bits.push('캡처 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.length ? `<span class="q-extra">${_attrEsc(bits.join(' · '))}</span>` : '';
       const ctl = movable ? `

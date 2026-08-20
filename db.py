@@ -271,6 +271,17 @@ def init() -> None:
                 c.execute("ALTER TABLE watch_queue ADD COLUMN position REAL")
             c.execute("UPDATE watch_queue SET position = id WHERE position IS NULL")
             c.execute("PRAGMA user_version = 11")
+        if ver < 12:
+            # v12: 영상 캡처(키프레임) 포함 여부.
+            # watch_queue.capture: 수동 추가 시 영상 단위 지정(NULL=채널 설정 따름)
+            # channels.capture:   채널별 기본값(1=포함)
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            if "capture" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN capture INTEGER")
+            ccols = {r[1] for r in c.execute("PRAGMA table_info(channels)").fetchall()}
+            if "capture" not in ccols:
+                c.execute("ALTER TABLE channels ADD COLUMN capture INTEGER NOT NULL DEFAULT 1")
+            c.execute("PRAGMA user_version = 12")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -755,7 +766,7 @@ def in_queue(yt_id: str) -> bool:
 def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
                   status: str = "pending", reason: str = "", *,
                   retry_after_seconds: int | float | None = None,
-                  error_kind: str = "") -> bool:
+                  error_kind: str = "", capture: bool | None = None) -> bool:
     """큐에 추가(yt_id UNIQUE라 중복이면 무시). 새로 넣었으면 True."""
     yt_id = (yt_id or "").strip()
     if not yt_id:
@@ -767,10 +778,11 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
         cur = conn.execute(
             """INSERT OR IGNORE INTO watch_queue
                  (yt_id, url, title, channel_id, status, reason, added_at, updated_at,
-                  next_retry_at, error_kind)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                  next_retry_at, error_kind, capture)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (yt_id, url, title, channel_id, status, reason, now, now,
-             next_retry_at, error_kind),
+             next_retry_at, error_kind,
+             None if capture is None else (1 if capture else 0)),
         )
         if cur.rowcount > 0:                       # 새 행의 position = id (FIFO 기본)
             conn.execute("UPDATE watch_queue SET position = id "
@@ -860,10 +872,13 @@ def queue_status_of(yt_id: str) -> str | None:
     return r["status"] if r else None
 
 
-def queue_requeue(yt_id: str) -> None:
+def queue_requeue(yt_id: str, capture: bool | None = None) -> None:
     """종료 상태(done/failed/skipped) 항목을 줄 맨 뒤 pending으로 되살린다(수동 재처리)."""
     with _lock:
         conn = _conn()
+        if capture is not None:
+            conn.execute("UPDATE watch_queue SET capture = ? WHERE yt_id = ?",
+                         (1 if capture else 0, yt_id))
         conn.execute(
             """UPDATE watch_queue
                   SET status = 'pending', reason = '', error_kind = NULL,
@@ -873,6 +888,30 @@ def queue_requeue(yt_id: str) -> None:
                       updated_at = ?
                 WHERE yt_id = ? AND status IN ('done', 'failed', 'skipped')""",
             (_now(), yt_id))
+
+
+def capture_enabled_for(v: dict) -> bool:
+    """이 큐 항목의 캡처 포함 여부 — 영상 단위 지정이 있으면 그것, 없으면 채널 설정.
+
+    미등록 채널(수동 추가 등)은 기본 포함. 증류의 override/channel 구조와 같다.
+    """
+    ov = v.get("capture")
+    if ov is not None:
+        return bool(ov)
+    cid = v.get("channel_id")
+    if cid:
+        r = _conn().execute("SELECT capture FROM channels WHERE channel_id = ?",
+                            (cid,)).fetchone()
+        if r is not None:
+            return bool(r["capture"])
+    return True
+
+
+def set_channel_capture(chan_id: int, enabled: bool) -> bool:
+    with _lock:
+        cur = _conn().execute("UPDATE channels SET capture = ? WHERE id = ?",
+                              (1 if enabled else 0, chan_id))
+        return cur.rowcount > 0
 
 
 def queue_overview(recent: int = 10) -> dict:

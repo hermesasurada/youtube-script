@@ -360,6 +360,8 @@
                      background: var(--text); color: var(--bg); }
     .mq-add button:disabled { opacity: .35; }
     .mq-add .mq-paste { background: var(--surface2); color: var(--text); padding: 0 .6rem; }
+    .mq-cap { display: flex; align-items: center; gap: .35rem; font-size: 11.5px;
+              color: var(--muted); margin: -.1rem 0 .4rem; }
     .mq-add-pv { min-height: 1em; margin-bottom: .6rem; font-size: 11.5px; }
     .mq-pv-wait { color: var(--muted); }
     .mq-pv-err { color: #dc2626; }
@@ -873,7 +875,8 @@ async function mqAdd() {
   $('mq-add-btn').disabled = true;
   const r = await fetch('/queue/items', {method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _mqPv.yt_id, title: _mqPv.title})});
+    body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _mqPv.yt_id, title: _mqPv.title,
+                          capture: $('mq-add-capture').checked})});
   const d = await r.json();
   if (d.ok) { $('mq-add-url').value = ''; _mqPv = null; loadQueueM(); }
   else $('mq-add-pv').innerHTML = `<span class="mq-pv-err">${attrEsc(d.error || '등록 실패')}</span>`;
@@ -891,6 +894,7 @@ async function loadQueueM() {
       const bits = [];
       if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
       if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
+      if (v.capture === 0) bits.push('캡처 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.join(' · ');
       const ctl = movable ? `<span class="mq-ctl">
@@ -910,6 +914,7 @@ async function loadQueueM() {
     body.innerHTML =
       `<div class="mq-add"><input type="url" id="mq-add-url" placeholder="https://youtu.be/..."
          oninput="mqPreviewDebounced()"><button class="mq-paste" onclick="mqPaste()" title="클립보드에서 붙여넣기">📋</button><button id="mq-add-btn" onclick="mqAdd()" disabled>추가</button></div>
+       <label class="mq-cap"><input type="checkbox" id="mq-add-capture" checked> 영상 캡처 포함</label>
        <div class="mq-add-pv" id="mq-add-pv"></div>`
       + `<p class="ch-hint">30분에 본편 1건 + 캡처 1건씩 처리됩니다.</p>`
       + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
@@ -1027,8 +1032,11 @@ async function loadChannels() {
         : (c.min_duration != null
           ? ` <span class="ch-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
       const dis = c.distill == null ? true : !!c.distill;   // 기본은 증류 대상
+      const cap = c.capture == null ? true : !!c.capture;   // 기본은 캡처 포함
       return `<div class="ch-row">
         <div class="ch-meta"><span class="ch-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span><span class="ch-sub">${esc(sub)}</span></div>
+        <button class="ch-distill ${cap ? 'on' : ''}" role="switch" aria-checked="${cap}"
+                aria-label="영상 캡처 포함" onclick="toggleChannelCapture(${c.id}, ${cap ? 'false' : 'true'}, this)">캡처</button>
         <button class="ch-distill ${dis ? 'on' : ''}" role="switch" aria-checked="${dis}"
                 aria-label="지식증류 대상" onclick="toggleChannelDistill(${c.id}, ${dis ? 'false' : 'true'}, this)">증류</button>
         <button class="ch-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
@@ -1042,6 +1050,23 @@ async function loadChannels() {
     body.innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
   }
 }
+/* 영상 캡처 토글 — 끄면 그 채널 신규 영상은 요약만 하고 키프레임을 만들지 않는다 */
+async function toggleChannelCapture(id, enable, btn) {
+  btn.disabled = true;
+  try {
+    const d = await (await fetch('/channels/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ capture: enable }),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    btn.classList.toggle('on', d.capture);
+    btn.setAttribute('aria-checked', String(d.capture));
+    btn.setAttribute('onclick', `toggleChannelCapture(${id}, ${d.capture ? 'false' : 'true'}, this)`);
+  } catch (e) {
+    alert('캡처 설정 실패: ' + e.message);
+  } finally { btn.disabled = false; }
+}
+
 /* 지식증류 대상 토글 — 끄면 증류 파이프라인이 그 채널 문서를 건너뛴다 */
 async function toggleChannelDistill(id, enable, btn) {
   btn.disabled = true;

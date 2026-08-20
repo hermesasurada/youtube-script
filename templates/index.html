@@ -22,71 +22,12 @@
 
 <div class="workspace">
 
-  <!-- ═══ Sidebar ═══ -->
-  <aside class="sidebar">
-
-    <!-- URL 전사는 서버 큐로 일원화 — 입력·대기열 UI는 큐 팝업 안에 있다 -->
-    <button class="btn-add-queue" onclick="openQueueModal()" title="처리 대기 목록 · URL 추가 · 순서 변경">
-      🕘 처리 큐 · URL 추가
-    </button>
-
-    <hr class="sep">
-
-    <div class="sidebar-spacer"></div>
-
-    <!-- 언어=auto, 스레드=8 고정 (옵션 UI 제거, 기본값 유지) -->
-    <input type="hidden" id="language" value="auto">
-    <input type="hidden" id="threads" value="8">
-
-    <div class="field">
-      <label>완료 후 동작</label>
-      <button class="onoff-btn on" id="auto-summarize-btn" onclick="toggleAutoSummarize()">
-        <span class="onoff-dot"></span>
-        <span class="onoff-label">AI 자동 요약</span>
-        <span class="onoff-state">ON</span>
-      </button>
-      <input type="checkbox" id="auto-summarize" checked style="display:none">
-      <button class="onoff-btn on" id="video-frames-btn" onclick="toggleVideoFrames()" title="요약에 영상 키프레임(자료성 캡처) 포함">
-        <span class="onoff-dot"></span>
-        <span class="onoff-label">영상 캡처 포함</span>
-        <span class="onoff-state">ON</span>
-      </button>
-      <input type="checkbox" id="video-frames" checked style="display:none">
-      <button class="prompt-edit-btn" type="button" onclick="openPromptModal()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-        요약 프롬프트 편집
-      </button>
-      <button class="prompt-edit-btn" type="button" onclick="openChannelsModal()" title="신규 영상 자동 전사·요약 채널 관리">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a10 10 0 0 0 10 10"/><circle cx="12" cy="12" r="3"/><path d="M22 12a10 10 0 0 0-10-10"/></svg>
-        채널 자동 모니터
-      </button>
-    </div>
-
-    <hr class="sep">
-
-    <!-- Progress -->
-    <div class="progress-section" id="progress-section">
-      <div class="duration-row" id="duration-row" style="display:none">
-        <span>영상 길이</span>
-        <strong id="duration-val">—</strong>
-      </div>
-      <div class="progress-label" id="progress-label">영상 정보 수집 중...</div>
-      <div class="progress-row">
-        <div class="progress-track">
-          <div class="progress-fill indeterminate" id="progress-fill"></div>
-        </div>
-        <span class="progress-pct" id="progress-pct">—</span>
-      </div>
-    </div>
-
-    <button class="btn-start" id="start-btn" onclick="startTranscription()">
-      전사 시작
-    </button>
-    <button class="btn-stop" id="stop-btn" onclick="stopTranscription()">
-      중지
-    </button>
-
-  </aside>
+  <!-- 사이드바 제거 — 수동 전사는 큐 팝업, 요약·캡처 설정은 큐/채널 단위로 이동.
+       아래 hidden input은 남은 JS 경로 호환용(요약은 항상 ON). -->
+  <input type="hidden" id="language" value="auto">
+  <input type="hidden" id="threads" value="8">
+  <input type="checkbox" id="auto-summarize" checked style="display:none">
+  <input type="checkbox" id="video-frames" checked style="display:none">
 
   <!-- ═══ Main ═══ -->
   <div class="main">
@@ -190,9 +131,10 @@
               <button class="btn-sm btn-ghost" onclick="resetHistoryFilter()" title="검색 초기화">초기화</button>
               <button class="btn-sm btn-ghost" onclick="openQueueModal()"
                       title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
-              <!-- 원격(이력 모드) 전용: 사이드바가 숨겨져 채널 관리 진입점이 없으므로 툴바에 노출 -->
-              <button class="btn-sm btn-ghost remote-channels-btn" onclick="openChannelsModal()"
+              <button class="btn-sm btn-ghost" onclick="openChannelsModal()"
                       title="신규 영상 자동 전사·요약 채널 관리">📡 채널 모니터</button>
+              <button class="btn-sm btn-ghost" onclick="openPromptModal()"
+                      title="요약 프롬프트 편집">✎ 프롬프트</button>
               <span class="history-count" id="history-count">—</span>
             </div>
           </div>
@@ -264,6 +206,9 @@
         <button class="q-paste-btn" id="q-paste-btn" onclick="qPasteUrl()" title="클립보드에서 붙여넣기">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
+        <label class="q-cap-toggle" title="이 영상의 요약에 키프레임 캡처를 포함할지">
+          <input type="checkbox" id="q-add-capture" checked> 캡처
+        </label>
         <button id="q-add-btn" onclick="qAddToQueue()" disabled>큐에 추가</button>
       </div>
       <div class="q-add-preview" id="q-add-preview"></div>

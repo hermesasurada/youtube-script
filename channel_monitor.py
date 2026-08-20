@@ -529,6 +529,11 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
 
     # 캡처(동기) — 요약은 이미 저장됨. 실패해도 항목은 완료(요약이 본체), systemic 여부만 표시
     kf_note, kf_systemic, kf_permanent = "", False, False
+    # 캡처 포함 여부: 영상 단위 지정 > 채널 설정 > 기본 포함(큐 밖 호출은 종전대로)
+    if not db.capture_enabled_for(v):
+        log("[kf] 캡처 제외 설정 — 건너뜀")
+        return {"txt_path": txt_path, "kf_note": "", "kf_systemic": False,
+                "kf_permanent": False, "kf_skipped": True}
     try:
         kf_body = {"txt_path": txt_path, "url": url}
         if capture_models is not None:
@@ -659,7 +664,7 @@ def _drain_main_one(orders, capture_order) -> None:
             log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
         else:
             db.queue_set_status(v["id"], "done")
-            suffix = "(캡처 실패)" if kf_note else ""
+            suffix = "(캡처 실패)" if kf_note else ("(캡처 제외)" if res.get("kf_skipped") else "")
             notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
     except ClaudeUnavailable as e:
         # 지정된 요약 모델이 모두 실패한 경우(폴백까지 소진)

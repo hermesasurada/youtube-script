@@ -1671,14 +1671,16 @@ def queue_add():
     if db.get_item_by_yt_id(yt_id):
         return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
     title = (data.get("title") or "").strip() or _oembed_meta(url).get("title") or url
+    capture = data.get("capture")            # 영상 단위 캡처 지정(None=기본 포함)
     added = db.enqueue_video(yt_id, f"https://www.youtube.com/watch?v={yt_id}",
-                             title, "manual")
+                             title, "manual",
+                             capture=None if capture is None else bool(capture))
     if not added:
         # 이미 큐에 있음 — 종료 상태(done/failed/skipped)면 재처리 요청으로 보고 되살린다
         st = db.queue_status_of(yt_id)
         if st in ("pending", "processing", "kf_retry", "deferred"):
             return _json({"error": "이미 큐에 대기 중입니다.", "duplicate": "queue"}, 409)
-        db.queue_requeue(yt_id)
+        db.queue_requeue(yt_id, capture=None if capture is None else bool(capture))
     waiting = len(db.queue_overview()["waiting"])
     return _json({"ok": True, "yt_id": yt_id, "title": title, "waiting": waiting})
 
@@ -1747,6 +1749,10 @@ def channel_toggle(cid: int):
         if not db.set_channel_distill(cid, bool(data["distill"])):
             return _json({"error": "채널을 찾을 수 없습니다."}, 404)
         out["distill"] = bool(data["distill"]); touched = True
+    if "capture" in data:
+        if not db.set_channel_capture(cid, bool(data["capture"])):
+            return _json({"error": "채널을 찾을 수 없습니다."}, 404)
+        out["capture"] = bool(data["capture"]); touched = True
     if not touched:
         return _json({"error": "변경할 항목이 없습니다(enabled/distill)."}, 400)
     return _json(out)
