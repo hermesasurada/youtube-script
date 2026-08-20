@@ -2329,3 +2329,13 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none;
 }
 .q-cap-toggle input { accent-color: var(--text); }
+.remote-mode .local-only { display: none; }
+.q-cap-chip {
+  flex: 0 0 auto; height: 32px; padding: 0 .7rem; font-size: 11.5px; font-weight: 700;
+  border: 1px solid var(--border); border-radius: 3px; background: var(--surface2);
+  color: var(--muted); cursor: pointer;
+}
+.q-cap-chip.on { color: var(--highlight, #2563eb); border-color: currentColor;
+                 background: var(--highlight-soft, rgba(37,99,235,.08)); }
+.q-ctl .q-cap-row { color: var(--muted); font-size: 10px; font-weight: 700; width: auto; padding: 0 .4rem; }
+.q-ctl .q-cap-row.on { color: var(--highlight, #2563eb); border-color: currentColor; }

@@ -360,6 +360,12 @@
                      background: var(--text); color: var(--bg); }
     .mq-add button:disabled { opacity: .35; }
     .mq-add .mq-paste { background: var(--surface2); color: var(--text); padding: 0 .6rem; }
+    .mq-cap-chip { height: 30px; padding: 0 .7rem; font-size: 11.5px; font-weight: 700;
+                   border: 1px solid var(--border); border-radius: var(--radius-sm);
+                   background: var(--surface2); color: var(--muted); margin: -.1rem 0 .4rem; }
+    .mq-cap-chip.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+    .mq-ctl .mq-cap-row { width: auto; padding: 0 .45rem; font-size: 10px; font-weight: 700; color: var(--muted); }
+    .mq-ctl .mq-cap-row.on { color: var(--highlight); border-color: var(--highlight); }
     .mq-cap { display: flex; align-items: center; gap: .35rem; font-size: 11.5px;
               color: var(--muted); margin: -.1rem 0 .4rem; }
     .mq-add-pv { min-height: 1em; margin-bottom: .6rem; font-size: 11.5px; }
@@ -876,7 +882,7 @@ async function mqAdd() {
   const r = await fetch('/queue/items', {method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _mqPv.yt_id, title: _mqPv.title,
-                          capture: $('mq-add-capture').checked})});
+                          capture: $('mq-add-capture-btn').classList.contains('on')})});
   const d = await r.json();
   if (d.ok) { $('mq-add-url').value = ''; _mqPv = null; loadQueueM(); }
   else $('mq-add-pv').innerHTML = `<span class="mq-pv-err">${attrEsc(d.error || '등록 실패')}</span>`;
@@ -897,10 +903,14 @@ async function loadQueueM() {
       if (v.capture === 0) bits.push('캡처 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.join(' · ');
-      const ctl = movable ? `<span class="mq-ctl">
+      const waitingRow = ['pending', 'kf_retry', 'deferred'].includes(v.status);
+      const capOn = v.capture !== 0;
+      const capBtn = waitingRow && v.status !== 'kf_retry'
+        ? `<button class="mq-cap-row ${capOn ? 'on' : ''}" onclick="mqToggleCapture(${v.id}, ${capOn ? 'false' : 'true'})">캡처</button>` : '';
+      const ctl = (movable || capBtn) ? `<span class="mq-ctl">${capBtn}${movable ? `
           <button onclick="mqMove(${v.id},'up')">↑</button>
           <button onclick="mqMove(${v.id},'down')">↓</button>
-          <button class="mq-del" onclick="mqCancel(${v.id})">×</button></span>` : '';
+          <button class="mq-del" onclick="mqCancel(${v.id})">×</button>` : ''}</span>` : '';
       return `<div class="mq-row">
         <span class="mq-st mq-${v.status}">${i ? i + ' · ' : ''}${_Q_ST[v.status] || v.status}</span>
         <div class="mq-main"><div class="mq-title">${attrEsc(v.title || v.yt_id)}</div>
@@ -914,7 +924,8 @@ async function loadQueueM() {
     body.innerHTML =
       `<div class="mq-add"><input type="url" id="mq-add-url" placeholder="https://youtu.be/..."
          oninput="mqPreviewDebounced()"><button class="mq-paste" onclick="mqPaste()" title="클립보드에서 붙여넣기">📋</button><button id="mq-add-btn" onclick="mqAdd()" disabled>추가</button></div>
-       <label class="mq-cap"><input type="checkbox" id="mq-add-capture" checked> 영상 캡처 포함</label>
+       <button type="button" class="mq-cap-chip on" id="mq-add-capture-btn" role="switch" aria-checked="true"
+               onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">영상 캡처 포함</button>
        <div class="mq-add-pv" id="mq-add-pv"></div>`
       + `<p class="ch-hint">30분에 본편 1건 + 캡처 1건씩 처리됩니다.</p>`
       + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
@@ -929,6 +940,11 @@ async function loadQueueM() {
   } catch (e) {
     body.innerHTML = `<div class="ch-empty">불러오기 실패: ${attrEsc(e.message)}</div>`;
   }
+}
+async function mqToggleCapture(id, enable) {
+  await fetch(`/queue/items/${id}`, {method: 'PATCH',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({capture: enable})});
+  loadQueueM();
 }
 async function mqMove(id, direction) {
   await fetch(`/queue/items/${id}/move`, {method: 'POST',

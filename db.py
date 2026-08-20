@@ -963,6 +963,16 @@ def queue_move(qid: int, direction: str) -> bool:
         return True
 
 
+def set_queue_capture(qid: int, enabled: bool) -> bool:
+    """대기 중(pending·kf_retry·deferred) 항목의 캡처 포함을 영상 단위로 지정."""
+    with _lock:
+        cur = _conn().execute(
+            """UPDATE watch_queue SET capture = ?, updated_at = ?
+                WHERE id = ? AND status IN ('pending', 'kf_retry', 'deferred')""",
+            (1 if enabled else 0, _now(), qid))
+        return cur.rowcount > 0
+
+
 def queue_cancel(qid: int) -> bool:
     """대기 중(pending·kf_retry·deferred) 항목만 취소 표시. 진행 중은 못 건드린다."""
     with _lock:

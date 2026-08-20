@@ -114,14 +114,26 @@ SUMMARY_DIR = os.path.join(RES_DIR, "summary")
 THUMB_DIR   = os.path.join(RES_DIR, "thumbs")
 AUDIO_EXT   = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".mp4", ".webm"}
 
-DEFAULT_PROMPT = """\
+PROMPT_FILE         = os.path.join(BASE_DIR, "prompt.txt")
+PROMPT_DEFAULT_FILE = os.path.join(BASE_DIR, "prompt_default.txt")   # '기본값으로 되돌리기'의 원본(repo 관리)
+
+_FALLBACK_PROMPT = """\
 YouTube 영상의 전사 텍스트를 구조화된 요약본으로 재작성해줘.
 ---
 전사 텍스트:
 {transcript}
 """
 
-PROMPT_FILE = os.path.join(BASE_DIR, "prompt.txt")
+
+def _default_prompt() -> str:
+    try:
+        with open(PROMPT_DEFAULT_FILE, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return _FALLBACK_PROMPT
+
+
+DEFAULT_PROMPT = _default_prompt()
 
 
 def _resolve_claude_bin() -> str:
@@ -1543,6 +1555,12 @@ def get_prompt():
     return _json({"prompt": DEFAULT_PROMPT})
 
 
+@app.route("/prompt/default")
+def get_default_prompt():
+    """'기본값으로 되돌리기'용 — repo에 저장된 스냅샷을 매번 새로 읽는다."""
+    return _json({"prompt": _default_prompt()})
+
+
 @app.route("/prompt", methods=["POST"])
 def save_prompt():
     data = request.get_json(force=True) or {}
@@ -1691,6 +1709,17 @@ def queue_item_move(qid: int):
     if not db.queue_move(qid, d):
         return _json({"error": "이동 불가(대기 항목이 아니거나 끝)"}, 400)
     return _json({"ok": True})
+
+
+@app.route("/queue/items/<int:qid>", methods=["PATCH"])
+def queue_item_update(qid: int):
+    """대기 항목의 영상 단위 설정 변경 — 현재는 캡처 포함 여부."""
+    data = request.get_json(force=True) or {}
+    if "capture" not in data:
+        return _json({"error": "변경할 항목이 없습니다."}, 400)
+    if not db.set_queue_capture(qid, bool(data["capture"])):
+        return _json({"error": "변경 불가(대기 중 항목이 아님)"}, 400)
+    return _json({"ok": True, "capture": bool(data["capture"])})
 
 
 @app.route("/queue/items/<int:qid>", methods=["DELETE"])

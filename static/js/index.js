@@ -29,6 +29,17 @@ function openPromptModal() {
   ta.selectionStart = ta.selectionEnd = ta.value.length;
 }
 
+async function restoreDefaultPrompt() {
+  const st = document.getElementById('save-status');
+  try {
+    const d = await (await fetch('/prompt/default')).json();
+    document.getElementById('prompt-text').value = d.prompt || '';
+    st.textContent = '기본값을 불러왔습니다 — 저장을 눌러야 반영됩니다.';
+  } catch (e) {
+    st.textContent = '기본값 로드 실패: ' + e.message;
+  }
+}
+
 function closePromptModal() {
   document.getElementById('prompt-overlay').hidden = true;
   document.body.style.overflow = '';
@@ -916,6 +927,12 @@ async function qPreview() {
   }
 }
 
+function qToggleAddCapture(btn) {
+  const on = !btn.classList.contains('on');
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-checked', String(on));
+}
+
 async function qPasteUrl() {
   const inp = document.getElementById('q-add-url');
   try {
@@ -938,7 +955,7 @@ async function qAddToQueue() {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _qPreview.yt_id,
                           title: _qPreview.title,
-                          capture: document.getElementById('q-add-capture').checked}),
+                          capture: document.getElementById('q-add-capture-btn').classList.contains('on')}),
   });
   const d = await r.json();
   const pv = document.getElementById('q-add-preview');
@@ -971,11 +988,17 @@ async function refreshQueueModal() {
       if (v.capture === 0) bits.push('캡처 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.length ? `<span class="q-extra">${_attrEsc(bits.join(' · '))}</span>` : '';
-      const ctl = movable ? `
-        <span class="q-ctl">
+      const waiting = ['pending', 'kf_retry', 'deferred'].includes(v.status);
+      const capOn = v.capture !== 0;      // NULL=채널/기본 따름(사실상 포함), 0=제외
+      const capBtn = waiting && v.status !== 'kf_retry'
+        ? `<button class="q-cap-row ${capOn ? 'on' : ''}" role="switch" aria-checked="${capOn}"
+                   onclick="toggleQueueCapture(${v.id}, ${capOn ? 'false' : 'true'})"
+                   title="이 영상의 캡처 포함/제외">캡처</button>` : '';
+      const ctl = (movable || capBtn) ? `
+        <span class="q-ctl">${capBtn}${movable ? `
           <button onclick="moveQueueItem(${v.id},'up')" title="위로">↑</button>
           <button onclick="moveQueueItem(${v.id},'down')" title="아래로">↓</button>
-          <button class="q-del" onclick="cancelQueueItem(${v.id})" title="취소">×</button>
+          <button class="q-del" onclick="cancelQueueItem(${v.id})" title="취소">×</button>` : ''}
         </span>` : '';
       return `<div class="q-row">
         <span class="q-no">${i}</span>
@@ -1000,6 +1023,14 @@ async function refreshQueueModal() {
   } catch (e) {
     body.innerHTML = `<div class="q-empty">불러오기 실패: ${_attrEsc(e.message)}</div>`;
   }
+}
+
+async function toggleQueueCapture(id, enable) {
+  await fetch(`/queue/items/${id}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({capture: enable}),
+  });
+  refreshQueueModal();
 }
 
 async function moveQueueItem(id, direction) {

@@ -133,7 +133,8 @@
                       title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
               <button class="btn-sm btn-ghost" onclick="openChannelsModal()"
                       title="신규 영상 자동 전사·요약 채널 관리">📡 채널 모니터</button>
-              <button class="btn-sm btn-ghost" onclick="openPromptModal()"
+              <!-- /prompt 는 원격 비허용(기존 정책) — 버튼도 로컬에서만 -->
+              <button class="btn-sm btn-ghost local-only" onclick="openPromptModal()"
                       title="요약 프롬프트 편집">✎ 프롬프트</button>
               <span class="history-count" id="history-count">—</span>
             </div>
@@ -206,9 +207,9 @@
         <button class="q-paste-btn" id="q-paste-btn" onclick="qPasteUrl()" title="클립보드에서 붙여넣기">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
-        <label class="q-cap-toggle" title="이 영상의 요약에 키프레임 캡처를 포함할지">
-          <input type="checkbox" id="q-add-capture" checked> 캡처
-        </label>
+        <button type="button" class="q-cap-chip on" id="q-add-capture-btn" role="switch"
+                aria-checked="true" onclick="qToggleAddCapture(this)"
+                title="이 영상의 요약에 키프레임 캡처를 포함할지">캡처</button>
         <button id="q-add-btn" onclick="qAddToQueue()" disabled>큐에 추가</button>
       </div>
       <div class="q-add-preview" id="q-add-preview"></div>
@@ -246,6 +247,8 @@
       <textarea id="prompt-text" spellcheck="false" placeholder="요약 프롬프트…"></textarea>
       <div class="prompt-warn" id="prompt-warn" hidden></div>
       <div class="prompt-modal-actions">
+        <button class="btn-sm btn-ghost" type="button" onclick="restoreDefaultPrompt()"
+                title="검증된 기본 프롬프트로 편집 내용을 교체(저장 전까지는 반영 안 됨)">↺ 기본값으로</button>
         <span class="save-status" id="save-status"></span>
         <button class="btn-sm btn-ghost" type="button" onclick="closePromptModal()">닫기</button>
         <button class="btn-sm btn-purple" type="button" onclick="savePromptFromModal()">저장</button>
