@@ -963,6 +963,11 @@ def queue_move(qid: int, direction: str) -> bool:
         return True
 
 
+def queue_row(qid: int) -> dict | None:
+    r = _conn().execute("SELECT * FROM watch_queue WHERE id = ?", (qid,)).fetchone()
+    return dict(r) if r else None
+
+
 def set_queue_capture(qid: int, enabled: bool) -> bool:
     """대기 중(pending·kf_retry·deferred) 항목의 캡처 포함을 영상 단위로 지정."""
     with _lock:

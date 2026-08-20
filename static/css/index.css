@@ -2339,3 +2339,4 @@ a.hist-card-uploader:hover { color: var(--highlight); }
                  background: var(--highlight-soft, rgba(37,99,235,.08)); }
 .q-ctl .q-cap-row { color: var(--muted); font-size: 10px; font-weight: 700; width: auto; padding: 0 .4rem; }
 .q-ctl .q-cap-row.on { color: var(--highlight, #2563eb); border-color: currentColor; }
+.q-ctl .q-requeue { width: auto; padding: 0 .55rem; font-size: 10.5px; font-weight: 700; }

@@ -19,6 +19,8 @@ async function loadSavedPrompt() {
 }
 
 function openPromptModal() {
+  if (IS_REMOTE && !document.getElementById('prompt-text').value) loadSavedPrompt();
+  _applyPromptReadonly();
   document.getElementById('prompt-warn').hidden = true;
   document.getElementById('save-status').textContent = '';
   document.getElementById('prompt-overlay').hidden = false;
@@ -27,6 +29,18 @@ function openPromptModal() {
   ta.focus();
   // 커서를 끝으로
   ta.selectionStart = ta.selectionEnd = ta.value.length;
+}
+
+function _applyPromptReadonly() {
+  // 원격에서는 조회만 허용 — 편집·저장·기본값 버튼을 감춘다
+  if (!IS_REMOTE) return;
+  const ta = document.getElementById('prompt-text');
+  ta.readOnly = true;
+  document.querySelectorAll('#prompt-panel .prompt-modal-actions button').forEach(b => {
+    if (!b.textContent.includes('닫기')) b.style.display = 'none';
+  });
+  document.querySelector('#prompt-panel .prompt-hint').textContent =
+    '원격 접속에서는 읽기 전용입니다 — 편집은 로컬에서.';
 }
 
 async function restoreDefaultPrompt() {
@@ -977,7 +991,7 @@ async function refreshQueueModal() {
   const body = document.getElementById('queue-modal-body');
   try {
     const d = await (await fetch('/queue/items')).json();
-    const row = (v, i, movable) => {
+    const row = (v, i, movable, extraCtl = '') => {
       const [label, cls] = _Q_STATUS[v.status] || [v.status, ''];
       const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
       const fmtEta = t => { const d = new Date(t * 1000);
@@ -994,8 +1008,8 @@ async function refreshQueueModal() {
         ? `<button class="q-cap-row ${capOn ? 'on' : ''}" role="switch" aria-checked="${capOn}"
                    onclick="toggleQueueCapture(${v.id}, ${capOn ? 'false' : 'true'})"
                    title="이 영상의 캡처 포함/제외">캡처</button>` : '';
-      const ctl = (movable || capBtn) ? `
-        <span class="q-ctl">${capBtn}${movable ? `
+      const ctl = (movable || capBtn || extraCtl) ? `
+        <span class="q-ctl">${capBtn}${extraCtl}${movable ? `
           <button onclick="moveQueueItem(${v.id},'up')" title="위로">↑</button>
           <button onclick="moveQueueItem(${v.id},'down')" title="아래로">↓</button>
           <button class="q-del" onclick="cancelQueueItem(${v.id})" title="취소">×</button>` : ''}
@@ -1014,7 +1028,11 @@ async function refreshQueueModal() {
     let n = 0, k = 0;
     const mainRows = main.map(v => row(v, ++n, v.status === 'pending')).join('');
     const kfRows   = kf.map(v => row(v, ++k, true)).join('');
-    const recent = d.recent.map(v => row(v, '', false)).join('');
+    // 최종 실패 건은 재시도 초기화 후 큐 맨 뒤로 복귀시킬 수 있다
+    const recent = d.recent.map(v => row(v, '', false,
+      v.status === 'failed'
+        ? `<button class="q-requeue" title="재시도 초기화 후 큐 복귀" onclick="requeueItem(${v.id})">↻ 복귀</button>`
+        : '')).join('');
     body.innerHTML =
       `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">30분에 1건 처리</span></div>`
       + (mainRows || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
@@ -1023,6 +1041,13 @@ async function refreshQueueModal() {
   } catch (e) {
     body.innerHTML = `<div class="q-empty">불러오기 실패: ${_attrEsc(e.message)}</div>`;
   }
+}
+
+async function requeueItem(id) {
+  const r = await fetch(`/queue/items/${id}/requeue`, {method: 'POST'});
+  const d = await r.json();
+  if (!d.ok) alert(d.error || '복귀 실패');
+  refreshQueueModal();
 }
 
 async function toggleQueueCapture(id, enable) {

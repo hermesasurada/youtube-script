@@ -133,9 +133,8 @@
                       title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
               <button class="btn-sm btn-ghost" onclick="openChannelsModal()"
                       title="신규 영상 자동 전사·요약 채널 관리">📡 채널 모니터</button>
-              <!-- /prompt 는 원격 비허용(기존 정책) — 버튼도 로컬에서만 -->
-              <button class="btn-sm btn-ghost local-only" onclick="openPromptModal()"
-                      title="요약 프롬프트 편집">✎ 프롬프트</button>
+              <button class="btn-sm btn-ghost" onclick="openPromptModal()"
+                      title="요약 프롬프트 (원격에서는 읽기 전용)">✎ 프롬프트</button>
               <span class="history-count" id="history-count">—</span>
             </div>
           </div>

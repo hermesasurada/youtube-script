@@ -803,6 +803,9 @@ def _restrict_remote_access():
     if request.remote_addr in _LOOPBACK:
         return
     p = request.path
+    # 프롬프트는 원격에서 '읽기'만 허용(편집·저장은 로컬 전용)
+    if p == "/prompt" and request.method == "GET":
+        return
     # 데이터/정적 엔드포인트는 그대로 허용 (/sframe = 요약 키프레임 이미지)
     if (p in _REMOTE_DATA_ALLOWED
             or p.startswith("/channels")   # 채널 자동 모니터 조회/토글(모바일 원격 관리)
@@ -1708,6 +1711,20 @@ def queue_item_move(qid: int):
     d = (request.get_json(force=True) or {}).get("direction", "")
     if not db.queue_move(qid, d):
         return _json({"error": "이동 불가(대기 항목이 아니거나 끝)"}, 400)
+    return _json({"ok": True})
+
+
+@app.route("/queue/items/<int:qid>/requeue", methods=["POST"])
+def queue_item_requeue(qid: int):
+    """종료 상태(failed/done/skipped) 항목을 재시도 초기화 후 줄 맨 뒤로 복귀."""
+    r = db.queue_row(qid)
+    if not r:
+        return _json({"error": "항목이 없습니다."}, 404)
+    if r["status"] not in ("failed", "done", "skipped"):
+        return _json({"error": "종료 상태 항목만 복귀할 수 있습니다."}, 400)
+    if db.get_item_by_yt_id(r["yt_id"]):
+        return _json({"error": "이미 전사된 영상입니다(이력 확인)."}, 409)
+    db.queue_requeue(r["yt_id"])
     return _json({"ok": True})
 
 

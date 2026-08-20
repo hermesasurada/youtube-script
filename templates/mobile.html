@@ -364,6 +364,7 @@
                    border: 1px solid var(--border); border-radius: var(--radius-sm);
                    background: var(--surface2); color: var(--muted); margin: -.1rem 0 .4rem; }
     .mq-cap-chip.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+    .mq-ctl .mq-requeue { width: auto; padding: 0 .5rem; font-size: 12px; }
     .mq-ctl .mq-cap-row { width: auto; padding: 0 .45rem; font-size: 10px; font-weight: 700; color: var(--muted); }
     .mq-ctl .mq-cap-row.on { color: var(--highlight); border-color: var(--highlight); }
     .mq-cap { display: flex; align-items: center; gap: .35rem; font-size: 11.5px;
@@ -893,7 +894,7 @@ async function loadQueueM() {
   body.innerHTML = '<div class="ch-empty">불러오는 중…</div>';
   try {
     const d = await (await fetch('/queue/items')).json();
-    const row = (v, i, movable) => {
+    const row = (v, i, movable, extraCtl = '') => {
       const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
       const fmtEta = t => { const d = new Date(t * 1000);
         return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
@@ -907,7 +908,7 @@ async function loadQueueM() {
       const capOn = v.capture !== 0;
       const capBtn = waitingRow && v.status !== 'kf_retry'
         ? `<button class="mq-cap-row ${capOn ? 'on' : ''}" onclick="mqToggleCapture(${v.id}, ${capOn ? 'false' : 'true'})">캡처</button>` : '';
-      const ctl = (movable || capBtn) ? `<span class="mq-ctl">${capBtn}${movable ? `
+      const ctl = (movable || capBtn || extraCtl) ? `<span class="mq-ctl">${capBtn}${extraCtl}${movable ? `
           <button onclick="mqMove(${v.id},'up')">↑</button>
           <button onclick="mqMove(${v.id},'down')">↓</button>
           <button class="mq-del" onclick="mqCancel(${v.id})">×</button>` : ''}</span>` : '';
@@ -934,12 +935,19 @@ async function loadQueueM() {
       + (kf.length ? `<div class="mq-sec">캡처 재시도 · ${kf.length}건</div>`
          + kf.map(v => row(v, ++k, true)).join('') : '')
       + (d.recent.length ? `<div class="mq-sec">최근 처리</div>`
-         + d.recent.map(v => row(v, '', false)).join('') : '');
+         + d.recent.map(v => row(v, '', false,
+             v.status === 'failed'
+               ? `<button class="mq-requeue" onclick="mqRequeue(${v.id})">↻</button>` : '')).join('') : '');
     if (keepUrl) { $('mq-add-url').value = keepUrl; $('mq-add-pv').innerHTML = keepPv;
       if (_mqPv) $('mq-add-btn').disabled = false; }
   } catch (e) {
     body.innerHTML = `<div class="ch-empty">불러오기 실패: ${attrEsc(e.message)}</div>`;
   }
+}
+async function mqRequeue(id) {
+  const d = await (await fetch(`/queue/items/${id}/requeue`, {method: 'POST'})).json();
+  if (!d.ok) alert(d.error || '복귀 실패');
+  loadQueueM();
 }
 async function mqToggleCapture(id, enable) {
   await fetch(`/queue/items/${id}`, {method: 'PATCH',
