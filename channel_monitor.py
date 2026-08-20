@@ -489,6 +489,10 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
         while time.time() < deadline:
             time.sleep(POLL_SEC)
             res = requests.get(f"{BASE}/result/{job_id}", timeout=30).json()
+            # 서버가 재시작되면 잡 상태가 소실돼 404("Not found")가 온다 — status가
+            # 영영 안 나오므로 여기서 끊지 않으면 MAX_JOB_SEC(5h)까지 헛폴링한다.
+            if res.get("error") == "Not found":
+                raise RuntimeError("전사 잡 소실(서버 재시작) — 재시도 필요")
             st = res.get("status")
             if st == "done":
                 txt_path = res.get("txt_path")
