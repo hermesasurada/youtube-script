@@ -2299,3 +2299,24 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .q-ctl button:hover { background: var(--surface); border-color: var(--border-strong, var(--border)); }
 .q-ctl .q-del { color: #dc2626; }
 .q-empty { padding: 1rem .3rem; color: var(--muted); font-size: 12.5px; }
+
+/* ── 큐 팝업 URL 추가 폼 ── */
+.q-add { display: flex; gap: .45rem; margin-bottom: .45rem; }
+.q-add input {
+  flex: 1; height: 32px; padding: 0 .7rem; font: inherit; font-size: 12.5px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--surface); color: var(--text); outline: none;
+}
+.q-add input:focus { border-color: var(--border-strong, var(--border)); }
+.q-add button {
+  height: 32px; padding: 0 .9rem; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+  background: var(--text); color: var(--bg);
+}
+.q-add button:disabled { opacity: .35; cursor: default; }
+.q-add-preview { min-height: 1.1em; margin-bottom: .8rem; font-size: 12px; }
+.q-pv-wait { color: var(--muted); }
+.q-pv-err  { color: #dc2626; }
+.q-pv-done { color: #16a34a; }
+.q-pv-ok b { display: block; font-size: 12.5px; line-height: 1.4; }
+.q-pv-ok span { color: var(--muted); font-size: 11.5px; }

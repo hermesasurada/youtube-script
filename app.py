@@ -1567,15 +1567,38 @@ def _extract_yt_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _oembed_title(url: str) -> str:
-    """oEmbed로 제목만 가볍게 조회(실패해도 무방 — 처리 시점에 실제 메타로 채워진다)."""
+def _oembed_meta(url: str) -> dict:
+    """oEmbed로 제목·채널명을 가볍게 조회(미디어 서버를 건드리지 않아 차단 위험 없음)."""
     try:
         with urllib.request.urlopen(
                 "https://www.youtube.com/oembed?format=json&url="
                 + urllib.parse.quote(url, safe=""), timeout=8) as r:
-            return (json.loads(r.read()).get("title") or "").strip()
+            d = json.loads(r.read())
+            return {"title": (d.get("title") or "").strip(),
+                    "channel": (d.get("author_name") or "").strip()}
     except Exception:
-        return ""
+        return {}
+
+
+@app.route("/queue/preview")
+def queue_preview():
+    """URL의 메타(제목·채널)와 중복 여부 — 큐 팝업의 추가 폼이 사용."""
+    url = (request.args.get("url") or "").strip()
+    yt_id = _extract_yt_id(url)
+    if not yt_id:
+        return _json({"error": "유튜브 URL이 아닙니다."}, 400)
+    meta = _oembed_meta(url)
+    if not meta.get("title"):
+        return _json({"error": "영상 정보를 가져올 수 없습니다(비공개·삭제 여부 확인)."}, 404)
+    dup = None
+    if db.get_item_by_yt_id(yt_id):
+        dup = "history"
+    else:
+        st = db.queue_status_of(yt_id)
+        if st in ("pending", "processing", "kf_retry", "deferred"):
+            dup = "queue"
+    return _json({"ok": True, "yt_id": yt_id, "title": meta["title"],
+                  "channel": meta.get("channel") or "", "duplicate": dup})
 
 
 _MONITOR_LOCK  = os.path.expanduser(
@@ -1598,12 +1621,36 @@ def _attach_queue_eta(overview: dict) -> dict:
         base = now
     while base <= now:
         base += _QUEUE_CYCLE_SEC
-    n_main = n_kf = 0
-    for v in overview.get("waiting", []):
-        if v.get("status") == "pending":
-            v["eta"] = base + n_main * _QUEUE_CYCLE_SEC
-            n_main += 1
-        elif v.get("status") == "kf_retry":
+
+    def _epoch(ts: str) -> float:
+        try:
+            return time.mktime(time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            return float("inf")
+
+    waiting = overview.get("waiting", [])
+    # 본편 슬롯 시뮬레이션: 주기마다 '그 시점까지 줄에 선 항목'(pending +
+    # 복귀 시각이 지난 deferred) 중 position이 가장 앞선 것이 처리된다.
+    # deferred는 due가 돼야 복귀하므로, 단순 순번 곱으로는 순서가 어긋난다
+    # (재시도 간격 30분과 주기 30분이 같은 박자라 자주 겹친다).
+    main = [v for v in waiting if v.get("status") in ("pending", "deferred")]
+    remain = list(main)
+    t = base
+    # ready가 없는 주기(예: 재시도 예약이 발화보다 몇 초 늦은 경우)는 배정 없이
+    # 지나가므로, 항목 수가 아니라 '남은 항목이 있는 동안' 주기를 소비한다.
+    for _ in range(len(main) * 4 + 8):
+        if not remain:
+            break
+        ready = [v for v in remain
+                 if v["status"] == "pending" or _epoch(v.get("next_retry_at") or "") <= t]
+        if ready:
+            pick = min(ready, key=lambda v: (v.get("position") or v["id"], v["id"]))
+            pick["eta"] = t
+            remain.remove(pick)
+        t += _QUEUE_CYCLE_SEC
+    n_kf = 0
+    for v in waiting:
+        if v.get("status") == "kf_retry":
             v["eta"] = base + n_kf * _QUEUE_CYCLE_SEC
             n_kf += 1
     return overview
@@ -1616,13 +1663,14 @@ def queue_items():
 
 @app.route("/queue/items", methods=["POST"])
 def queue_add():
-    url = (request.get_json(force=True) or {}).get("url", "").strip()
+    data = request.get_json(force=True) or {}
+    url = (data.get("url") or "").strip()
     yt_id = _extract_yt_id(url)
     if not yt_id:
         return _json({"error": "유튜브 URL이 아닙니다."}, 400)
     if db.get_item_by_yt_id(yt_id):
         return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
-    title = _oembed_title(url) or url
+    title = (data.get("title") or "").strip() or _oembed_meta(url).get("title") or url
     added = db.enqueue_video(yt_id, f"https://www.youtube.com/watch?v={yt_id}",
                              title, "manual")
     if not added:

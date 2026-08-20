@@ -857,6 +857,65 @@ function openQueueModal() {
   document.body.style.overflow = 'hidden';
   refreshQueueModal();
 }
+
+/* URL 추가 폼 — 메타(제목·채널)가 확인돼야 추가 버튼이 활성화된다 */
+let _qPreviewTimer = null;
+let _qPreview = null;          // {yt_id, title, channel} | null
+
+function qPreviewDebounced() {
+  clearTimeout(_qPreviewTimer);
+  _qPreviewTimer = setTimeout(qPreview, 350);
+}
+
+async function qPreview() {
+  const url = document.getElementById('q-add-url').value.trim();
+  const btn = document.getElementById('q-add-btn');
+  const pv  = document.getElementById('q-add-preview');
+  _qPreview = null;
+  btn.disabled = true;
+  if (!url) { pv.innerHTML = ''; return; }
+  pv.innerHTML = '<span class="q-pv-wait">영상 정보 확인 중…</span>';
+  try {
+    const d = await (await fetch('/queue/preview?url=' + encodeURIComponent(url))).json();
+    // 확인하는 사이 입력이 바뀌었으면 결과를 버린다
+    if (document.getElementById('q-add-url').value.trim() !== url) return;
+    if (!d.ok) { pv.innerHTML = `<span class="q-pv-err">${_attrEsc(d.error || '조회 실패')}</span>`; return; }
+    if (d.duplicate === 'history') {
+      pv.innerHTML = `<span class="q-pv-err">이미 전사된 영상입니다 — ${_attrEsc(d.title)}</span>`;
+      return;
+    }
+    if (d.duplicate === 'queue') {
+      pv.innerHTML = `<span class="q-pv-err">이미 큐에 대기 중입니다 — ${_attrEsc(d.title)}</span>`;
+      return;
+    }
+    _qPreview = d;
+    pv.innerHTML = `<div class="q-pv-ok"><b>${_attrEsc(d.title)}</b><span>${_attrEsc(d.channel || '')}</span></div>`;
+    btn.disabled = false;
+  } catch (e) {
+    pv.innerHTML = `<span class="q-pv-err">조회 실패: ${_attrEsc(e.message)}</span>`;
+  }
+}
+
+async function qAddToQueue() {
+  if (!_qPreview) return;
+  const btn = document.getElementById('q-add-btn');
+  btn.disabled = true;
+  const r = await fetch('/queue/items', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _qPreview.yt_id,
+                          title: _qPreview.title}),
+  });
+  const d = await r.json();
+  const pv = document.getElementById('q-add-preview');
+  if (d.ok) {
+    pv.innerHTML = `<span class="q-pv-done">✅ 큐 등록 (대기 ${d.waiting}번째) — ${_attrEsc(_qPreview.title)}</span>`;
+    document.getElementById('q-add-url').value = '';
+    _qPreview = null;
+    refreshQueueModal();
+  } else {
+    pv.innerHTML = `<span class="q-pv-err">${_attrEsc(d.error || '등록 실패')}</span>`;
+  }
+}
 function closeQueueModal() {
   document.getElementById('queue-overlay').hidden = true;
   document.body.style.overflow = '';
@@ -964,7 +1023,7 @@ async function enqueueUrls() {
 }
 
 async function startTranscription() {
-  if (currentSource === 'url') { await enqueueUrls(); return; }
+  if (currentSource === 'url') { openQueueModal(); return; }   // URL 전사는 큐 팝업에서
   if (_queueLaunchTimer) {
     clearTimeout(_queueLaunchTimer);
     _queueLaunchTimer = null;
@@ -1498,7 +1557,7 @@ function buildPayload() {
 }
 
 /* ── Enter key (URL mode only) ── */
-document.getElementById('url-input').addEventListener('keydown', (e) => {
+document.getElementById('url-input')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && currentSource === 'url') startTranscription();
 });
 
@@ -1656,6 +1715,7 @@ const _ERROR_STAGE_LABELS = {
 };
 
 function renderQueue() {
+  if (!document.getElementById('queue-list')) return;   // 사이드바 대기열 UI 제거됨(서버 큐로 일원화)
   const list    = document.getElementById('queue-list');
   const countEl = document.getElementById('queue-count');
   const waiting = urlQueue.filter(i => i.status === 'waiting').length;

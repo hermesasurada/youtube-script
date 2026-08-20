@@ -25,38 +25,10 @@
   <!-- ═══ Sidebar ═══ -->
   <aside class="sidebar">
 
-    <div id="url-section">
-      <div class="field">
-        <label>YouTube URL</label>
-        <div class="url-wrap">
-          <input type="text" id="url-input" placeholder="https://youtu.be/..." />
-          <button class="btn-paste" id="paste-btn" onclick="pasteUrl()" title="클립보드에서 붙여넣기">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          <button class="btn-copy-url" id="copy-url-btn" onclick="copyUrl()" title="URL 복사">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </button>
-        </div>
-      </div>
-      <button class="btn-add-queue" id="add-queue-btn" onclick="addToQueue()" title="현재 URL을 대기열에 추가">
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        대기열에 추가
-      </button>
-      <div class="queue-section" id="queue-section">
-        <div class="queue-hdr">
-          <span class="queue-hdr-label">대기열</span>
-          <span class="queue-count-badge" id="queue-count">0</span>
-          <button class="queue-clear-btn" onclick="clearQueue()">전체삭제</button>
-        </div>
-        <ul class="queue-list" id="queue-list"></ul>
-        <div class="queue-footer">
-          <button class="queue-export-btn" id="queue-export-btn" onclick="copyQueue()" title="대기열 URL과 정보를 클립보드로 복사">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            <span id="queue-export-label">클립보드로 내보내기</span>
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- URL 전사는 서버 큐로 일원화 — 입력·대기열 UI는 큐 팝업 안에 있다 -->
+    <button class="btn-add-queue" onclick="openQueueModal()" title="처리 대기 목록 · URL 추가 · 순서 변경">
+      🕘 처리 큐 · URL 추가
+    </button>
 
     <hr class="sep">
 
@@ -284,7 +256,16 @@
       <button class="btn-sm btn-ghost" onclick="refreshQueueModal()" title="새로고침">↻</button>
       <button class="sum-panel-close" onclick="closeQueueModal()" title="닫기">×</button>
     </div>
-    <div class="sum-panel-body" id="queue-modal-body"></div>
+    <div class="sum-panel-body">
+      <!-- URL 추가: 메타(제목·채널)가 확인되면 버튼이 활성화된다 -->
+      <div class="q-add">
+        <input type="text" id="q-add-url" placeholder="https://youtu.be/... 붙여넣기"
+               oninput="qPreviewDebounced()" onpaste="setTimeout(qPreviewDebounced, 50)">
+        <button id="q-add-btn" onclick="qAddToQueue()" disabled>큐에 추가</button>
+      </div>
+      <div class="q-add-preview" id="q-add-preview"></div>
+      <div id="queue-modal-body"></div>
+    </div>
   </div>
 </div>
 
