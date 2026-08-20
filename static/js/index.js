@@ -896,6 +896,20 @@ async function qPreview() {
   }
 }
 
+async function qPasteUrl() {
+  const inp = document.getElementById('q-add-url');
+  try {
+    const text = await navigator.clipboard.readText();
+    inp.value = (text || '').trim();
+    qPreviewDebounced();
+  } catch (e) {
+    // 원격(http)에서는 clipboard 읽기가 막힌다 — 입력창에 직접 붙여넣도록 포커스만
+    inp.focus();
+    document.getElementById('q-add-preview').innerHTML =
+      '<span class="q-pv-wait">이 환경에선 자동 붙여넣기가 막혀 있습니다 — 입력창에 직접 붙여넣어 주세요.</span>';
+  }
+}
+
 async function qAddToQueue() {
   if (!_qPreview) return;
   const btn = document.getElementById('q-add-btn');

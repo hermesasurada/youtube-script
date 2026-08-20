@@ -359,6 +359,7 @@
                      border: 1px solid var(--border); border-radius: var(--radius-sm);
                      background: var(--text); color: var(--bg); }
     .mq-add button:disabled { opacity: .35; }
+    .mq-add .mq-paste { background: var(--surface2); color: var(--text); padding: 0 .6rem; }
     .mq-add-pv { min-height: 1em; margin-bottom: .6rem; font-size: 11.5px; }
     .mq-pv-wait { color: var(--muted); }
     .mq-pv-err { color: #dc2626; }
@@ -857,6 +858,16 @@ async function mqPreview() {
     btn.disabled = false;
   } catch (e) { pv.innerHTML = `<span class="mq-pv-err">조회 실패</span>`; }
 }
+async function mqPaste() {
+  const inp = $('mq-add-url');
+  try {
+    inp.value = ((await navigator.clipboard.readText()) || '').trim();
+    mqPreviewDebounced();
+  } catch (e) {
+    inp.focus();
+    $('mq-add-pv').innerHTML = '<span class="mq-pv-wait">자동 붙여넣기가 막혀 있습니다 — 직접 붙여넣어 주세요.</span>';
+  }
+}
 async function mqAdd() {
   if (!_mqPv) return;
   $('mq-add-btn').disabled = true;
@@ -897,8 +908,8 @@ async function loadQueueM() {
     const keepUrl = $('mq-add-url') ? $('mq-add-url').value : '';
     const keepPv = $('mq-add-pv') ? $('mq-add-pv').innerHTML : '';
     body.innerHTML =
-      `<div class="mq-add"><input type="url" id="mq-add-url" placeholder="https://youtu.be/... 붙여넣기"
-         oninput="mqPreviewDebounced()"><button id="mq-add-btn" onclick="mqAdd()" disabled>추가</button></div>
+      `<div class="mq-add"><input type="url" id="mq-add-url" placeholder="https://youtu.be/..."
+         oninput="mqPreviewDebounced()"><button class="mq-paste" onclick="mqPaste()" title="클립보드에서 붙여넣기">📋</button><button id="mq-add-btn" onclick="mqAdd()" disabled>추가</button></div>
        <div class="mq-add-pv" id="mq-add-pv"></div>`
       + `<p class="ch-hint">30분에 본편 1건 + 캡처 1건씩 처리됩니다.</p>`
       + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
