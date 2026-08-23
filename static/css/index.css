@@ -814,31 +814,35 @@ select option { background: var(--surface); color: var(--text); }
 
 /* ── 채널 자동 모니터 모달 ── */
 #channels-panel { max-width: 460px; width: 92vw; height: auto; max-height: 82vh; }
-.channels-modal-body { display: flex; flex-direction: column; gap: .8rem; padding: 1.1rem 1.25rem 1.25rem; overflow-y: auto; }
+.channels-modal-body { display: flex; flex-direction: column; gap: .8rem; padding: 1.1rem 1.25rem 1.25rem; overflow-x: hidden; overflow-y: auto; min-width: 0; }
 .channels-queue {
   font-size: 11px; font-family: var(--font-mono); color: var(--muted);
   background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
   padding: .4rem .6rem;
 }
 .model-order-card {
-  display: grid; gap: .55rem; padding: .7rem;
+  display: grid; gap: .55rem; padding: .7rem; min-width: 0;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .model-order-head { display: flex; align-items: center; justify-content: space-between;
   color: var(--text); font-size: 12px; font-weight: 700; }
 .model-order-status { min-height: 1em; color: var(--muted); font-size: 10.5px; font-weight: 500; }
-.model-order-row { display: flex; align-items: center; gap: .55rem; }
+.model-order-row { display: flex; align-items: center; gap: .55rem; min-width: 0; }
 .model-order-label { flex: 0 0 34px; color: var(--muted); font-size: 11.5px; font-weight: 650; }
-.model-order-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; flex: 1; }
+.model-order-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; flex: 1; min-width: 0; }
 .model-order-slot { display: flex; align-items: center; gap: .25rem; min-width: 0; }
-.model-order-rank { color: var(--muted); font: 10px var(--font-mono); }
+.model-order-rank { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); }
 .model-order-select {
-  min-width: 0; width: 100%; height: 27px; padding: 0 1.25rem 0 .4rem;
-  color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+  appearance: none; -webkit-appearance: none;
+  min-width: 0; max-width: 100%; width: 100%; height: 27px;
+  padding: 0 1.1rem 0 .35rem;
+  color: var(--text); background-color: var(--surface2); border: 1px solid var(--border);
   border-radius: 5px; font: 11px var(--font-mono); cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888178' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat; background-position: right .35rem center;
 }
 .model-order-select:disabled { opacity: .55; cursor: wait; }
-.model-order-hint { margin: -.1rem 0 0 40px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.model-order-hint { margin: -.1rem 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
 .channels-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
 .channels-empty { color: var(--muted); font-size: 13px; padding: .5rem .2rem; }
 .channel-row {

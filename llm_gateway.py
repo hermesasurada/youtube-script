@@ -101,15 +101,11 @@ def resolve_codex_bin() -> str:
 
 
 MODEL_KEYS = ("opus", "gpt", "grok")
+NONE_KEY = "none"
+SLOT_COUNT = len(MODEL_KEYS)
 
 
-def normalize_model_order(value, *, default: Sequence[str] = MODEL_KEYS) -> list[str]:
-    """Return a complete, duplicate-free model order.
-
-    HTTP callers send JSON arrays, while persisted or environment-backed values may be
-    JSON strings or comma-separated strings. Unknown values are ignored and omitted
-    choices are appended in the supplied default order.
-    """
+def _parse_model_tokens(value) -> list[str]:
     raw = value
     if isinstance(raw, str):
         try:
@@ -118,13 +114,57 @@ def normalize_model_order(value, *, default: Sequence[str] = MODEL_KEYS) -> list
         except (TypeError, ValueError):
             raw = raw.split(",")
     if not isinstance(raw, (list, tuple)):
-        raw = []
-    order: list[str] = []
-    for item in list(raw) + list(default):
-        key = str(item or "").strip().lower()
+        return []
+    return [str(item or "").strip().lower() for item in raw]
+
+
+def normalize_model_order(value, *, default: Sequence[str] = MODEL_KEYS) -> list[str]:
+    """Return a duplicate-free model order of SLOT_COUNT entries.
+
+    HTTP callers send JSON arrays, while persisted or environment-backed values may be
+    JSON strings or comma-separated strings. Unknown values are ignored.
+
+    ``none`` truncates the fallback chain: everything after the first none is none,
+    and missing models are not filled in. Without none, omitted choices are appended
+    from ``default`` (previous behaviour).
+    """
+    parsed = _parse_model_tokens(value)
+    if NONE_KEY in parsed:
+        order: list[str] = []
+        for key in parsed:
+            if key == NONE_KEY:
+                break
+            if key in MODEL_KEYS and key not in order:
+                order.append(key)
+        if not order:
+            return list(default)
+        while len(order) < SLOT_COUNT:
+            order.append(NONE_KEY)
+        return order[:SLOT_COUNT]
+    order = []
+    for key in parsed + [str(item).strip().lower() for item in default]:
         if key in MODEL_KEYS and key not in order:
             order.append(key)
     return order
+
+
+def is_valid_monitor_order(value) -> bool:
+    """1순위는 실제 모델, 없음은 접미사만. 중간 없음·중복 모델은 거부."""
+    if not isinstance(value, list) or len(value) != SLOT_COUNT:
+        return False
+    keys = [str(v).lower() for v in value]
+    if keys[0] not in MODEL_KEYS:
+        return False
+    seen_none = False
+    seen: set[str] = set()
+    for key in keys:
+        if key == NONE_KEY:
+            seen_none = True
+            continue
+        if seen_none or key not in MODEL_KEYS or key in seen:
+            return False
+        seen.add(key)
+    return True
 
 
 def run_codex_prompt(

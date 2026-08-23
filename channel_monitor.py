@@ -174,15 +174,19 @@ def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
     order = llm_gateway.normalize_model_order(model_order or default, default=default)
     failures = []
     for key in order:
+        if key == llm_gateway.NONE_KEY:
+            break
         if key == "opus":
             ok, detail = claude_healthy()
         elif key == "gpt":
             path = _gpt_bin()
             ok, detail = os.path.exists(path), path
-        else:
+        elif key == "grok":
             path = _grok_bin()
             ok = os.path.exists(path) and (explicit or GROK_FALLBACK)
             detail = path if ok else ("GROK_FALLBACK=0" if not explicit else f"grok 없음 ({path})")
+        else:
+            continue
         if ok:
             return True, key, ("; ".join(failures) if failures else "")
         failures.append(f"{key}: {detail}")

@@ -385,6 +385,10 @@ JSON 배열로만 답하라(다른 설명 금지):
     failures: list[str] = []
     callers = {"opus": _call_claude, "gpt": _call_gpt, "grok": _call_grok}
     for key in order:
+        if key == "none":
+            break
+        if key not in callers:
+            continue
         attempts = 3 if key == "opus" else 1
         for attempt in range(attempts):
             data, err = callers[key]()

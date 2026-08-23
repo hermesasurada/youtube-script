@@ -77,17 +77,60 @@ function handleChannelsOverlayClick(e) {
   if (e.target.id === 'channels-overlay') closeChannelsModal();
 }
 const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
-const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok-4.5' };
+const MONITOR_NONE = 'none';
+const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+
+function applyMonitorModelLabels(labels) {
+  if (!labels || typeof labels !== 'object') return;
+  for (const key of [...MONITOR_MODELS, MONITOR_NONE]) {
+    if (labels[key]) MONITOR_MODEL_LABELS[key] = labels[key];
+  }
+}
+
+function padMonitorOrder(order) {
+  const next = (order || []).slice(0, MONITOR_MODELS.length);
+  while (next.length < MONITOR_MODELS.length) next.push(MONITOR_NONE);
+  return next;
+}
+
+function monitorOrderChoices(order, index) {
+  if (index > 0 && order.slice(0, index).includes(MONITOR_NONE)) return [MONITOR_NONE];
+  if (index === 0) return MONITOR_MODELS.slice();
+  return MONITOR_MODELS.concat(MONITOR_NONE);
+}
+
+function applyMonitorOrderChange(order, index, selected) {
+  const next = padMonitorOrder(order);
+  if (index === 0 && selected === MONITOR_NONE) return next;
+  if (selected === MONITOR_NONE) {
+    for (let i = index; i < next.length; i++) next[i] = MONITOR_NONE;
+    return next;
+  }
+  const other = next.indexOf(selected);
+  if (other === index) return next;
+  if (other >= 0) {
+    const displaced = next[index];
+    next[index] = next[other];
+    next[other] = displaced;
+  } else {
+    next[index] = selected;
+  }
+  const noneAt = next.indexOf(MONITOR_NONE);
+  if (noneAt >= 0) {
+    for (let i = noneAt; i < next.length; i++) next[i] = MONITOR_NONE;
+  }
+  return next;
+}
 
 function renderMonitorModelOrders() {
   for (const kind of ['summary', 'capture']) {
     const el = document.getElementById(kind + '-model-order');
     if (!el) continue;
-    const order = monitorModelOrders[kind] || MONITOR_MODELS;
+    const order = padMonitorOrder(monitorModelOrders[kind] || MONITOR_MODELS);
     el.innerHTML = order.map((selected, index) => {
-      const options = MONITOR_MODELS.map(model =>
-        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model]}</option>`
+      const options = monitorOrderChoices(order, index).map(model =>
+        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
       return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
         + `<select class="model-order-select" aria-label="${kind === 'summary' ? '요약' : '캡처'} ${index + 1}순위" `
@@ -98,11 +141,7 @@ function renderMonitorModelOrders() {
 
 async function changeMonitorModelOrder(kind, index, selected) {
   const original = [...monitorModelOrders[kind]];
-  const previous = [...original];
-  const other = previous.indexOf(selected);
-  if (other !== index) {
-    [previous[index], previous[other]] = [previous[other], previous[index]];
-  }
+  const previous = applyMonitorOrderChange(original, index, selected);
   monitorModelOrders[kind] = previous;
   renderMonitorModelOrders();
   const selects = document.querySelectorAll('.model-order-select');
@@ -116,6 +155,7 @@ async function changeMonitorModelOrder(kind, index, selected) {
     })).json();
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders;
+    applyMonitorModelLabels(d.model_labels);
     status.textContent = '저장됨';
   } catch (e) {
     monitorModelOrders[kind] = original;
@@ -136,6 +176,7 @@ async function loadChannels() {
     const d = await (await fetch('/channels')).json();
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders || monitorModelOrders;
+    applyMonitorModelLabels(d.model_labels);
     renderMonitorModelOrders();
     const q = d.queue || {};
     const parts = [];
@@ -1034,7 +1075,7 @@ async function refreshQueueModal() {
         ? `<button class="q-requeue" title="재시도 초기화 후 큐 복귀" onclick="requeueItem(${v.id})">↻ 복귀</button>`
         : '')).join('');
     body.innerHTML =
-      `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">30분에 1건 처리</span></div>`
+      `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">유휴면 바로, 이후 30분에 1건</span></div>`
       + (mainRows || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
       + (kf.length ? `<div class="q-sec">캡처 재시도 대기 · ${kf.length}건 <span class="q-hint">본편과 별도 슬롯</span></div>${kfRows}` : '')
       + (recent ? `<div class="q-sec">최근 처리</div>${recent}` : '');
@@ -1073,8 +1114,9 @@ async function cancelQueueItem(id) {
 }
 
 /* ── Start transcription ── */
-/* URL 전사는 서버 큐(watch_queue)에 줄을 선다 — 자동 모니터와 같은 파이프라인이
-   30분에 한 건씩 처리한다. 입력창 URL + 사이드바 대기열의 대기 항목을 전부 적재.
+/* URL 전사는 서버 큐(watch_queue)에 줄을 선다 — 자동 모니터와 같은 파이프라인.
+   유휴(최근 주기 동안 처리 없음)면 즉시 시작하고, 이후 30분에 한 건.
+   입력창 URL + 사이드바 대기열의 대기 항목을 전부 적재.
    (파일 업로드는 유튜브와 무관하므로 종전대로 즉시 처리) */
 async function enqueueUrls() {
   clearError();
@@ -1097,7 +1139,8 @@ async function enqueueUrls() {
       });
       const d = await r.json();
       if (d.ok) {
-        lines.push(`✅ 큐 등록 (대기 ${d.waiting}번째): ${d.title}`);
+        lines.push(`✅ 큐 등록 (대기 ${d.waiting}번째): ${d.title}`
+          + (d.started ? ' — 바로 시작합니다' : ''));
         const qi = urlQueue.find(i => i.url === u);
         if (qi) { urlQueue.splice(urlQueue.indexOf(qi), 1); }
         if (input.value.trim() === u) input.value = '';
@@ -1108,7 +1151,7 @@ async function enqueueUrls() {
       lines.push(`⚠️ 서버 연결 실패: ${e.message}`);
     }
     logEl.textContent = lines.join('\n') +
-      '\n\n큐는 30분에 한 건씩 자동 처리됩니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
+      '\n\n최근 30분 동안 처리가 없었으면 바로 시작하고, 이후에는 30분에 한 건입니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
   }
   renderQueue();
   openQueueModal();          // 등록 직후 현재 대기 순서를 바로 보여준다

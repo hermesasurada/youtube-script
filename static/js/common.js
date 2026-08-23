@@ -92,10 +92,11 @@
       stash.push(m);
       return '\x01C' + (stash.length - 1) + '\x01';
     });
-    // 백슬래시 이스케이프(\* \_ \~) → 리터럴 엔티티로 선치환. 강조/틸드 정규식이
+    // 백슬래시 이스케이프(\* \_ \~ \|) → 리터럴 엔티티로 선치환. 강조/틸드 정규식이
     // '궁수자리 A\*' 같은 이스케이프된 별표를 만나 매칭이 어긋나는 것 방지
     // (예: **궁수자리 A\*** → 예전엔 <strong>…A\</strong>* 로 깨짐). marked도 엔티티는 그대로 통과.
-    src = src.replace(/\\([*_~])/g, (_, ch) => '&#' + ch.charCodeAt(0) + ';');
+    // `\|` 는 유튜브 제목의 파이프가 표 칸을 쪼개지 않게 한다.
+    src = src.replace(/\\([*_~|])/g, (_, ch) => '&#' + ch.charCodeAt(0) + ';');
     // 틸드 무력화: 본문 취소선 금지 정책 + 한국어 범위표현(예: 5~8개)이 GFM 단일틸드
     // 취소선으로 오인돼 두 범위 사이가 통째로 <del> 되는 것 방지. 엔티티라 화면엔 '~'로 표시.
     // (코드 스팬은 위에서 stash로 보호됨)
@@ -105,6 +106,29 @@
                       (_, p, t) => p + '<em>' + t + '</em>');
     src = src.replace(/\x01C(\d+)\x01/g, (_, i) => stash[+i]);
     return src;
+  }
+
+  /**
+   * GFM 표는 헤더 다음 구분행(`| --- | --- |`)이 없으면 표가 아니라 <p>로 붕괴한다.
+   * 요약 모델이 구분행을 빼먹으면 메타정보 칩이 깨지므로 삽입한다.
+   */
+  function _ensureGfmTables(src) {
+    const stash = [];
+    src = String(src || '').replace(/```[\s\S]*?```/g, (m) => {
+      stash.push(m);
+      return '\x01T' + (stash.length - 1) + '\x01';
+    });
+    src = src.replace(/(^|\n)((?:\|[^\n]*\n)+)/g, (all, pre, block) => {
+      const trimmed = block.endsWith('\n');
+      const lines = (trimmed ? block.slice(0, -1) : block).split('\n');
+      if (lines.length < 2) return all;
+      if (/^\|\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/.test(lines[1])) return all;
+      const cols = Math.max(0, (lines[0].match(/\|/g) || []).length - 1);
+      if (cols < 2) return all;
+      lines.splice(1, 0, '|' + ' --- |'.repeat(cols));
+      return pre + lines.join('\n') + (trimmed ? '\n' : '');
+    });
+    return src.replace(/\x01T(\d+)\x01/g, (_, i) => stash[+i]);
   }
 
   /**
@@ -192,7 +216,7 @@
     src = src.replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => _stashMath(t, true));
     src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => _stashMath(t, true));
     src = src.replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => _stashMath(t, false));
-    src = _fixCjkEmphasis(src);
+    src = _ensureGfmTables(_fixCjkEmphasis(src));
     let html;
     if (global.marked && typeof global.marked.parse === 'function') {
       html = _decorateSummary(_decorateHeadings(global.marked.parse(src)), model, compress);
@@ -318,7 +342,7 @@
     src = src.replace(/^---\n[\s\S]*?\n---\n?/, '');            // YAML 프론트매터
 
     // 2) 마크다운 → HTML (앱 장식 없이 순수 변환. CJK 볼드·수식 보정은 공용 로직 재사용)
-    src = _fixCjkEmphasis(src);
+    src = _ensureGfmTables(_fixCjkEmphasis(src));
     const math = [];                                            // 수식은 KaTeX 대신 원문 유지(블로거엔 KaTeX 없음)
     src = src.replace(/\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g, (_, a, b) => {
       math.push(a || b); return '\x01M' + (math.length - 1) + '\x01';

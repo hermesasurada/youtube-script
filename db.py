@@ -1114,6 +1114,34 @@ def queue_mark_kf_retry(qid: int, txt_path: str, reason: str = "") -> None:
         )
 
 
+def queue_has_processing() -> bool:
+    r = _conn().execute(
+        "SELECT 1 FROM watch_queue WHERE status = 'processing' LIMIT 1"
+    ).fetchone()
+    return r is not None
+
+
+def last_queue_activity_epoch() -> float | None:
+    """가장 최근 실제 처리(claim/완료/실패/재시도 예약) 시각.
+
+    pending 적재는 처리가 아니므로 제외한다. 빈 폴 주기와 구분해야 수동 추가 시
+    유휴 슬롯을 바로 쓸 수 있다.
+    """
+    row = _conn().execute(
+        """SELECT MAX(COALESCE(claimed_at, updated_at)) AS t
+             FROM watch_queue
+            WHERE status IN ('processing','done','failed','kf_retry','deferred')
+               OR claimed_at IS NOT NULL"""
+    ).fetchone()
+    raw = row["t"] if row else None
+    if not raw:
+        return None
+    try:
+        return time.mktime(time.strptime(str(raw), "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def queue_counts() -> dict:
     rows = _conn().execute(
         "SELECT status, COUNT(*) n FROM watch_queue GROUP BY status"

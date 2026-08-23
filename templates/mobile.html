@@ -399,21 +399,24 @@
     .ch-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
     .ch-queue { font-size: 11.5px; font-family: var(--font-mono); color: var(--muted);
       background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: .45rem .6rem; }
-    .model-order-card { display: grid; gap: .6rem; padding: .75rem;
+    .model-order-card { display: grid; gap: .6rem; padding: .75rem; min-width: 0;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
     .model-order-head { display: flex; align-items: center; justify-content: space-between;
       color: var(--text); font-size: 13px; font-weight: 700; }
     .model-order-status { min-height: 1em; color: var(--muted); font-size: 11px; font-weight: 500; }
-    .model-order-row { display: flex; align-items: center; gap: .55rem; }
+    .model-order-row { display: flex; align-items: center; gap: .55rem; min-width: 0; }
     .model-order-label { flex: 0 0 34px; color: var(--muted); font-size: 12px; font-weight: 650; }
-    .model-order-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .3rem; flex: 1; }
+    .model-order-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .3rem; flex: 1; min-width: 0; }
     .model-order-slot { display: flex; align-items: center; gap: .2rem; min-width: 0; }
-    .model-order-rank { color: var(--muted); font: 10px var(--font-mono); }
-    .model-order-select { min-width: 0; width: 100%; height: 31px; padding: 0 1rem 0 .3rem;
-      color: var(--text); background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 5px; font: 11px var(--font-mono); }
+    .model-order-rank { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); }
+    .model-order-select { appearance: none; -webkit-appearance: none;
+      min-width: 0; max-width: 100%; width: 100%; height: 31px; padding: 0 1.1rem 0 .3rem;
+      color: var(--text); background-color: var(--surface2); border: 1px solid var(--border);
+      border-radius: 5px; font: 11px var(--font-mono);
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888178' d='M1 1l4 4 4-4'/></svg>");
+      background-repeat: no-repeat; background-position: right .35rem center; }
     .model-order-select:disabled { opacity: .55; }
-    .model-order-hint { margin: -.1rem 0 0 40px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+    .model-order-hint { margin: -.1rem 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
     .ch-empty, .ch-loading { color: var(--muted); font-size: 13.5px; padding: .5rem .2rem; }
     .ch-row { display: flex; align-items: center; gap: .75rem; padding: .7rem .8rem;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -928,7 +931,7 @@ async function loadQueueM() {
        <button type="button" class="mq-cap-chip on" id="mq-add-capture-btn" role="switch" aria-checked="true"
                onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">영상 캡처 포함</button>
        <div class="mq-add-pv" id="mq-add-pv"></div>`
-      + `<p class="ch-hint">30분에 본편 1건 + 캡처 1건씩 처리됩니다.</p>`
+      + `<p class="ch-hint">유휴면 바로 시작, 이후 30분에 본편 1건 + 캡처 1건.</p>`
       + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
       + (main.map(v => row(v, ++n, v.status === 'pending')).join('')
          || '<div class="ch-empty">대기 중인 영상이 없습니다.</div>')
@@ -974,15 +977,56 @@ async function openChannels() {
   await loadChannels();
 }
 const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
-const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok-4.5' };
+const MONITOR_NONE = 'none';
+const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+
+function applyMonitorModelLabels(labels) {
+  if (!labels || typeof labels !== 'object') return;
+  [...MONITOR_MODELS, MONITOR_NONE].forEach(key => { if (labels[key]) MONITOR_MODEL_LABELS[key] = labels[key]; });
+}
+
+function padMonitorOrder(order) {
+  const next = (order || []).slice(0, MONITOR_MODELS.length);
+  while (next.length < MONITOR_MODELS.length) next.push(MONITOR_NONE);
+  return next;
+}
+
+function monitorOrderChoices(order, index) {
+  if (index > 0 && order.slice(0, index).includes(MONITOR_NONE)) return [MONITOR_NONE];
+  if (index === 0) return MONITOR_MODELS.slice();
+  return MONITOR_MODELS.concat(MONITOR_NONE);
+}
+
+function applyMonitorOrderChange(order, index, selected) {
+  const next = padMonitorOrder(order);
+  if (index === 0 && selected === MONITOR_NONE) return next;
+  if (selected === MONITOR_NONE) {
+    for (let i = index; i < next.length; i++) next[i] = MONITOR_NONE;
+    return next;
+  }
+  const other = next.indexOf(selected);
+  if (other === index) return next;
+  if (other >= 0) {
+    const displaced = next[index];
+    next[index] = next[other];
+    next[other] = displaced;
+  } else {
+    next[index] = selected;
+  }
+  const noneAt = next.indexOf(MONITOR_NONE);
+  if (noneAt >= 0) {
+    for (let i = noneAt; i < next.length; i++) next[i] = MONITOR_NONE;
+  }
+  return next;
+}
 
 function monitorModelControlsHtml() {
   return `<div class="model-order-card">
     <div class="model-order-head"><span>LLM 처리 순서</span><span class="model-order-status" id="model-order-status"></span></div>
     <div class="model-order-row"><span class="model-order-label">요약</span><div class="model-order-selects" id="summary-model-order"></div></div>
     <div class="model-order-row"><span class="model-order-label">캡처</span><div class="model-order-selects" id="capture-model-order"></div></div>
-    <p class="model-order-hint">1순위 실패 시 왼쪽에서 오른쪽 순서로 자동 전환합니다.</p>
+    <p class="model-order-hint">실패 시 오른쪽으로 넘어가고, 없음에서 멈춥니다.</p>
   </div>`;
 }
 
@@ -990,10 +1034,10 @@ function renderMonitorModelOrders() {
   for (const kind of ['summary', 'capture']) {
     const el = $(kind + '-model-order');
     if (!el) continue;
-    const order = monitorModelOrders[kind] || MONITOR_MODELS;
+    const order = padMonitorOrder(monitorModelOrders[kind] || MONITOR_MODELS);
     el.innerHTML = order.map((selected, index) => {
-      const options = MONITOR_MODELS.map(model =>
-        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model]}</option>`
+      const options = monitorOrderChoices(order, index).map(model =>
+        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
       return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
         + `<select class="model-order-select" aria-label="${kind === 'summary' ? '요약' : '캡처'} ${index + 1}순위" `
@@ -1004,9 +1048,7 @@ function renderMonitorModelOrders() {
 
 async function changeMonitorModelOrder(kind, index, selected) {
   const original = [...monitorModelOrders[kind]];
-  const next = [...original];
-  const other = next.indexOf(selected);
-  if (other !== index) [next[index], next[other]] = [next[other], next[index]];
+  const next = applyMonitorOrderChange(original, index, selected);
   monitorModelOrders[kind] = next;
   renderMonitorModelOrders();
   const selects = document.querySelectorAll('.model-order-select');
@@ -1020,6 +1062,7 @@ async function changeMonitorModelOrder(kind, index, selected) {
     })).json();
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders;
+    applyMonitorModelLabels(d.model_labels);
     status.textContent = '저장됨';
   } catch (e) {
     monitorModelOrders[kind] = original;
@@ -1038,6 +1081,7 @@ async function loadChannels() {
     const d = await (await fetch('/channels', { cache: 'no-store' })).json();
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders || monitorModelOrders;
+    applyMonitorModelLabels(d.model_labels);
     const q = d.queue || {}, parts = [];
     if (q.pending)    parts.push(`대기 ${q.pending}`);
     if (q.processing) parts.push(`처리중 ${q.processing}`);

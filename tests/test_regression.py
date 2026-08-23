@@ -11,6 +11,7 @@ import gzip
 import os
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta
 
 import app
@@ -35,9 +36,37 @@ def test_clean_summary_skips_stray_hash_before_real_title():
     assert app._clean_summary(dirty) == "# 실제 영상 제목\n\n## 1. 메타정보"
 
 
+def test_clean_summary_inserts_missing_gfm_table_delimiter():
+    dirty = (
+        "# 제목 | 부제\n\n## 1. 메타정보\n\n"
+        "| 항목 | 내용 |\n"
+        "| 제목 | Foo \\| Bar |\n"
+        "| 업로더 | Fortune |\n"
+    )
+    out = app._clean_summary(dirty)
+    assert "| --- | --- |" in out
+    assert "| 제목 | Foo \\| Bar |" in out
+    # 이미 구분행이 있으면 중복 삽입하지 않는다
+    assert app._clean_summary(out) == out
+
+
 def test_model_order_normalization_is_complete_and_unique():
     assert llm_gateway.normalize_model_order(["grok", "opus", "gpt"]) == ["grok", "opus", "gpt"]
     assert llm_gateway.normalize_model_order('["gpt","gpt","unknown"]') == ["gpt", "opus", "grok"]
+
+
+def test_model_order_none_truncates_and_cannot_sit_in_the_middle():
+    assert llm_gateway.normalize_model_order(["opus", "none", "none"]) == ["opus", "none", "none"]
+    assert llm_gateway.normalize_model_order(["opus", "gpt", "none"]) == ["opus", "gpt", "none"]
+    # 중간에 없음이 오면 그 뒤는 버린다
+    assert llm_gateway.normalize_model_order(["opus", "none", "grok"]) == ["opus", "none", "none"]
+    # 모델이 하나도 없으면 기존처럼 전체 기본값
+    assert llm_gateway.normalize_model_order(["none", "opus", "gpt"]) == ["opus", "gpt", "grok"]
+    assert llm_gateway.is_valid_monitor_order(["opus", "gpt", "none"]) is True
+    assert llm_gateway.is_valid_monitor_order(["opus", "none", "none"]) is True
+    assert llm_gateway.is_valid_monitor_order(["opus", "none", "grok"]) is False
+    assert llm_gateway.is_valid_monitor_order(["none", "opus", "gpt"]) is False
+    assert llm_gateway.is_valid_monitor_order(["opus", "opus", "none"]) is False
 
 
 # ── ① 마크다운 I/O 왕복 + app·db 파서 일치(드리프트 가드) ──────────────
@@ -282,6 +311,91 @@ def test_queue_claim_and_stale_recovery(monkeypatch):
     assert row["status"] == "deferred" and row["next_retry_at"]
 
 
+def test_queue_idle_when_nothing_has_been_processed():
+    db.init()
+    db._conn().execute("DELETE FROM watch_queue")
+    assert db.last_queue_activity_epoch() is None
+    assert db.queue_has_processing() is False
+    assert app._queue_idle_enough() is True
+
+
+def test_queue_not_idle_during_recent_processing():
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM watch_queue")
+    db.enqueue_video("busy-test", "https://youtu.be/busy-test", "busy", "UC1")
+    claimed = db.queue_claim_one()
+    assert claimed
+    assert db.queue_has_processing() is True
+    assert app._queue_idle_enough() is False
+
+
+def test_queue_idle_after_cycle_since_last_activity(monkeypatch):
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM watch_queue")
+    db.enqueue_video("old-test", "https://youtu.be/old-test", "old", "UC1")
+    claimed = db.queue_claim_one()
+    old = (datetime.now() - timedelta(minutes=40)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "UPDATE watch_queue SET status='done', claimed_at=NULL, updated_at=? WHERE id=?",
+        (old, claimed["id"]),
+    )
+    monkeypatch.setattr(app, "_QUEUE_CYCLE_SEC", 1800)
+    assert app._queue_idle_enough() is True
+
+
+def test_manual_add_kicks_drain_when_idle(monkeypatch):
+    db.init()
+    db._conn().execute("DELETE FROM watch_queue")
+    spawned = []
+    monkeypatch.setattr(app, "_spawn_drain", lambda: spawned.append(True) or True)
+    c = app.app.test_client()
+    r = c.post("/queue/items", json={
+        "url": "https://www.youtube.com/watch?v=abcdefghijk",
+        "title": "수동 추가",
+    })
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ok"] is True
+    assert body["started"] is True
+    assert spawned == [True]
+
+
+def test_manual_add_does_not_kick_when_recently_processed(monkeypatch):
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM watch_queue")
+    db.enqueue_video("recent-done", "https://youtu.be/recentdone1", "done", "UC1")
+    claimed = db.queue_claim_one()
+    conn.execute(
+        "UPDATE watch_queue SET status='done', claimed_at=NULL, updated_at=? WHERE id=?",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), claimed["id"]),
+    )
+    spawned = []
+    monkeypatch.setattr(app, "_spawn_drain", lambda: spawned.append(True) or True)
+    c = app.app.test_client()
+    r = c.post("/queue/items", json={
+        "url": "https://www.youtube.com/watch?v=xyzxyzxyzxy",
+        "title": "곧 처리",
+    })
+    assert r.status_code == 200
+    assert r.get_json()["started"] is False
+    assert spawned == []
+
+
+def test_idle_eta_is_now_not_next_cycle(monkeypatch):
+    db.init()
+    db._conn().execute("DELETE FROM watch_queue")
+    db.enqueue_video("eta-test", "https://youtu.be/etatest123", "eta", "manual")
+    overview = db.queue_overview()
+    monkeypatch.setattr(app, "_QUEUE_CYCLE_SEC", 1800)
+    app._attach_queue_eta(overview)
+    pending = [v for v in overview["waiting"] if v["status"] == "pending"]
+    assert pending
+    assert abs(pending[0]["eta"] - time.time()) < 2
+
+
 def test_transient_filter_is_deferred_and_rechecked(monkeypatch):
     db.init()
     conn = db._conn()
@@ -372,6 +486,17 @@ def test_item_distill_overrides_channel_setting():
         conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
 
 
+def test_monitor_model_labels_follow_grok_cli_default(monkeypatch):
+    monkeypatch.setattr(app.llm_gateway, "resolve_grok_default_model", lambda: "grok-4.6")
+    monkeypatch.setattr(app, "GROK_MODEL", "")
+    labels = app._monitor_model_labels()
+    assert labels["grok"] == "Grok 4.6"
+    assert labels["opus"] == "Opus 5"
+    assert labels["none"] == "없음"
+    payload = app.app.test_client().get("/channels").get_json()
+    assert payload["model_labels"]["grok"] == "Grok 4.6"
+
+
 def test_monitor_model_orders_persist_independently():
     db.init()
     try:
@@ -397,6 +522,14 @@ def test_monitor_model_orders_persist_independently():
             "/channels/model-orders", json={"capture": ["opus", "opus", "gpt"]}
         )
         assert bad.status_code == 400
+        truncated = client.patch(
+            "/channels/model-orders", json={"summary": ["grok", "none", "none"]}
+        ).get_json()
+        assert truncated["model_orders"]["summary"] == ["grok", "none", "none"]
+        middle = client.patch(
+            "/channels/model-orders", json={"summary": ["opus", "none", "gpt"]}
+        )
+        assert middle.status_code == 400
     finally:
         db.set_monitor_model_orders(
             summary=["opus", "gpt", "grok"], capture=["opus", "gpt", "grok"]

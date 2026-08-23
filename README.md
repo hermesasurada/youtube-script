@@ -15,12 +15,13 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 | `static/js/index.js` | 데스크톱 UI 로직(큐·SSE·모달·이력) |
 | `static/css/index.css` | 데스크톱 스타일 |
 | `prompt.txt` | 요약 프롬프트(반드시 `{transcript}` 플레이스홀더 포함) |
+| `humanize_korean.py` | 요약 저장 직전 im-not-ai 결정적 윤문(연결어미 쉼표·`것이다` 등). `HUMANIZE_SUMMARY=0`이면 생략 |
 
 ## 데이터 흐름
 
 ```
 URL/파일 → yt-dlp(오디오) → whisper.cpp(--output-json) → 전사 .md(res/{date}/)
-        → Opus 5/GPT-5.6 Sol/Grok-4.5 순차 요약 → 요약 .md(res/summary/{date}/) → db.upsert(인덱싱)
+        → Opus 5/GPT-5.6 Sol/Grok-4.5 순차 요약 → humanize_korean → 요약 .md(res/summary/{date}/) → db.upsert(인덱싱)
         → (옵션) keyframe_report → res/summary/{date}/{stem}.frames/*.jpg + 요약 md에 스트립 주입
 ```
 
@@ -82,6 +83,7 @@ curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"v
 | `VISION_MODEL` | opus | 키프레임 분류·캡션 모델 (Claude) |
 | `GROK_MODEL` | (빈 값) | Grok 폴백 모델. **비우면 `-m` 없이 grok CLI 기본 모델**을 쓴다(CLI 업데이트를 자동으로 따라감) |
 | `GROK_VISION_FALLBACK` / `GROK_VISION_MODEL` | 1 / (빈 값) | 비전 Claude 3회 실패 시 Grok 폴백(모델은 요약과 동일 기조 — 비우면 CLI 기본) |
+| `HUMANIZE_SUMMARY` | 1 | `0`이면 요약 저장 직전 한글 윤문(im-not-ai C-11/I-3)을 건너뛴다 |
 | `VIDEO_MAXH` / `FRAME_WIDTH` | 1080 / 1708 | 다운로드 최대 높이 / 프레임 가로폭 |
 | `SCENE_THRESHOLD` | 0.3 | ffmpeg 장면전환 임계값([0,1] clamp) |
 | `MAX_CANDIDATES` / `MIN_GAP` | 40 / 6 | 후보 프레임 상한 / 근접 중복 제거 간격(초) |

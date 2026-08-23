@@ -54,6 +54,7 @@ except ImportError:
 
 import db
 import document_io
+import humanize_korean
 import keyframe_report
 import llm_gateway
 
@@ -1137,6 +1138,44 @@ def _translate_titles_async() -> None:
 # Claude Code CLI(에이전트)가 요약을 '파일로 저장'하려다 권한 거부되면 본문 앞에
 # "파일 쓰기 권한이 없어..." 같은 메타문구를 붙이는 경우가 있다. 요약은 출력 형식상
 # 항상 '# 제목' H1로 시작하므로, 첫 H1 앞의 군더더기는 저장 전에 잘라낸다(결정적 보장).
+_GFM_TABLE_BLOCK_RE = re.compile(r"(^|\n)((?:\|[^\n]*\n)+)")
+_GFM_TABLE_DELIM_RE = re.compile(r"^\|\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
+
+
+def _ensure_gfm_tables(text: str) -> str:
+    """헤더 다음 구분행이 없는 GFM 표를 고쳐, marked가 <p>로 붕괴시키지 않게 한다.
+
+    유튜브 제목의 `|` 때문에 모델이 `\\|`는 넣으면서 `| --- | --- |` 는 빼먹는 경우가 있다.
+    """
+    if not text or "|" not in text:
+        return text
+    fences: list[str] = []
+
+    def _stash(m: re.Match) -> str:
+        fences.append(m.group(0))
+        return f"\x01T{len(fences) - 1}\x01"
+
+    text = re.sub(r"```[\s\S]*?```", _stash, text)
+
+    def _insert_delim(m: re.Match) -> str:
+        pre, block = m.group(1), m.group(2)
+        trimmed = block.endswith("\n")
+        lines = (block[:-1] if trimmed else block).split("\n")
+        if len(lines) < 2 or _GFM_TABLE_DELIM_RE.match(lines[1]):
+            return m.group(0)
+        cols = max(0, lines[0].count("|") - 1)
+        if cols < 2:
+            return m.group(0)
+        lines.insert(1, "|" + " --- |" * cols)
+        out = "\n".join(lines) + ("\n" if trimmed else "")
+        return pre + out
+
+    text = _GFM_TABLE_BLOCK_RE.sub(_insert_delim, text)
+    if fences:
+        text = re.sub(r"\x01T(\d+)\x01", lambda m: fences[int(m.group(1))], text)
+    return text
+
+
 def _clean_summary(text: str) -> str:
     if not text:
         return text
@@ -1144,8 +1183,14 @@ def _clean_summary(text: str) -> str:
     # 단일 '#'만 허용해 '### 소제목'을 제목으로 오인하지 않는다.
     m = re.search(r"(?<!#)#[ \t]+\S", text)
     if m and m.start() > 0:
-        return text[m.start():].lstrip()
-    return text
+        text = text[m.start():].lstrip()
+    return _ensure_gfm_tables(text)
+
+
+def _prepare_summary_body(text: str) -> str:
+    """저장·송출 직전: CLI 군더더기 제거 후 im-not-ai 결정적 윤문."""
+    cleaned = _clean_summary(text)
+    return humanize_korean.humanize_summary(cleaned)
 
 
 # 요약 생성용 시스템 프롬프트: 출력 전용 강제(도구/파일/승인 언급 금지).
@@ -1170,6 +1215,17 @@ def _model_label(model_id: str) -> str:
         v = re.search(r"(\d+(?:\.\d+)?)", mid)
         return "GPT" + (f" {v.group(1)}" if v else "")
     return mid or "?"
+
+
+def _monitor_model_labels() -> dict[str, str]:
+    """채널 모니터 선택기에 보여줄 이름. Grok은 CLI 기본 모델을 따라간다."""
+    grok_id = GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok"
+    return {
+        "opus": "Opus 5",
+        "gpt": "GPT-5.6 Sol",
+        "grok": _model_label(grok_id),
+        "none": "없음",
+    }
 
 
 def _model_line(label: str, note: str = "") -> str:
@@ -1201,7 +1257,7 @@ def _summarize_with_gpt(prompt: str) -> tuple[str, str]:
         return "", f"gpt 타임아웃({GPT_TIMEOUT}s)"
     if r.returncode != 0:
         return "", (r.stderr or r.stdout or f"gpt rc={r.returncode}").strip()[:200]
-    out = _clean_summary(r.stdout or "")
+    out = _prepare_summary_body(r.stdout or "")
     if not out.strip():
         return "", "gpt 빈 응답"
     return out, ""
@@ -1233,7 +1289,7 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
         return "", f"grok 타임아웃({GROK_TIMEOUT}s)"
     if r.returncode != 0:
         return "", (r.stderr or f"grok rc={r.returncode}").strip()[:200]
-    out = _clean_summary(r.stdout or "")
+    out = _prepare_summary_body(r.stdout or "")
     if not out.strip():
         return "", "grok 빈 응답"
     return out, ""
@@ -1265,6 +1321,8 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
         return full, ""
 
     for key in order:
+        if key == llm_gateway.NONE_KEY:
+            break
         if key == "opus":
             command = [
                 _resolve_claude_bin(), "-p",
@@ -1329,15 +1387,27 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             except Exception as e:
                 error_msg = str(e)
 
-            body = _clean_summary(final if final is not None else "".join(chunks))
+            cleaned = _clean_summary(final if final is not None else "".join(chunks))
+            body = humanize_korean.humanize_summary(cleaned)
             if not error_msg and body:
-                cline = _compress_line(body, transcript_chars)
-                if cline:
-                    yield f"data: {json.dumps(cline)}\n\n"
-                _, save_err = save_full(body, _model_label(used_model or CLAUDE_MODEL))
-                if save_err:
-                    yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
-                    return
+                label = _model_label(used_model or CLAUDE_MODEL)
+                if body != cleaned and client_has_output:
+                    reset = reset_client()
+                    if reset:
+                        yield reset
+                    full, save_err = save_full(body, label)
+                    if save_err:
+                        yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
+                        return
+                    yield f"data: {json.dumps(full)}\n\n"
+                else:
+                    cline = _compress_line(body, transcript_chars)
+                    if cline:
+                        yield f"data: {json.dumps(cline)}\n\n"
+                    _, save_err = save_full(body, label)
+                    if save_err:
+                        yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
+                        return
                 yield "event: done\ndata: \n\n"
                 return
             failures.append(f"Opus: {error_msg or '빈 응답'}")
@@ -1471,14 +1541,18 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         yield from _yield_grok(error_msg)
         return
 
-    body = _clean_summary(final if final is not None else "".join(chunks))
+    cleaned = _clean_summary(final if final is not None else "".join(chunks))
+    body = humanize_korean.humanize_summary(cleaned)
     if not body:
         yield from _yield_grok("Claude 빈 응답")
         return
     cline = _compress_line(body, transcript_chars)
-    if cline:
-        yield f"data: {json.dumps(cline)}\n\n"
     full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + cline + body
+    if body != cleaned and chunks:
+        yield "event: reset\ndata: \"\"\n\n"
+        yield f"data: {json.dumps(full)}\n\n"
+    elif cline:
+        yield f"data: {json.dumps(cline)}\n\n"
     if save_path:
         try:
             document_io.atomic_write_text(save_path, full)
@@ -1577,7 +1651,7 @@ def save_prompt():
 
 # ── 채널 자동 모니터링(로컬 전용 — 원격은 before_request에서 차단) ──────
 # ── 처리 큐 (단일 파이프라인 관리) ────────────────────────────────────
-# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(30분에 1건 처리).
+# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(유휴면 즉시, 이후 30분에 1건).
 
 _YT_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?[^#]*v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
@@ -1622,26 +1696,72 @@ def queue_preview():
                   "channel": meta.get("channel") or "", "duplicate": dup})
 
 
-_MONITOR_LOCK  = os.path.expanduser(
-    os.environ.get("MONITOR_LOCK", "~/.hermes/youtube-monitor.lock"))
 _QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "1800"))
+_MONITOR_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channel_monitor.py")
+_MONITOR_LOG_DIR = os.path.expanduser("~/Library/Logs/hermes")
+
+
+def _queue_idle_enough(now: float | None = None) -> bool:
+    """최근 주기 동안 실제 처리가 없었고, 지금 돌아가는 작업도 없으면 유휴."""
+    if db.queue_has_processing():
+        return False
+    last = db.last_queue_activity_epoch()
+    if last is None:
+        return True
+    return (now if now is not None else time.time()) - last >= _QUEUE_CYCLE_SEC
+
+
+def _next_drain_epoch(now: float) -> float:
+    """다음 본편/캡처 슬롯이 열릴 epoch초."""
+    last = db.last_queue_activity_epoch()
+    if db.queue_has_processing():
+        return max(now, (last or now) + _QUEUE_CYCLE_SEC)
+    if _queue_idle_enough(now):
+        return now
+    return (last or now) + _QUEUE_CYCLE_SEC
+
+
+def _spawn_drain() -> bool:
+    """launchd를 기다리지 않고 drain 한 사이클을 띄운다. 락이 잡혀 있으면 자식이 바로 종료."""
+    try:
+        os.makedirs(_MONITOR_LOG_DIR, exist_ok=True)
+        out_path = os.path.join(_MONITOR_LOG_DIR, "youtube-monitor.out.log")
+        err_path = os.path.join(_MONITOR_LOG_DIR, "youtube-monitor.err.log")
+        with open(out_path, "a", encoding="utf-8") as out, open(err_path, "a", encoding="utf-8") as err:
+            subprocess.Popen(
+                [sys.executable, _MONITOR_PY, "--drain-only"],
+                cwd=os.path.dirname(_MONITOR_PY),
+                stdout=out,
+                stderr=err,
+                start_new_session=True,
+                env=os.environ.copy(),
+            )
+        log.info("idle queue — drain started immediately")
+        return True
+    except Exception as e:
+        log.warning("idle drain spawn failed: %s", e)
+        return False
+
+
+def _kick_drain_if_idle() -> bool:
+    if not _queue_idle_enough():
+        return False
+    waiting = db.queue_overview().get("waiting") or []
+    if not any(v.get("status") in ("pending", "kf_retry") for v in waiting):
+        return False
+    return _spawn_drain()
 
 
 def _attach_queue_eta(overview: dict) -> dict:
     """대기 항목에 예정 시작 시각(eta, epoch초)을 붙인다.
 
-    모니터는 launchd 30분 주기라, 마지막 실행 시각(잠금 파일 mtime) + 주기의
-    배수로 다음 발화를 추정한다. 본편(pending)과 캡처(kf_retry)는 슬롯이
-    분리돼 있어 각자 순번 × 주기로 계산한다. deferred는 복귀 시점이 due에
-    달려 있어 예정을 확정할 수 없으므로 붙이지 않는다(재시도 시각만 표시).
+    실제 처리가 주기 이상 없었으면 첫 슬롯은 지금이다(수동 추가 즉시 시작).
+    본편(pending)과 캡처(kf_retry)는 슬롯이 분리돼 있어 각자 순번 × 주기로
+    계산한다. deferred는 복귀 시점이 due에 달려 있어 예정을 확정할 수 없으므로
+    붙이지 않는다(재시도 시각만 표시).
     """
     now = time.time()
-    try:
-        base = os.path.getmtime(_MONITOR_LOCK)
-    except OSError:
-        base = now
-    while base <= now:
-        base += _QUEUE_CYCLE_SEC
+    base = _next_drain_epoch(now)
 
     def _epoch(ts: str) -> float:
         try:
@@ -1702,8 +1822,10 @@ def queue_add():
         if st in ("pending", "processing", "kf_retry", "deferred"):
             return _json({"error": "이미 큐에 대기 중입니다.", "duplicate": "queue"}, 409)
         db.queue_requeue(yt_id, capture=None if capture is None else bool(capture))
+    started = _kick_drain_if_idle()
     waiting = len(db.queue_overview()["waiting"])
-    return _json({"ok": True, "yt_id": yt_id, "title": title, "waiting": waiting})
+    return _json({"ok": True, "yt_id": yt_id, "title": title,
+                  "waiting": waiting, "started": started})
 
 
 @app.route("/queue/items/<int:qid>/move", methods=["POST"])
@@ -1725,7 +1847,8 @@ def queue_item_requeue(qid: int):
     if db.get_item_by_yt_id(r["yt_id"]):
         return _json({"error": "이미 전사된 영상입니다(이력 확인)."}, 409)
     db.queue_requeue(r["yt_id"])
-    return _json({"ok": True})
+    started = _kick_drain_if_idle()
+    return _json({"ok": True, "started": started})
 
 
 @app.route("/queue/items/<int:qid>", methods=["PATCH"])
@@ -1751,7 +1874,8 @@ def channels_list():
     """모니터링 채널 목록 + 큐 요약(모달용)."""
     try:
         return _json({"channels": db.list_channels(), "queue": db.queue_counts(),
-                      "model_orders": db.get_monitor_model_orders()})
+                      "model_orders": db.get_monitor_model_orders(),
+                      "model_labels": _monitor_model_labels()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 
@@ -1761,20 +1885,21 @@ def channel_model_orders():
     """자동모니터 요약/캡처의 Opus·GPT·Grok 폴백 순서를 저장한다."""
     data = request.get_json(force=True) or {}
     updates = {}
-    expected = set(llm_gateway.MODEL_KEYS)
     for key in ("summary", "capture"):
         if key not in data:
             continue
         value = data[key]
-        if (not isinstance(value, list) or len(value) != len(expected)
-                or set(str(v).lower() for v in value) != expected):
-            return _json({"error": f"{key} 순서는 opus, gpt, grok을 한 번씩 포함해야 합니다."}, 400)
-        updates[key] = [str(v).lower() for v in value]
+        if not llm_gateway.is_valid_monitor_order(value):
+            return _json({
+                "error": f"{key} 순서는 1순위에 모델을 두고, 없음은 맨 뒤에만 둘 수 있습니다.",
+            }, 400)
+        updates[key] = llm_gateway.normalize_model_order(value)
     if not updates:
         return _json({"error": "변경할 순서가 없습니다(summary/capture)."}, 400)
     try:
         saved = db.set_monitor_model_orders(**updates)
-        return _json({"ok": True, "model_orders": saved})
+        return _json({"ok": True, "model_orders": saved,
+                      "model_labels": _monitor_model_labels()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 
