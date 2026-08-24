@@ -27,8 +27,8 @@ BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 RES_DIR    = os.path.join(BASE_DIR, "res")
 TRANS_DIR  = os.path.join(RES_DIR, "translated")
 
-QWEN_BASE   = os.environ.get("QWEN_BASE_URL", "http://192.168.1.125:8000/v1")
-QWEN_MODEL  = os.environ.get("QWEN_MODEL", "qwen3.8-27b")
+QWEN_BASE   = os.environ.get("QWEN_BASE_URL", "http://127.0.0.1:8080/v1")   # 로컬 oMLX
+QWEN_MODEL  = os.environ.get("QWEN_MODEL", "Qwen3.8-27B-Alis-MLX-6bit")
 QWEN_TIMEOUT = int(os.environ.get("QWEN_TIMEOUT", "900"))
 
 # 청크가 크면 호출 오버헤드가 줄지만 출력이 길어져 중단 위험이 커진다.
@@ -55,7 +55,11 @@ SYSTEM_PROMPT = """유튜브 영상 전사문을 한국어로 번역한다.
 표기 규칙:
 - **제품·서비스·브랜드·회사·모델명은 음차하지 말고 원문 표기를 그대로 쓴다** —
   NVIDIA, Anthropic, ChatGPT, OpenAI, SpaceX, S&P 500처럼.
-- 인물 이름은 한국어 표기 뒤 첫 등장에만 원문을 괄호로 병기한다 — 샘 올트먼(Sam Altman).
+- **인물 이름도 원어를 그대로 쓴다** — "샘 올트먼"이 아니라 **Sam Altman**, "젠슨 황"이 아니라
+  **Jensen Huang**. 한국어 음차로 바꾸지 말 것. 전사기가 음차로만 적었고 원어 철자를
+  확신할 수 없을 때만 음차를 남긴다.
+- 회사·기관명도 같다 — "엔비디아"가 아니라 **NVIDIA**, "오픈에이아이"가 아니라 **OpenAI**.
+  한국 기업·기관은 한국어 표기를 쓴다(삼성전자, 금융위원회).
 - 전문용어는 널리 쓰이는 한국어 용어가 있으면 그것을 쓰고, 없으면 원문을 유지한다.
   처음 나올 때만 괄호로 원문을 병기한다 — 추론(inference).
 - **영어 관용구·업계 은어·약어는 음차하거나 직역하지 말고 뜻이 통하는 한국어로 풀어 쓴다.**
