@@ -1263,15 +1263,6 @@ def _summarize_with_gpt(prompt: str) -> tuple[str, str]:
     return out, ""
 
 
-def _summarize_with_qwen(prompt: str) -> tuple[str, str]:
-    """로컬 oMLX(Qwen) 요약. (요약 텍스트, 오류사유).
-
-    토큰 비용이 없고 전사 원문이 밖으로 나가지 않는다. 대신 생성 속도가
-    CLI 모델보다 느려, 긴 영상은 몇 분씩 걸린다.
-    """
-    return llm_gateway.run_omlx_prompt(prompt)
-
-
 def _summarize_with_grok(prompt: str) -> tuple[str, str]:
     """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
 
@@ -1429,9 +1420,6 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
         if key == "gpt":
             body, err = _summarize_with_gpt(prompt)
             label = _model_label(GPT_MODEL or "gpt")
-        elif key == "qwen":
-            body, err = _summarize_with_qwen(prompt)
-            label = llm_gateway.OMLX_MODEL
         else:
             body, err = _summarize_with_grok(prompt)
             # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.

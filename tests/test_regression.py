@@ -51,22 +51,22 @@ def test_clean_summary_inserts_missing_gfm_table_delimiter():
 
 
 def test_model_order_normalization_is_complete_and_unique():
-    assert llm_gateway.normalize_model_order(["grok", "opus", "gpt"]) == ["grok", "opus", "gpt", "qwen"]
-    assert llm_gateway.normalize_model_order('["gpt","gpt","unknown"]') == ["gpt", "opus", "grok", "qwen"]
+    assert llm_gateway.normalize_model_order(["grok", "opus", "gpt"]) == ["grok", "opus", "gpt"]
+    assert llm_gateway.normalize_model_order('["gpt","gpt","unknown"]') == ["gpt", "opus", "grok"]
 
 
 def test_model_order_none_truncates_and_cannot_sit_in_the_middle():
-    assert llm_gateway.normalize_model_order(["opus", "none", "none"]) == ["opus", "none", "none", "none"]
-    assert llm_gateway.normalize_model_order(["opus", "gpt", "none"]) == ["opus", "gpt", "none", "none"]
+    assert llm_gateway.normalize_model_order(["opus", "none", "none"]) == ["opus", "none", "none"]
+    assert llm_gateway.normalize_model_order(["opus", "gpt", "none"]) == ["opus", "gpt", "none"]
     # 중간에 없음이 오면 그 뒤는 버린다
-    assert llm_gateway.normalize_model_order(["opus", "none", "grok"]) == ["opus", "none", "none", "none"]
+    assert llm_gateway.normalize_model_order(["opus", "none", "grok"]) == ["opus", "none", "none"]
     # 모델이 하나도 없으면 기존처럼 전체 기본값
-    assert llm_gateway.normalize_model_order(["none", "opus", "gpt"]) == ["opus", "gpt", "grok", "qwen"]
-    assert llm_gateway.is_valid_monitor_order(["opus", "gpt", "none", "none"]) is True
-    assert llm_gateway.is_valid_monitor_order(["opus", "none", "none", "none"]) is True
-    assert llm_gateway.is_valid_monitor_order(["opus", "none", "grok", "none"]) is False
-    assert llm_gateway.is_valid_monitor_order(["none", "opus", "gpt", "qwen"]) is False
-    assert llm_gateway.is_valid_monitor_order(["opus", "opus", "none", "none"]) is False
+    assert llm_gateway.normalize_model_order(["none", "opus", "gpt"]) == ["opus", "gpt", "grok"]
+    assert llm_gateway.is_valid_monitor_order(["opus", "gpt", "none"]) is True
+    assert llm_gateway.is_valid_monitor_order(["opus", "none", "none"]) is True
+    assert llm_gateway.is_valid_monitor_order(["opus", "none", "grok"]) is False
+    assert llm_gateway.is_valid_monitor_order(["none", "opus", "gpt"]) is False
+    assert llm_gateway.is_valid_monitor_order(["opus", "opus", "none"]) is False
 
 
 # ── ① 마크다운 I/O 왕복 + app·db 파서 일치(드리프트 가드) ──────────────
@@ -501,12 +501,12 @@ def test_monitor_model_orders_persist_independently():
     db.init()
     try:
         saved = db.set_monitor_model_orders(
-            summary=["gpt", "opus", "grok", "qwen"],
-            capture=["grok", "gpt", "opus", "qwen"],
+            summary=["gpt", "opus", "grok"],
+            capture=["grok", "gpt", "opus"],
         )
         assert saved == {
-            "summary": ["gpt", "opus", "grok", "qwen"],
-            "capture": ["grok", "gpt", "opus", "qwen"],
+            "summary": ["gpt", "opus", "grok"],
+            "capture": ["grok", "gpt", "opus"],
         }
         assert db.get_monitor_model_orders() == saved
 
@@ -514,20 +514,20 @@ def test_monitor_model_orders_persist_independently():
         payload = client.get("/channels").get_json()
         assert payload["model_orders"] == saved
         changed = client.patch(
-            "/channels/model-orders", json={"summary": ["opus", "grok", "gpt", "qwen"]}
+            "/channels/model-orders", json={"summary": ["opus", "grok", "gpt"]}
         ).get_json()
-        assert changed["model_orders"]["summary"] == ["opus", "grok", "gpt", "qwen"]
-        assert changed["model_orders"]["capture"] == ["grok", "gpt", "opus", "qwen"]
+        assert changed["model_orders"]["summary"] == ["opus", "grok", "gpt"]
+        assert changed["model_orders"]["capture"] == ["grok", "gpt", "opus"]
         bad = client.patch(
             "/channels/model-orders", json={"capture": ["opus", "opus", "gpt"]}
         )
         assert bad.status_code == 400
         truncated = client.patch(
-            "/channels/model-orders", json={"summary": ["grok", "none", "none", "none"]}
+            "/channels/model-orders", json={"summary": ["grok", "none", "none"]}
         ).get_json()
-        assert truncated["model_orders"]["summary"] == ["grok", "none", "none", "none"]
+        assert truncated["model_orders"]["summary"] == ["grok", "none", "none"]
         middle = client.patch(
-            "/channels/model-orders", json={"summary": ["opus", "none", "gpt", "qwen"]}
+            "/channels/model-orders", json={"summary": ["opus", "none", "gpt"]}
         )
         assert middle.status_code == 400
     finally:
@@ -653,13 +653,13 @@ def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
     channel_monitor.process_video(
         {"id": 1, "url": "https://youtu.be/orders", "txt_path": "/tmp/existing.md"},
         "prompt",
-        summary_models=["gpt", "opus", "grok", "qwen"],
+        summary_models=["gpt", "opus", "grok"],
         capture_models=["grok", "gpt", "opus"],
     )
     summary_body = next(body for url, body in calls if url.endswith("/summarize"))
     capture_body = next(body for url, body in calls if url.endswith("/keyframes"))
-    assert summary_body["models"] == ["gpt", "opus", "grok", "qwen"]
-    assert capture_body["models"] == ["grok", "gpt", "opus", "qwen"]
+    assert summary_body["models"] == ["gpt", "opus", "grok"]
+    assert capture_body["models"] == ["grok", "gpt", "opus"]
 
 
 def test_stream_command_timeout_and_stderr_drain():
