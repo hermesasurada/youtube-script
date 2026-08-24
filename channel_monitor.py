@@ -150,6 +150,19 @@ def claude_healthy() -> tuple[bool, str]:
     return True, ""
 
 
+def omlx_healthy() -> tuple[bool, str]:
+    """로컬 oMLX 서버가 살아 있고 지정 모델을 서빙하는지(가벼운 /v1/models 조회)."""
+    try:
+        r = requests.get(llm_gateway.OMLX_BASE.rstrip("/") + "/models", timeout=8)
+        r.raise_for_status()
+        ids = {m.get("id") for m in (r.json().get("data") or [])}
+    except Exception as e:                       # noqa: BLE001
+        return False, f"oMLX 응답 없음: {str(e)[:80]}"
+    if llm_gateway.OMLX_MODEL not in ids:
+        return False, f"모델 미탑재({llm_gateway.OMLX_MODEL})"
+    return True, llm_gateway.OMLX_MODEL
+
+
 def grok_fallback_ready() -> tuple[bool, str]:
     """app.py 요약 Grok 폴백을 시도할 수 있는지(바이너리 존재 + 플래그). 실제 호출은 안 함."""
     if not GROK_FALLBACK:
@@ -165,7 +178,7 @@ def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
 
     Returns:
         (proceed, mode, detail)
-        mode: "opus" | "gpt" | "grok" | "none"
+        mode: "opus" | "gpt" | "grok" | "qwen" | "none"
     저장된 순서에서 실행 가능한 첫 모델을 고른다. 실제 요청에서는 그 모델부터
     남은 순서를 서버에 전달해 인증·한도 오류까지 순차 폴백한다.
     """
@@ -185,6 +198,8 @@ def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
             path = _grok_bin()
             ok = os.path.exists(path) and (explicit or GROK_FALLBACK)
             detail = path if ok else ("GROK_FALLBACK=0" if not explicit else f"grok 없음 ({path})")
+        elif key == "qwen":
+            ok, detail = omlx_healthy()
         else:
             continue
         if ok:

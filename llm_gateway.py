@@ -100,9 +100,44 @@ def resolve_codex_bin() -> str:
     return fallback if os.path.exists(fallback) else (env or "codex")
 
 
-MODEL_KEYS = ("opus", "gpt", "grok")
+MODEL_KEYS = ("opus", "gpt", "grok", "qwen")
 NONE_KEY = "none"
 SLOT_COUNT = len(MODEL_KEYS)
+
+# ── 로컬 oMLX(Qwen) — OpenAI 호환 API. 토큰 비용 없이 맥에서 직접 돌린다.
+OMLX_BASE    = os.environ.get("OMLX_BASE_URL", "http://127.0.0.1:8080/v1")
+OMLX_MODEL   = os.environ.get("OMLX_MODEL", "Qwen3.8-27B-Alis-MLX-6bit")
+OMLX_TIMEOUT = int(os.environ.get("OMLX_TIMEOUT", "3600"))
+
+
+def run_omlx_prompt(prompt: str, *, max_tokens: int = 8000,
+                    temperature: float = 0.3) -> tuple[str, str]:
+    """oMLX로 단일턴 생성. (본문, 오류사유) — 비전은 지원하지 않는다(요약 전용).
+
+    사고 모드는 끈다(일반 작업에서 느려지는 주된 원인). 실패해도 예외를 던지지
+    않고 사유를 돌려줘 상위 폴백 체인이 다음 모델로 넘어가게 한다.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return "", "openai 패키지 없음"
+    try:
+        cli = OpenAI(base_url=OMLX_BASE, api_key="none", timeout=OMLX_TIMEOUT)
+        r = cli.chat.completions.create(
+            model=OMLX_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens, temperature=temperature,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+    except Exception as e:                       # noqa: BLE001 - 서버 다운·타임아웃 등
+        return "", f"oMLX 오류: {str(e)[:200]}"
+    body = (r.choices[0].message.content or "").strip()
+    if not body:
+        return "", "oMLX 빈 응답"
+    fin = r.choices[0].finish_reason or ""
+    if fin == "length":
+        return body, ""      # 잘렸어도 본문은 살린다(상위에서 판단)
+    return body, ""
 
 
 def _parse_model_tokens(value) -> list[str]:
