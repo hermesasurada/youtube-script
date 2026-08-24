@@ -27,10 +27,17 @@ BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 RES_DIR    = os.path.join(BASE_DIR, "res")
 TRANS_DIR  = os.path.join(RES_DIR, "translated")
 
-# DGX Spark(vLLM). 로컬 oMLX보다 청크당 1.4배 빨라 번역은 이쪽을 쓴다.
+# 번역 백엔드 — 1차 DGX Spark(vLLM), 2차 로컬 oMLX.
+# Spark가 청크당 1.4배 빠르지만 별도 머신이라 꺼져 있을 수 있어, 연결이 안 되면
+# 맥 안의 oMLX로 넘어가 번역을 계속한다(둘 다 Qwen3.8 계열이라 결과가 비슷하다).
 QWEN_BASE   = os.environ.get("QWEN_BASE_URL", "http://192.168.1.125:8000/v1")
 QWEN_MODEL  = os.environ.get("QWEN_MODEL", "qwen3.8-27b")
+OMLX_BASE   = os.environ.get("OMLX_BASE_URL", "http://127.0.0.1:8080/v1")
+OMLX_MODEL  = os.environ.get("OMLX_MODEL", "Qwen3.8-27B-Alis-MLX-6bit")
 QWEN_TIMEOUT = int(os.environ.get("QWEN_TIMEOUT", "900"))
+
+BACKENDS = [("spark", QWEN_BASE, QWEN_MODEL), ("omlx", OMLX_BASE, OMLX_MODEL)]
+_active = 0          # 한 번 폴백하면 이 프로세스 동안 유지(죽은 서버를 매 청크 두드리지 않게)
 
 # 청크가 크면 호출 오버헤드가 줄지만 출력이 길어져 중단 위험이 커진다.
 # 실측(16 tok/s)상 4천자 내외가 한 번에 안정적으로 나오는 크기다.
@@ -84,9 +91,14 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def _client():
+def _client(idx: int = 0):
     from openai import OpenAI
-    return OpenAI(base_url=QWEN_BASE, api_key="none", timeout=QWEN_TIMEOUT)
+    _, base, _model = BACKENDS[idx]
+    return OpenAI(base_url=base, api_key="none", timeout=QWEN_TIMEOUT)
+
+
+def active_backend() -> str:
+    return BACKENDS[_active][0]
 
 
 def split_body(md_text: str) -> tuple[str, str]:
@@ -128,29 +140,45 @@ def chunk_body(body: str) -> list[str]:
     return [c for c in chunks if c.strip()]
 
 
-def _call(client, user: str, temperature: float, rep_penalty: float) -> tuple[str, str]:
-    # 네트워크 오류는 서버 재시작·일시 무응답이 대부분이라 잠깐 물러났다 다시 시도한다.
-    # (한 번의 connection error로 영상 전체가 영구 실패 처리된 사례가 있었다)
+def _is_conn_error(msg: str) -> bool:
+    m = msg.lower()
+    return "connection" in m or "timeout" in m or "refused" in m or "unreachable" in m
+
+
+def _call(user: str, temperature: float, rep_penalty: float) -> tuple[str, str]:
+    """활성 백엔드로 한 청크 번역. 연결이 안 되면 짧게 재시도한 뒤 다음 백엔드로 넘어간다.
+
+    (한 번의 connection error로 영상 전체가 영구 실패 처리된 사례가 있었다)
+    """
+    global _active
     last = None
-    for i in range(3):
-        try:
-            r = client.chat.completions.create(
-                model=QWEN_MODEL,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                          {"role": "user", "content": user}],
-                max_tokens=MAX_TOKENS, temperature=temperature,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False},
-                            "repetition_penalty": rep_penalty},
-            )
-            break
-        except Exception as e:                       # noqa: BLE001
-            msg = str(e)
-            if i < 2 and ("Connection" in msg or "timeout" in msg.lower()):
-                log(f"  ↻ 서버 연결 실패 — 30초 뒤 재시도({i + 1}/2)")
-                time.sleep(30)
+    for idx in range(_active, len(BACKENDS)):
+        name, _base, model = BACKENDS[idx]
+        for attempt in range(2):
+            try:
+                r = _client(idx).chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                              {"role": "user", "content": user}],
+                    max_tokens=MAX_TOKENS, temperature=temperature,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False},
+                                "repetition_penalty": rep_penalty},
+                )
+                if idx != _active:
+                    log(f"  ✓ {name} 백엔드로 전환")
+                    _active = idx
+                break
+            except Exception as e:                   # noqa: BLE001
                 last = e
-                continue
-            raise
+                if not _is_conn_error(str(e)):
+                    raise                            # 연결 외 오류는 폴백 대상이 아니다
+                if attempt == 0:
+                    log(f"  ↻ {name} 연결 실패 — 20초 뒤 재시도")
+                    time.sleep(20)
+        else:
+            log(f"  ⤳ {name} 사용 불가 — 다음 백엔드 시도")
+            continue
+        break
     else:
         raise last
     out = (r.choices[0].message.content or "").strip()
@@ -175,16 +203,16 @@ def _looks_degenerate(out: str, chunk: str, finish: str) -> bool:
     return longest > 3000
 
 
-def translate_chunk(client, chunk: str, prev_tail: str = "") -> str:
+def translate_chunk(chunk: str, prev_tail: str = "") -> str:
     user = chunk
     if prev_tail:
         user = (f"[직전까지의 번역 끝부분 — 용어와 화자를 잇기 위한 참고. "
                 f"다시 번역하지 말 것]\n{prev_tail}\n\n[여기부터 번역]\n{chunk}")
-    out, finish = _call(client, user, 0.3, 1.05)
+    out, finish = _call(user, 0.3, 1.05)
     if _looks_degenerate(out, chunk, finish):
         # 폭주는 샘플링 운에 좌우되므로, 온도를 낮추고 반복 페널티를 올려 한 번 더.
         log(f"  ↻ 폭주 감지({len(out):,}자, finish={finish}) — 재시도")
-        out2, finish2 = _call(client, user, 0.15, 1.15)
+        out2, finish2 = _call(user, 0.15, 1.15)
         if not _looks_degenerate(out2, chunk, finish2):
             return out2
         log(f"  ⚠ 재시도도 비정상({len(out2):,}자) — 짧은 쪽을 채택")
@@ -234,13 +262,12 @@ def translate_file(md_path: str, yt_id: str = "") -> dict:
         done_n = 0
 
     db.set_translation_state(yt_id, md_path, dest, "processing", done_n, len(chunks), "")
-    client = _client()
     t_all = time.time()
     for i in range(done_n, len(chunks)):
         tail = parts[-1][-CTX_TAIL_CHARS:] if parts else ""
         t0 = time.time()
         try:
-            out = translate_chunk(client, chunks[i], tail)
+            out = translate_chunk(chunks[i], tail)
         except Exception as e:                        # noqa: BLE001
             db.set_translation_state(yt_id, md_path, dest, "failed", len(parts),
                                      len(chunks), str(e)[:300])
