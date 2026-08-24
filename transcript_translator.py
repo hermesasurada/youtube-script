@@ -27,8 +27,9 @@ BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 RES_DIR    = os.path.join(BASE_DIR, "res")
 TRANS_DIR  = os.path.join(RES_DIR, "translated")
 
-QWEN_BASE   = os.environ.get("QWEN_BASE_URL", "http://127.0.0.1:8080/v1")   # 로컬 oMLX
-QWEN_MODEL  = os.environ.get("QWEN_MODEL", "Qwen3.8-27B-Alis-MLX-6bit")
+# DGX Spark(vLLM). 로컬 oMLX보다 청크당 1.4배 빨라 번역은 이쪽을 쓴다.
+QWEN_BASE   = os.environ.get("QWEN_BASE_URL", "http://192.168.1.125:8000/v1")
+QWEN_MODEL  = os.environ.get("QWEN_MODEL", "qwen3.8-27b")
 QWEN_TIMEOUT = int(os.environ.get("QWEN_TIMEOUT", "900"))
 
 # 청크가 크면 호출 오버헤드가 줄지만 출력이 길어져 중단 위험이 커진다.
