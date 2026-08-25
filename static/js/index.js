@@ -975,7 +975,10 @@ async function qPreview() {
       return;
     }
     _qPreview = d;
-    pv.innerHTML = `<div class="q-pv-ok"><b>${_attrEsc(d.title)}</b><span>${_attrEsc(d.channel || '')}</span></div>`;
+    const seg = d.start_sec
+      ? `<span class="q-pv-seg">${_attrEsc(d.start_label)}부터 전사</span>` : '';
+    pv.innerHTML = `<div class="q-pv-ok"><b>${_attrEsc(d.title)}</b>`
+                 + `<span>${_attrEsc(d.channel || '')}</span>${seg}</div>`;
     btn.disabled = false;
   } catch (e) {
     pv.innerHTML = `<span class="q-pv-err">조회 실패: ${_attrEsc(e.message)}</span>`;
@@ -1010,6 +1013,7 @@ async function qAddToQueue() {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _qPreview.yt_id,
                           title: _qPreview.title,
+                          start_sec: _qPreview.start_sec || 0,
                           capture: document.getElementById('q-add-capture-btn').classList.contains('on')}),
   });
   const d = await r.json();
@@ -1028,6 +1032,13 @@ function closeQueueModal() {
   document.body.style.overflow = '';
 }
 
+function _qhms(sec) {
+  const s = Math.max(0, Math.floor(sec)), h = Math.floor(s / 3600),
+        m = Math.floor((s % 3600) / 60), x = s % 60;
+  const p = n => String(n).padStart(2, '0');
+  return h ? `${h}:${p(m)}:${p(x)}` : `${m}:${p(x)}`;
+}
+
 async function refreshQueueModal() {
   const body = document.getElementById('queue-modal-body');
   try {
@@ -1040,6 +1051,7 @@ async function refreshQueueModal() {
       const bits = [];
       if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
       if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
+      if (v.start_sec) bits.push(`${_qhms(v.start_sec)}부터`);
       if (v.capture === 0) bits.push('캡처 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.length ? `<span class="q-extra">${_attrEsc(bits.join(' · '))}</span>` : '';

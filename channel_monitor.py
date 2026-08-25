@@ -483,7 +483,10 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     url = v["url"]
     txt_path = v.get("txt_path")
     if not txt_path or not os.path.isfile(txt_path):
-        r = requests.post(f"{BASE}/start", json={"source": "url", "url": url}, timeout=30).json()
+        payload = {"source": "url", "url": url}
+        if v.get("start_sec"):
+            payload["start_sec"] = int(v["start_sec"])   # 구간 전사(시작 시각 지정)
+        r = requests.post(f"{BASE}/start", json=payload, timeout=30).json()
         job_id = r.get("job_id")
         if not job_id:
             raise RuntimeError(r.get("error", "start 실패"))

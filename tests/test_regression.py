@@ -782,7 +782,7 @@ def test_sparse_transcript_is_rejected_before_saving(monkeypatch, tmp_path):
     """길이 대비 본문이 사실상 비면 저장하지 않는다(요약·캡처 낭비 차단)."""
     md = tmp_path / "out.md"
     saved = {"called": False}
-    monkeypatch.setattr(app, "_parse_transcript", lambda p: "[00:00] We'll be right back.")
+    monkeypatch.setattr(app, "_parse_transcript", lambda p, off=0: "[00:00] We'll be right back.")
     monkeypatch.setattr(app, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
 
     job_id = "sparse-transcript"
@@ -801,7 +801,7 @@ def test_normal_transcript_still_saves(monkeypatch, tmp_path):
     """정상 분량 전사는 그대로 저장돼야 한다(방어가 과하게 걸리지 않는지)."""
     md = tmp_path / "ok.md"
     saved = {"called": False}
-    monkeypatch.setattr(app, "_parse_transcript", lambda p: "[00:00] " + "가" * 3000)
+    monkeypatch.setattr(app, "_parse_transcript", lambda p, off=0: "[00:00] " + "가" * 3000)
     monkeypatch.setattr(app, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
 
     job_id = "normal-transcript"
@@ -828,3 +828,58 @@ def test_job_result_exposes_failure_stage_and_reason():
         assert payload["error_message"] == "다운로드 실패 접근 거부"
     finally:
         app.jobs.pop(job_id, None)
+
+
+# ── 시작 시각 지정 전사(?t=266) ────────────────────────────────────────
+
+def test_extract_start_sec_forms():
+    """공유 링크의 t 파라미터는 초·h/m/s 표기 모두 초로 환산된다."""
+    assert app._extract_start_sec("https://youtu.be/0kC3xOZChdA?t=266") == 266
+    assert app._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk&t=4m26s") == 266
+    assert app._extract_start_sec("https://youtu.be/x?t=1h2m3s") == 3723
+    assert app._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk&start=90") == 90
+    assert app._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk") == 0
+    assert app._extract_start_sec("https://youtu.be/x?t=") == 0
+
+
+def test_start_time_url_keeps_video_id_for_dedup():
+    """t 파라미터가 붙어도 영상 ID 추출(중복 판정 키)은 그대로여야 한다."""
+    assert app._extract_yt_id("https://youtu.be/0kC3xOZChdA?t=266") == "0kC3xOZChdA"
+
+
+def test_parse_transcript_offsets_timestamps(tmp_path):
+    """구간 전사의 [mm:ss] 마커는 원본 영상 기준으로 되돌아온다 — 캡처 정합성."""
+    j = tmp_path / "a.mp3.json"
+    j.write_text(json.dumps({"transcription": [
+        {"text": "first", "offsets": {"from": 0}},
+        {"text": "second", "offsets": {"from": 20000}},
+    ]}), encoding="utf-8")
+    assert app._parse_transcript(str(j)).startswith("[00:00] first")
+    shifted = app._parse_transcript(str(j), 266)
+    assert shifted.startswith("[04:26] first")
+    assert "[04:46] second" in shifted
+
+
+def test_queue_add_with_start_sec_bypasses_history_dup(monkeypatch):
+    """이미 전사된 영상이라도 시작 시각을 지정하면 다른 결과물이라 큐에 들어간다."""
+    monkeypatch.setattr(app.db, "get_item_by_yt_id", lambda i: {"md_path": "x"})
+    monkeypatch.setattr(app, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
+    monkeypatch.setattr(app, "_kick_drain_if_idle", lambda: False)
+    seen = {}
+
+    def _enq(yt_id, url, title, channel_id, **kw):
+        seen.update({"url": url, "start_sec": kw.get("start_sec")})
+        return True
+
+    monkeypatch.setattr(app.db, "enqueue_video", _enq)
+    monkeypatch.setattr(app.db, "queue_overview", lambda *a, **k: {"waiting": [], "recent": []})
+    client = app.app.test_client()
+
+    r = client.post("/queue/items", json={"url": "https://youtu.be/0kC3xOZChdA?t=266"})
+    assert r.status_code == 200
+    assert seen["start_sec"] == 266
+    assert seen["url"].endswith("&t=266")
+
+    # 시작 시각이 없으면 종전대로 이력 중복으로 거절
+    r2 = client.post("/queue/items", json={"url": "https://youtu.be/0kC3xOZChdA"})
+    assert r2.status_code == 409

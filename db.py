@@ -282,6 +282,13 @@ def init() -> None:
             if "capture" not in ccols:
                 c.execute("ALTER TABLE channels ADD COLUMN capture INTEGER NOT NULL DEFAULT 1")
             c.execute("PRAGMA user_version = 12")
+        if ver < 13:
+            # v13: 전사 시작 시각(초). NULL·0 = 처음부터.
+            # 긴 팟캐스트에서 뒷부분만 필요할 때 앞을 통째로 건너뛴다.
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            if "start_sec" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN start_sec INTEGER")
+            c.execute("PRAGMA user_version = 13")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -766,7 +773,8 @@ def in_queue(yt_id: str) -> bool:
 def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
                   status: str = "pending", reason: str = "", *,
                   retry_after_seconds: int | float | None = None,
-                  error_kind: str = "", capture: bool | None = None) -> bool:
+                  error_kind: str = "", capture: bool | None = None,
+                  start_sec: int | None = None) -> bool:
     """큐에 추가(yt_id UNIQUE라 중복이면 무시). 새로 넣었으면 True."""
     yt_id = (yt_id or "").strip()
     if not yt_id:
@@ -778,11 +786,12 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
         cur = conn.execute(
             """INSERT OR IGNORE INTO watch_queue
                  (yt_id, url, title, channel_id, status, reason, added_at, updated_at,
-                  next_retry_at, error_kind, capture)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                  next_retry_at, error_kind, capture, start_sec)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (yt_id, url, title, channel_id, status, reason, now, now,
              next_retry_at, error_kind,
-             None if capture is None else (1 if capture else 0)),
+             None if capture is None else (1 if capture else 0),
+             start_sec or None),
         )
         if cur.rowcount > 0:                       # 새 행의 position = id (FIFO 기본)
             conn.execute("UPDATE watch_queue SET position = id "
@@ -870,6 +879,15 @@ def queue_status_of(yt_id: str) -> str | None:
     r = _conn().execute("SELECT status FROM watch_queue WHERE yt_id = ?",
                         (yt_id,)).fetchone()
     return r["status"] if r else None
+
+
+def set_queue_start_sec(yt_id: str, start_sec: int | None) -> None:
+    """되살린(requeue) 항목의 전사 시작 시각 갱신 — 0/None이면 처음부터."""
+    with _lock:
+        _conn().execute(
+            "UPDATE watch_queue SET start_sec = ?, updated_at = ? WHERE yt_id = ?",
+            (start_sec or None, _now(), yt_id),
+        )
 
 
 def queue_requeue(yt_id: str, capture: bool | None = None) -> None:

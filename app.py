@@ -210,7 +210,7 @@ _META_KEYS = [
 # md 프론트매터 출력 순서
 _MD_META_ORDER = [
     "title", "uploader", "channel", "channel_url",
-    "duration", "upload_date", "webpage_url", "id",
+    "duration", "clip_start", "upload_date", "webpage_url", "id",
     "categories", "tags", "source_file",
 ]
 
@@ -352,9 +352,12 @@ def _ts_tag(sec: float) -> str:
     return f"[{h}:{m:02d}:{s:02d}]" if h else f"[{m:02d}:{s:02d}]"
 
 
-def _parse_transcript(json_path: str) -> str | None:
+def _parse_transcript(json_path: str, offset: float = 0) -> str | None:
     """whisper JSON → 본문. 약 15초 간격으로 [mm:ss] 시각 마커를 삽입해
-    이후 요약기가 주제별 시작 시각을 라벨링(Tier3 타임스탬프 정렬)할 수 있게 한다."""
+    이후 요약기가 주제별 시작 시각을 라벨링(Tier3 타임스탬프 정렬)할 수 있게 한다.
+
+    offset은 구간 전사(시작 시각 지정)에서 잘라낸 앞부분 길이 —
+    마커를 원본 영상 기준으로 되돌려 캡처가 엉뚱한 장면을 뽑지 않게 한다."""
     if not os.path.exists(json_path):
         return None
     with open(json_path, encoding="utf-8", errors="replace") as f:
@@ -367,6 +370,7 @@ def _parse_transcript(json_path: str) -> str | None:
         prev = text
         start = _seg_start_sec(seg)
         if start is not None:
+            start += offset
             bucket = int(start // 15)            # 약 15초 간격으로만 마커 삽입(가독성)
             if bucket != last_bucket:
                 last_bucket = bucket
@@ -374,6 +378,29 @@ def _parse_transcript(json_path: str) -> str | None:
         cleaned.append(text)
     # 주의: JSON 삭제는 md 저장이 확정된 뒤 _finish_transcription에서 수행한다.
     return "\n".join(cleaned)
+
+
+def _trim_audio_head(audio_path: str, start_sec: int) -> None:
+    """오디오 앞부분(0~start_sec)을 잘라낸다 — 시작 시각 지정 전사용.
+
+    yt-dlp의 download_ranges(구간만 받기)는 ffmpeg가 googlevideo에 직접 붙어
+    403에 막히므로 쓰지 않는다. 전체를 기존 경로로 받아(403 재시도·잘림 감지
+    그대로 유효) 여기서 잘라낸다 — 네트워크는 그대로지만 전사 시간이 줄어든다.
+    """
+    tmp = audio_path + ".trim.mp3"
+    ff = os.path.join(FFMPEG_LOCATION, "ffmpeg") if FFMPEG_LOCATION else "ffmpeg"
+    r = subprocess.run(
+        [ff, "-y", "-loglevel", "error", "-ss", str(int(start_sec)),
+         "-i", audio_path, "-c", "copy", tmp],
+        capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise RuntimeError((r.stderr or "ffmpeg 실패").strip().splitlines()[-1][:200])
+    os.replace(tmp, audio_path)
+    _duration_cache.pop(audio_path, None)   # 길이 캐시 무효화(잘라낸 뒤 길이가 바뀐다)
 
 
 def _run_whisper(job_id: str, audio_path: str, language: str,
@@ -472,11 +499,12 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
     q = jobs[job_id]["queue"]
     json_path = audio_path + ".json"
     if rc == 0:
-        transcript = _parse_transcript(json_path)
+        transcript = _parse_transcript(json_path, jobs[job_id].get("start_offset") or 0)
         # 방어 B: 길이 대비 본문이 사실상 비어 있으면(무음·잘린 오디오) 성공 처리하지 않는다.
         # 저장까지 하면 요약 LLM 호출과 캡처가 낭비되고 빈 요약본이 이력에 남는다.
         if transcript is not None:
-            secs = float((jobs[job_id].get("meta") or {}).get("duration") or 0)
+            secs = float(jobs[job_id].get("clip_duration")
+                         or (jobs[job_id].get("meta") or {}).get("duration") or 0)
             mins = secs / 60
             body = _TS_TAG_RE.sub("", transcript).strip()   # [mm:ss] 마커는 본문 길이에서 제외
             if mins >= 1 and len(body) / mins < MIN_CHARS_PER_MIN:
@@ -581,6 +609,10 @@ def run_job(job_id: str, params: dict) -> None:
     url  = params["url"]
     lang = params.get("language", "auto")
     thr  = str(params.get("threads", 8))
+    try:
+        start_sec = max(0, int(params.get("start_sec") or 0))
+    except (TypeError, ValueError):
+        start_sec = 0
 
     q.put("영상 정보 가져오는 중...")
     try:
@@ -596,16 +628,40 @@ def run_job(job_id: str, params: dict) -> None:
         q.put(None)
         return
 
-    jobs[job_id]["total_duration"] = total
+    if start_sec and total and start_sec >= total - 5:
+        detail = _set_job_error(
+            job_id, "metadata",
+            f"시작 시각({_format_duration(start_sec)})이 영상 길이"
+            f"({_format_duration(total)})를 벗어납니다.")
+        q.put(f"오류: {detail}")
+        q.put(None)
+        return
+
+    # 구간 전사에서는 진행률·길이 검증·비어있음 판정 모두 '잘라낸 뒤 길이' 기준이어야 한다.
+    clip = max(0.0, total - start_sec) if (start_sec and total) else total
+    jobs[job_id]["total_duration"] = clip
+    jobs[job_id]["start_offset"]   = start_sec
+    jobs[job_id]["clip_duration"]  = clip
     jobs[job_id]["meta"] = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
+    if start_sec:
+        # md 프론트매터에는 구간 정보를 남기고 duration은 실제 전사 길이로 맞춘다.
+        jobs[job_id]["meta"]["clip_start"] = start_sec
+        if clip:
+            jobs[job_id]["meta"]["duration"] = clip
     if total > 0:
-        q.put(f"영상 길이: {_format_duration(total)}")
-        q.put({"type": "duration", "seconds": total})
+        if start_sec:
+            q.put(f"영상 길이: {_format_duration(total)} — "
+                  f"{_format_duration(start_sec)}부터 전사({_format_duration(clip)})")
+        else:
+            q.put(f"영상 길이: {_format_duration(total)}")
+        q.put({"type": "duration", "seconds": clip})
     q.put({"type": "videoinfo", "title": title, "uploader": uploader})
 
     out_dir    = _dated_dir()
     ts         = datetime.now().strftime("%Y%m%d%H%M")
-    stem       = f"{ts}_{_dur_tag(total)}_{_safe_stem(title)}"
+    stem       = f"{ts}_{_dur_tag(clip)}_{_safe_stem(title)}"
+    if start_sec:
+        stem += f"_from{int(start_sec)}s"
     audio_path = unique_path(out_dir, stem, ".mp3")
     stem_final = os.path.splitext(os.path.basename(audio_path))[0]
 
@@ -686,8 +742,20 @@ def run_job(job_id: str, params: dict) -> None:
         q.put(None)
         return
 
+    if start_sec:
+        _stage(q, "download")
+        q.put(f"{_format_duration(start_sec)} 이전 구간 잘라내는 중...")
+        try:
+            _trim_audio_head(audio_path, start_sec)
+        except Exception as e:
+            log.warning("audio trim failed: %s — %s", os.path.basename(audio_path), e)
+            detail = _set_job_error(job_id, "download", f"시작 시각 잘라내기 실패: {e}")
+            q.put(f"오류: {detail}")
+            q.put(None)
+            return
+
     q.put(f"저장됨: {os.path.basename(audio_path)}")
-    _transcribe_and_finish(job_id, audio_path, lang, thr, total,
+    _transcribe_and_finish(job_id, audio_path, lang, thr, clip,
                            unique_path(out_dir, stem_final, ".md"),
                            delete_audio=True)  # URL 다운로드본은 전사 후 삭제
 
@@ -923,6 +991,8 @@ def start():
         url = (data.get("url") or "").strip()
         if not url:
             return _json({"error": "URL을 입력해주세요."}, 400)
+        if not data.get("start_sec"):
+            data["start_sec"] = _extract_start_sec(url)
 
     job_id = str(uuid.uuid4())
     with jobs_lock:
@@ -1662,6 +1732,25 @@ def _extract_yt_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+_T_PARAM_RE = re.compile(r"[?&#](?:t|start)=([0-9hms]+)", re.I)
+_T_HMS_RE   = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$", re.I)
+
+
+def _extract_start_sec(url: str) -> int:
+    """공유 링크의 시작 시각(`?t=266`, `?t=4m26s`, `&start=90`) → 초. 없으면 0."""
+    m = _T_PARAM_RE.search(url or "")
+    if not m:
+        return 0
+    raw = m.group(1)
+    if raw.isdigit():
+        return int(raw)
+    hms = _T_HMS_RE.match(raw)
+    if not hms or not any(hms.groups()):
+        return 0
+    h, mi, se = (int(g or 0) for g in hms.groups())
+    return h * 3600 + mi * 60 + se
+
+
 def _oembed_meta(url: str) -> dict:
     """oEmbed로 제목·채널명을 가볍게 조회(미디어 서버를 건드리지 않아 차단 위험 없음)."""
     try:
@@ -1685,15 +1774,18 @@ def queue_preview():
     meta = _oembed_meta(url)
     if not meta.get("title"):
         return _json({"error": "영상 정보를 가져올 수 없습니다(비공개·삭제 여부 확인)."}, 404)
+    start_sec = _extract_start_sec(url)
     dup = None
-    if db.get_item_by_yt_id(yt_id):
-        dup = "history"
-    else:
-        st = db.queue_status_of(yt_id)
-        if st in ("pending", "processing", "kf_retry", "deferred"):
-            dup = "queue"
+    st = db.queue_status_of(yt_id)
+    if st in ("pending", "processing", "kf_retry", "deferred"):
+        dup = "queue"
+    elif db.get_item_by_yt_id(yt_id):
+        # 시작 시각을 지정했다면 앞부분을 뺀 다른 결과물이므로 재전사를 막지 않는다.
+        dup = None if start_sec else "history"
     return _json({"ok": True, "yt_id": yt_id, "title": meta["title"],
-                  "channel": meta.get("channel") or "", "duplicate": dup})
+                  "channel": meta.get("channel") or "", "duplicate": dup,
+                  "start_sec": start_sec,
+                  "start_label": _format_duration(start_sec) if start_sec else ""})
 
 
 _QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "1800"))
@@ -1809,22 +1901,33 @@ def queue_add():
     yt_id = _extract_yt_id(url)
     if not yt_id:
         return _json({"error": "유튜브 URL이 아닙니다."}, 400)
-    if db.get_item_by_yt_id(yt_id):
+    try:
+        start_sec = max(0, int(data.get("start_sec") or 0))
+    except (TypeError, ValueError):
+        start_sec = 0
+    if not start_sec:
+        start_sec = _extract_start_sec(url)
+    # 시작 시각을 지정한 요청은 기존 전사본과 다른 결과물이라 이력 중복으로 막지 않는다.
+    if not start_sec and db.get_item_by_yt_id(yt_id):
         return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
     title = (data.get("title") or "").strip() or _oembed_meta(url).get("title") or url
     capture = data.get("capture")            # 영상 단위 캡처 지정(None=기본 포함)
-    added = db.enqueue_video(yt_id, f"https://www.youtube.com/watch?v={yt_id}",
-                             title, "manual",
-                             capture=None if capture is None else bool(capture))
+    canonical = f"https://www.youtube.com/watch?v={yt_id}"
+    if start_sec:
+        canonical += f"&t={start_sec}"
+    added = db.enqueue_video(yt_id, canonical, title, "manual",
+                             capture=None if capture is None else bool(capture),
+                             start_sec=start_sec)
     if not added:
         # 이미 큐에 있음 — 종료 상태(done/failed/skipped)면 재처리 요청으로 보고 되살린다
         st = db.queue_status_of(yt_id)
         if st in ("pending", "processing", "kf_retry", "deferred"):
             return _json({"error": "이미 큐에 대기 중입니다.", "duplicate": "queue"}, 409)
         db.queue_requeue(yt_id, capture=None if capture is None else bool(capture))
+        db.set_queue_start_sec(yt_id, start_sec)
     started = _kick_drain_if_idle()
     waiting = len(db.queue_overview()["waiting"])
-    return _json({"ok": True, "yt_id": yt_id, "title": title,
+    return _json({"ok": True, "yt_id": yt_id, "title": title, "start_sec": start_sec,
                   "waiting": waiting, "started": started})
 
 
