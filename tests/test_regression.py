@@ -860,9 +860,9 @@ def test_parse_transcript_offsets_timestamps(tmp_path):
     assert "[04:46] second" in shifted
 
 
-def test_queue_add_with_start_sec_bypasses_history_dup(monkeypatch):
-    """이미 전사된 영상이라도 시작 시각을 지정하면 다른 결과물이라 큐에 들어간다."""
-    monkeypatch.setattr(app.db, "get_item_by_yt_id", lambda i: {"md_path": "x"})
+def test_queue_add_start_sec_is_stored(monkeypatch):
+    """시작 시각을 지정한 요청은 start_sec과 t 파라미터가 붙은 url로 큐에 들어간다."""
+    monkeypatch.setattr(app.db, "get_item_by_yt_id", lambda i: None)
     monkeypatch.setattr(app, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
     monkeypatch.setattr(app, "_kick_drain_if_idle", lambda: False)
     seen = {}
@@ -873,13 +873,22 @@ def test_queue_add_with_start_sec_bypasses_history_dup(monkeypatch):
 
     monkeypatch.setattr(app.db, "enqueue_video", _enq)
     monkeypatch.setattr(app.db, "queue_overview", lambda *a, **k: {"waiting": [], "recent": []})
-    client = app.app.test_client()
 
-    r = client.post("/queue/items", json={"url": "https://youtu.be/0kC3xOZChdA?t=266"})
+    r = app.app.test_client().post("/queue/items",
+                                   json={"url": "https://youtu.be/0kC3xOZChdA?t=266"})
     assert r.status_code == 200
     assert seen["start_sec"] == 266
     assert seen["url"].endswith("&t=266")
 
-    # 시작 시각이 없으면 종전대로 이력 중복으로 거절
-    r2 = client.post("/queue/items", json={"url": "https://youtu.be/0kC3xOZChdA"})
-    assert r2.status_code == 409
+
+def test_transcribed_video_stays_blocked_even_with_start_sec(monkeypatch):
+    """이미 전사된 영상은 시작 시각을 지정해도 중복으로 거절한다."""
+    monkeypatch.setattr(app.db, "get_item_by_yt_id", lambda i: {"md_path": "x"})
+    monkeypatch.setattr(app, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
+    c = app.app.test_client()
+    for url in ("https://youtu.be/0kC3xOZChdA?t=266", "https://youtu.be/0kC3xOZChdA"):
+        r = c.post("/queue/items", json={"url": url})
+        assert r.status_code == 409, url
+        assert r.get_json()["duplicate"] == "history"
+    pv = c.get("/queue/preview?url=https://youtu.be/0kC3xOZChdA%3Ft%3D266").get_json()
+    assert pv["duplicate"] == "history"

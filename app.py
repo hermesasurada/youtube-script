@@ -1776,12 +1776,12 @@ def queue_preview():
         return _json({"error": "영상 정보를 가져올 수 없습니다(비공개·삭제 여부 확인)."}, 404)
     start_sec = _extract_start_sec(url)
     dup = None
-    st = db.queue_status_of(yt_id)
-    if st in ("pending", "processing", "kf_retry", "deferred"):
-        dup = "queue"
-    elif db.get_item_by_yt_id(yt_id):
-        # 시작 시각을 지정했다면 앞부분을 뺀 다른 결과물이므로 재전사를 막지 않는다.
-        dup = None if start_sec else "history"
+    if db.get_item_by_yt_id(yt_id):
+        dup = "history"      # 시작 시각을 지정해도 이미 전사된 영상은 다시 받지 않는다
+    else:
+        st = db.queue_status_of(yt_id)
+        if st in ("pending", "processing", "kf_retry", "deferred"):
+            dup = "queue"
     return _json({"ok": True, "yt_id": yt_id, "title": meta["title"],
                   "channel": meta.get("channel") or "", "duplicate": dup,
                   "start_sec": start_sec,
@@ -1907,8 +1907,7 @@ def queue_add():
         start_sec = 0
     if not start_sec:
         start_sec = _extract_start_sec(url)
-    # 시작 시각을 지정한 요청은 기존 전사본과 다른 결과물이라 이력 중복으로 막지 않는다.
-    if not start_sec and db.get_item_by_yt_id(yt_id):
+    if db.get_item_by_yt_id(yt_id):
         return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
     title = (data.get("title") or "").strip() or _oembed_meta(url).get("title") or url
     capture = data.get("capture")            # 영상 단위 캡처 지정(None=기본 포함)
