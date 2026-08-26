@@ -146,7 +146,7 @@
       position: absolute;
       top: .4rem; right: .4rem;
       display: flex; align-items: center; justify-content: center;
-      width: 30px; height: 30px;             /* 터치 여유 */
+      width: 45px; height: 45px;             /* 터치 여유 */
       border: none; border-radius: 5px;
       background: rgba(0,0,0,.45);
       color: rgba(255,255,255,.7);
@@ -779,7 +779,7 @@ function renderCard(item) {
   const bmBtn = `<button class="hist-bm-btn${item.bookmark ? ' on' : ''}"
     data-id="${item.item_id}" data-on="${item.bookmark ? '1' : '0'}"
     onclick="event.stopPropagation();toggleBookmark(this)"
-    aria-label="${item.bookmark ? '북마크 해제' : '북마크'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>`;
+    aria-label="${item.bookmark ? '북마크 해제' : '북마크'}"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>`;
   return `<article class="hist-card${unreadClass}${clickable}">
     <div class="hist-thumb-wrap">${thumb}${dur}${bmBtn}</div>
     <div class="hist-card-body">

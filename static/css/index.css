@@ -1499,7 +1499,7 @@ select option { background: var(--surface); color: var(--text); }
   top: .45rem;
   right: .45rem;
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px;
+  width: 39px; height: 39px;
   border: none; border-radius: 4px;
   background: rgba(0,0,0,.45);
   backdrop-filter: blur(6px);
