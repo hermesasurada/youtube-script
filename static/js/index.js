@@ -347,6 +347,7 @@ let _historySelIdx   = -1;
 let _historyPage     = 1;
 let _historyRevision = '';
 let _histUnreadOnly  = false;
+let _histBookmarkOnly = false;
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
 let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일
 const HIST_PAGE_SIZE = 20;
@@ -363,6 +364,7 @@ function _saveHistFilter() {
       uploader: document.getElementById('hf-uploader').value,
       title:    document.getElementById('hf-title').value,
       unread:   _histUnreadOnly,
+      bookmark: _histBookmarkOnly,
       page:     _historyPage,
     }));
   } catch { /* 사파리 프라이빗 등 스토리지 불가 — 무시 */ }
@@ -380,6 +382,8 @@ function _restoreHistFilter() {
     if (s.uploader && [...usel.options].some(o => o.value === s.uploader)) usel.value = s.uploader;
     _histUnreadOnly = !!s.unread;
     document.getElementById('hf-unread-btn').classList.toggle('active', _histUnreadOnly);
+    _histBookmarkOnly = !!s.bookmark;
+    document.getElementById('hf-bookmark-btn').classList.toggle('active', _histBookmarkOnly);
     _histRestorePage = Number(s.page) > 1 ? Number(s.page) : 1;   // 필터 적용 후 반영
   } finally {
     _histRestoring = false;
@@ -441,6 +445,7 @@ function applyHistoryFilter(keepPage = false) {
     if (uploader && item.uploader !== uploader)  return false;
     if (titleQ   && !item.title.toLowerCase().includes(titleQ)) return false;
     if (_histUnreadOnly && item.is_read) return false;
+    if (_histBookmarkOnly && !item.bookmark) return false;
     return true;
   });
   // 정렬: 기준(_histSortKey)에 따라 전사 처리일 또는 영상 게시일. desc=최신순, asc=과거순.
@@ -493,6 +498,31 @@ function toggleHistorySortKey() {
   localStorage.setItem('histSortKey', _histSortKey);
   _updateSortBtn();
   applyHistoryFilter();
+}
+
+function toggleBookmarkFilter() {
+  _histBookmarkOnly = !_histBookmarkOnly;
+  document.getElementById('hf-bookmark-btn').classList.toggle('active', _histBookmarkOnly);
+  applyHistoryFilter();
+}
+
+/* 썸네일 우측 상단 북마크 토글 — 서버 저장 후 아이콘 즉시 갱신 */
+async function toggleBookmark(btn, ev) {
+  if (ev) ev.stopPropagation();          // 카드 클릭(요약 열기)과 분리
+  const itemId = Number(btn.dataset.id);
+  const next = btn.dataset.on !== '1';
+  try {
+    const result = await YS.apiBookmark(itemId, next);
+    if (!result) return;
+    if (result.revision) _historyRevision = result.revision;
+  } catch { return; }
+  const item = _historyItems.find(i => i.item_id === itemId);
+  if (item) item.bookmark = next;
+  btn.dataset.on = next ? '1' : '0';
+  btn.classList.toggle('on', next);
+  btn.title = next ? '북마크 해제' : '북마크';
+  // 북마크만 보기 중 해제하면 목록에서 빠진다(페이지 유지)
+  if (_histBookmarkOnly && !next) applyHistoryFilter(true);
 }
 
 function toggleUnreadFilter() {
@@ -611,6 +641,8 @@ function resetHistoryFilter() {
   document.getElementById('hf-title').value      = '';
   _histUnreadOnly = false;
   document.getElementById('hf-unread-btn').classList.remove('active');
+  _histBookmarkOnly = false;
+  document.getElementById('hf-bookmark-btn').classList.remove('active');
   _histSort    = 'desc';                                // 정렬도 기본(전사처리일·최신순)으로
   _histSortKey = 'date';
   localStorage.setItem('histSort', _histSort);
@@ -627,6 +659,7 @@ const ICON_SUMMARY  = '<svg width="14" height="14" viewBox="0 0 16 16" fill="non
 const ICON_TRANSCRIPT = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7"/></svg>';
 const ICON_YOUTUBE = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>';
 const ICON_DELETE  = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+const ICON_BOOKMARK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
 const ICON_EYE     = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_EYE_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 
@@ -674,7 +707,11 @@ function _renderHistoryList() {
     const durBadge  = item.duration
       ? `<span class="hist-thumb-dur">${fmtDurKo(item.duration)}</span>` : '';
 
-    const thumbBlock = `<div class="hist-thumb-wrap">${thumbInner}${durBadge}</div>`;
+    const bmBtn = `<button class="hist-bm-btn${item.bookmark ? ' on' : ''}"
+      data-id="${item.item_id}" data-on="${item.bookmark ? '1' : '0'}"
+      onclick="toggleBookmark(this, event)"
+      title="${item.bookmark ? '북마크 해제' : '북마크'}">${ICON_BOOKMARK}</button>`;
+    const thumbBlock = `<div class="hist-thumb-wrap">${thumbInner}${durBadge}${bmBtn}</div>`;
 
     const uploaderHtml = item.channel_url
       ? `<a class="hist-card-uploader" href="${_attrEsc(item.channel_url)}" target="_blank" rel="noopener" title="${_attrEsc(item.uploader)}">${esc(item.uploader)}</a>`
@@ -1014,7 +1051,8 @@ async function qAddToQueue() {
     body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + _qPreview.yt_id,
                           title: _qPreview.title,
                           start_sec: _qPreview.start_sec || 0,
-                          capture: document.getElementById('q-add-capture-btn').classList.contains('on')}),
+                          capture: document.getElementById('q-add-capture-btn').classList.contains('on'),
+                          distill: document.getElementById('q-add-distill-btn').classList.contains('on')}),
   });
   const d = await r.json();
   const pv = document.getElementById('q-add-preview');
@@ -1053,6 +1091,7 @@ async function refreshQueueModal() {
       if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
       if (v.start_sec) bits.push(`${_qhms(v.start_sec)}부터`);
       if (v.capture === 0) bits.push('캡처 제외');
+      if (v.distill === 0) bits.push('증류 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.length ? `<span class="q-extra">${_attrEsc(bits.join(' · '))}</span>` : '';
       const waiting = ['pending', 'kf_retry', 'deferred'].includes(v.status);
@@ -1061,8 +1100,13 @@ async function refreshQueueModal() {
         ? `<button class="q-cap-row ${capOn ? 'on' : ''}" role="switch" aria-checked="${capOn}"
                    onclick="toggleQueueCapture(${v.id}, ${capOn ? 'false' : 'true'})"
                    title="이 영상의 캡처 포함/제외">캡처</button>` : '';
-      const ctl = (movable || capBtn || extraCtl) ? `
-        <span class="q-ctl">${capBtn}${extraCtl}${movable ? `
+      const dsOn = v.distill !== 0;       // NULL=채널/기본 따름(포함 취급), 0=제외
+      const dsBtn = waiting && v.status !== 'kf_retry'
+        ? `<button class="q-cap-row ${dsOn ? 'on' : ''}" role="switch" aria-checked="${dsOn}"
+                   onclick="toggleQueueDistill(${v.id}, ${dsOn ? 'false' : 'true'})"
+                   title="이 영상의 지식증류 포함/제외">증류</button>` : '';
+      const ctl = (movable || capBtn || dsBtn || extraCtl) ? `
+        <span class="q-ctl">${capBtn}${dsBtn}${extraCtl}${movable ? `
           <button onclick="moveQueueItem(${v.id},'up')" title="위로">↑</button>
           <button onclick="moveQueueItem(${v.id},'down')" title="아래로">↓</button>
           <button class="q-del" onclick="cancelQueueItem(${v.id})" title="취소">×</button>` : ''}
@@ -1100,6 +1144,14 @@ async function requeueItem(id) {
   const r = await fetch(`/queue/items/${id}/requeue`, {method: 'POST'});
   const d = await r.json();
   if (!d.ok) alert(d.error || '복귀 실패');
+  refreshQueueModal();
+}
+
+async function toggleQueueDistill(id, enable) {
+  await fetch(`/queue/items/${id}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({distill: enable}),
+  });
   refreshQueueModal();
 }
 

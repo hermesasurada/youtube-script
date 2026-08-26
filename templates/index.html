@@ -124,6 +124,10 @@
                 <input type="text" id="hf-title" class="hf-title" placeholder="제목 검색..." oninput="applyHistoryFilter()">
                 <button class="hf-clear-btn" id="hf-clear-btn" onclick="clearTitleSearch()" title="지우기">✕</button>
               </div>
+              <button class="hf-unread-btn" id="hf-bookmark-btn" onclick="toggleBookmarkFilter()" title="북마크된 영상만 보기">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                북마크만
+              </button>
               <button class="hf-unread-btn" id="hf-unread-btn" onclick="toggleUnreadFilter()" title="미읽음만 보기">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 미읽음만
@@ -209,6 +213,9 @@
         <button type="button" class="q-cap-chip on" id="q-add-capture-btn" role="switch"
                 aria-checked="true" onclick="qToggleAddCapture(this)"
                 title="이 영상의 요약에 키프레임 캡처를 포함할지">캡처</button>
+        <button type="button" class="q-cap-chip on" id="q-add-distill-btn" role="switch"
+                aria-checked="true" onclick="qToggleAddCapture(this)"
+                title="이 영상을 지식증류(옵시디언 볼트) 대상에 포함할지">증류</button>
         <button id="q-add-btn" onclick="qAddToQueue()" disabled>큐에 추가</button>
       </div>
       <div class="q-add-preview" id="q-add-preview"></div>

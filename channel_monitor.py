@@ -672,6 +672,14 @@ def _drain_main_one(orders, capture_order) -> None:
             capture_models=capture_order,
         )
         kf_note = res.get("kf_note")
+        # 큐에서 증류를 지정했으면(NULL 아님) 완성된 이력에 영상 단위 오버라이드로 이관.
+        # 캡처 재시도로 빠져도 전사·요약은 끝난 상태라 여기서 한 번에 처리한다.
+        if v.get("distill") is not None and res.get("txt_path"):
+            try:
+                db.set_item_distill(res["txt_path"], bool(v["distill"]))
+                log(f"[drain] 증류 지정 이관: {'포함' if v['distill'] else '제외'} — {title}")
+            except Exception as e:
+                log(f"[drain] 증류 지정 이관 실패(무시): {e}")
         # 캡처만 일시 실패(systemic·영구사유 아님) → 큐 뒤에 kf_retry로 다시 세운다
         retryable = (bool(kf_note) and not res.get("kf_systemic")
                      and not res.get("kf_permanent"))

@@ -283,6 +283,15 @@
     return r.ok ? r.json() : null;
   }
 
+  async function apiBookmark(ref, on) {
+    const r = await fetch('/history/bookmark', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ..._historyRef(ref, 'txt_path'), bookmark: on }),
+    });
+    return r.ok ? r.json() : null;
+  }
+
   async function apiDeleteItem(ref) {
     const r = await fetch('/history/item', {
       method: 'DELETE',
@@ -322,13 +331,6 @@
     li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
-    // 한눈 요약 박스 — 화면의 callout(왼쪽 컬러 바 + 연한 배경 + 라벨)을 인라인으로 옮긴 것.
-    // 블로거는 ::before·gradient를 못 살리므로 border-left와 단색 배경으로 대체한다.
-    tldr:      'margin:0 0 2.2em;padding:1.05em 1.3em 1.1em;background-color:#faf6f2;'
-             + 'border:1px solid #ecdfd6;border-left:4px solid #b0413e;border-radius:0 3px 3px 0;',
-    tldrLabel: 'margin:0 0 .6em;font-size:.78em;font-weight:700;letter-spacing:.13em;color:#b0413e;',
-    tldrUl:    'margin:0;padding-left:1.15em;font-weight:400;',
-    tldrLi:    'margin:0 0 .5em;line-height:1.75;font-weight:400;',
   };
 
   /* 요약 md → 내보내기용 본문 DOM. 블로거·텔레그램이 같은 범위를 쓰도록 여기서 한 번만 추린다.
@@ -357,7 +359,7 @@
     // 3) 섹션 정리: 본문(핵심 내용의 소제목+본문)만 남긴다.
     //    메타정보 표는 출처 URL만 뽑아 쓰고 제거, 한눈 요약·목차 섹션은 통째로 제거,
     //    '핵심 내용' 헤더는 그 아래 소제목만 남기면 되므로 헤더만 제거.
-    let title = '', url = '', brief = null;   // brief = 한눈 요약 불릿(블로거 복사용으로 보관)
+    let title = '', url = '', brief = null;   // brief = 한눈 요약 불릿(현재 내보내기에선 미사용)
     const h1 = root.querySelector('h1');
     if (h1) { title = h1.textContent.trim(); h1.remove(); }     // 제목은 블로거 '제목' 칸에 넣도록 본문에선 제외
     root.querySelectorAll('details').forEach(d => d.remove());  // 접이식 목차(있을 경우)
@@ -435,28 +437,7 @@
     const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거 (박스 삽입 전에 잡는다)
     if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .85em;'));
 
-    // 한눈 요약은 본문 맨 앞에 색상 박스로 넣는다(화면의 callout과 같은 역할).
-    if (brief && brief.children.length) {
-      brief.setAttribute('style', _BL.tldrUl);
-      brief.querySelectorAll('li').forEach(li => li.setAttribute('style', _BL.tldrLi));
-      brief.querySelectorAll('strong,b').forEach(s => s.setAttribute('style', 'font-weight:700;'));
-      brief.querySelectorAll('code').forEach(c => c.setAttribute('style',
-        'background:#f0ece4;padding:.1em .35em;border-radius:3px;font-size:.92em;'));
-      const box = document.createElement('div');
-      box.setAttribute('style', _BL.tldr);
-      const label = document.createElement('div');
-      label.setAttribute('style', _BL.tldrLabel);
-      label.textContent = '한눈 요약';
-      box.appendChild(label);
-      box.appendChild(brief);
-      body.insertBefore(box, body.firstChild);
-      // 박스와 본문 사이에 빈 줄 한 칸. margin만으로는 편집기가 여백을 줄일 수 있어
-      // 실제 빈 단락을 넣어 붙여넣기 결과에서도 한 줄이 확실히 남게 한다.
-      const gap = document.createElement('p');
-      gap.setAttribute('style', 'margin:0 0 1.2em;line-height:1.6;');
-      gap.innerHTML = '&nbsp;';
-      box.insertAdjacentElement('afterend', gap);
-    }
+    // 한눈 요약은 블로거 복사에서 제외한다(2026-08-26) — 본문 소제목부터 시작.
 
     if (url) {                                     // 출처는 원본 영상 링크만 남긴다
       const foot = document.createElement('div');
@@ -589,6 +570,7 @@
     fmtDate,
     ytVideoId,
     apiMarkRead,
+    apiBookmark,
     apiDeleteItem,
     apiSummaryContent,
     ensureReaderAssets,

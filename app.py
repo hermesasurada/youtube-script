@@ -831,6 +831,7 @@ _LOOPBACK = {"127.0.0.1", "::1"}
 _REMOTE_DATA_ALLOWED = {
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
+    "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
 }
 _PHONE_UA  = re.compile(r"iPhone|iPod|Windows Phone", re.I)
 _TABLET_UA = re.compile(r"iPad|Tablet|PlayBook|Kindle|Silk", re.I)
@@ -1911,19 +1912,22 @@ def queue_add():
         return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
     title = (data.get("title") or "").strip() or _oembed_meta(url).get("title") or url
     capture = data.get("capture")            # 영상 단위 캡처 지정(None=기본 포함)
+    distill = data.get("distill")            # 증류 지정(None=채널/기본 설정 따름)
     canonical = f"https://www.youtube.com/watch?v={yt_id}"
     if start_sec:
         canonical += f"&t={start_sec}"
     added = db.enqueue_video(yt_id, canonical, title, "manual",
                              capture=None if capture is None else bool(capture),
-                             start_sec=start_sec)
+                             start_sec=start_sec,
+                             distill=None if distill is None else bool(distill))
     if not added:
         # 이미 큐에 있음 — 종료 상태(done/failed/skipped)면 재처리 요청으로 보고 되살린다
         st = db.queue_status_of(yt_id)
         if st in ("pending", "processing", "kf_retry", "deferred"):
             return _json({"error": "이미 큐에 대기 중입니다.", "duplicate": "queue"}, 409)
-        db.queue_requeue(yt_id, capture=None if capture is None else bool(capture))
-        db.set_queue_start_sec(yt_id, start_sec)
+        db.queue_requeue(yt_id, capture=None if capture is None else bool(capture),
+                         distill=None if distill is None else bool(distill))
+        db.set_queue_start_sec(yt_id, start_sec, url=canonical)
     started = _kick_drain_if_idle()
     waiting = len(db.queue_overview()["waiting"])
     return _json({"ok": True, "yt_id": yt_id, "title": title, "start_sec": start_sec,
@@ -1955,13 +1959,20 @@ def queue_item_requeue(qid: int):
 
 @app.route("/queue/items/<int:qid>", methods=["PATCH"])
 def queue_item_update(qid: int):
-    """대기 항목의 영상 단위 설정 변경 — 현재는 캡처 포함 여부."""
+    """대기 항목의 영상 단위 설정 변경 — 캡처 포함 여부, 증류 지정."""
     data = request.get_json(force=True) or {}
-    if "capture" not in data:
+    out = {}
+    if "capture" in data:
+        if not db.set_queue_capture(qid, bool(data["capture"])):
+            return _json({"error": "변경 불가(대기 중 항목이 아님)"}, 400)
+        out["capture"] = bool(data["capture"])
+    if "distill" in data:
+        if not db.set_queue_distill(qid, bool(data["distill"])):
+            return _json({"error": "변경 불가(대기 중 항목이 아님)"}, 400)
+        out["distill"] = bool(data["distill"])
+    if not out:
         return _json({"error": "변경할 항목이 없습니다."}, 400)
-    if not db.set_queue_capture(qid, bool(data["capture"])):
-        return _json({"error": "변경 불가(대기 중 항목이 아님)"}, 400)
-    return _json({"ok": True, "capture": bool(data["capture"])})
+    return _json({"ok": True, **out})
 
 
 @app.route("/queue/items/<int:qid>", methods=["DELETE"])
@@ -2126,6 +2137,19 @@ def mark_read():
     if not ok:
         return _json({"error": "항목을 찾을 수 없습니다."}, 404)
     return _json({"ok": True, "is_read": is_read, "revision": db.history_revision()})
+
+
+@app.route("/history/bookmark", methods=["PATCH"])
+def history_bookmark():
+    """영상 북마크 설정/해제 — 카드 썸네일의 북마크 아이콘이 사용."""
+    data = request.get_json(force=True) or {}
+    on = bool(data.get("bookmark", True))
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    if not item or not db.set_bookmark_by_id(item["item_id"], on):
+        return _json({"error": "항목을 찾을 수 없습니다."}, 404)
+    return _json({"ok": True, "bookmark": on, "revision": db.history_revision()})
 
 
 @app.route("/history/item", methods=["DELETE"])

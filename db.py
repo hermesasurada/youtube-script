@@ -289,6 +289,18 @@ def init() -> None:
             if "start_sec" not in wcols:
                 c.execute("ALTER TABLE watch_queue ADD COLUMN start_sec INTEGER")
             c.execute("PRAGMA user_version = 13")
+        if ver < 14:
+            # v14: 영상 북마크(즐겨찾기) + 큐 항목의 증류 지정.
+            #  - items.bookmark: 0/1. 재색인 시 is_read처럼 보존된다(upsert SET에 없음).
+            #  - watch_queue.distill: NULL=미지정(채널 설정 따름), 0/1=완료 시
+            #    items.distill 오버라이드로 이관.
+            icols = {r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()}
+            if "bookmark" not in icols:
+                c.execute("ALTER TABLE items ADD COLUMN bookmark INTEGER NOT NULL DEFAULT 0")
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            if "distill" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN distill INTEGER")
+            c.execute("PRAGMA user_version = 14")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -505,7 +517,7 @@ def upsert(md_path: str) -> bool:
                 mtime_md=excluded.mtime_md,
                 mtime_summary=excluded.mtime_summary,
                 indexed_at=excluded.indexed_at
-                -- is_read 는 의도적으로 제외 (재인덱싱 시 읽음 상태 보존)
+                -- is_read·bookmark 는 의도적으로 제외 (재인덱싱 시 상태 보존)
             """,
             (
                 md_path,
@@ -774,7 +786,8 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
                   status: str = "pending", reason: str = "", *,
                   retry_after_seconds: int | float | None = None,
                   error_kind: str = "", capture: bool | None = None,
-                  start_sec: int | None = None) -> bool:
+                  start_sec: int | None = None,
+                  distill: bool | None = None) -> bool:
     """큐에 추가(yt_id UNIQUE라 중복이면 무시). 새로 넣었으면 True."""
     yt_id = (yt_id or "").strip()
     if not yt_id:
@@ -786,12 +799,13 @@ def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
         cur = conn.execute(
             """INSERT OR IGNORE INTO watch_queue
                  (yt_id, url, title, channel_id, status, reason, added_at, updated_at,
-                  next_retry_at, error_kind, capture, start_sec)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  next_retry_at, error_kind, capture, start_sec, distill)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (yt_id, url, title, channel_id, status, reason, now, now,
              next_retry_at, error_kind,
              None if capture is None else (1 if capture else 0),
-             start_sec or None),
+             start_sec or None,
+             None if distill is None else (1 if distill else 0)),
         )
         if cur.rowcount > 0:                       # 새 행의 position = id (FIFO 기본)
             conn.execute("UPDATE watch_queue SET position = id "
@@ -881,22 +895,35 @@ def queue_status_of(yt_id: str) -> str | None:
     return r["status"] if r else None
 
 
-def set_queue_start_sec(yt_id: str, start_sec: int | None) -> None:
-    """되살린(requeue) 항목의 전사 시작 시각 갱신 — 0/None이면 처음부터."""
+def set_queue_start_sec(yt_id: str, start_sec: int | None,
+                        url: str | None = None) -> None:
+    """되살린(requeue) 항목의 전사 시작 시각 갱신 — 0/None이면 처음부터.
+
+    url도 함께 갱신한다(주어진 경우). start_sec 컬럼만 지우고 url에 이전
+    &t=가 남으면 /start가 URL에서 시각을 다시 추출해 구간 전사가 재발한다.
+    """
     with _lock:
-        _conn().execute(
-            "UPDATE watch_queue SET start_sec = ?, updated_at = ? WHERE yt_id = ?",
-            (start_sec or None, _now(), yt_id),
-        )
+        if url:
+            _conn().execute(
+                "UPDATE watch_queue SET start_sec = ?, url = ?, updated_at = ? WHERE yt_id = ?",
+                (start_sec or None, url, _now(), yt_id))
+        else:
+            _conn().execute(
+                "UPDATE watch_queue SET start_sec = ?, updated_at = ? WHERE yt_id = ?",
+                (start_sec or None, _now(), yt_id))
 
 
-def queue_requeue(yt_id: str, capture: bool | None = None) -> None:
+def queue_requeue(yt_id: str, capture: bool | None = None,
+                  distill: bool | None = None) -> None:
     """종료 상태(done/failed/skipped) 항목을 줄 맨 뒤 pending으로 되살린다(수동 재처리)."""
     with _lock:
         conn = _conn()
         if capture is not None:
             conn.execute("UPDATE watch_queue SET capture = ? WHERE yt_id = ?",
                          (1 if capture else 0, yt_id))
+        if distill is not None:
+            conn.execute("UPDATE watch_queue SET distill = ? WHERE yt_id = ?",
+                         (1 if distill else 0, yt_id))
         conn.execute(
             """UPDATE watch_queue
                   SET status = 'pending', reason = '', error_kind = NULL,
@@ -999,6 +1026,16 @@ def set_queue_capture(qid: int, enabled: bool) -> bool:
     with _lock:
         cur = _conn().execute(
             """UPDATE watch_queue SET capture = ?, updated_at = ?
+                WHERE id = ? AND status IN ('pending', 'kf_retry', 'deferred')""",
+            (1 if enabled else 0, _now(), qid))
+        return cur.rowcount > 0
+
+
+def set_queue_distill(qid: int, enabled: bool) -> bool:
+    """대기 중 항목의 증류 지정 — 완료 시 items.distill 오버라이드로 이관된다."""
+    with _lock:
+        cur = _conn().execute(
+            """UPDATE watch_queue SET distill = ?, updated_at = ?
                 WHERE id = ? AND status IN ('pending', 'kf_retry', 'deferred')""",
             (1 if enabled else 0, _now(), qid))
         return cur.rowcount > 0
@@ -1194,7 +1231,7 @@ _HISTORY_COLUMNS = """
     rowid AS item_id, date, upload_date, stem, title, uploader, channel,
     duration, webpage_url, channel_url, has_txt,
     CASE WHEN summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
-    is_read
+    is_read, bookmark
 """
 
 def _row_to_item(r: sqlite3.Row) -> dict:
@@ -1231,6 +1268,7 @@ def _row_to_history_item(r: sqlite3.Row) -> dict:
         "has_txt":       bool(r["has_txt"]),
         "has_summary":   bool(r["has_summary"]),
         "is_read":       bool(r["is_read"]),
+        "bookmark":      bool(r["bookmark"]),
     }
 
 
@@ -1258,10 +1296,12 @@ def history_revision() -> str:
                   COALESCE(MAX(indexed_at), 0) AS indexed,
                   COALESCE(SUM(rowid), 0) AS ids,
                   COALESCE(SUM(CASE WHEN is_read != 0 THEN rowid ELSE 0 END), 0) AS reads,
+                  COALESCE(SUM(CASE WHEN bookmark != 0 THEN rowid ELSE 0 END), 0) AS marks,
                   COALESCE(SUM(CASE WHEN summary_path IS NOT NULL THEN rowid ELSE 0 END), 0) AS summaries
              FROM items"""
     ).fetchone()
-    return f'{r["n"]}:{float(r["indexed"]):.6f}:{r["ids"]}:{r["reads"]}:{r["summaries"]}'
+    return (f'{r["n"]}:{float(r["indexed"]):.6f}:{r["ids"]}:{r["reads"]}'
+            f':{r["marks"]}:{r["summaries"]}')
 
 
 def get_history_item(item_id: int) -> dict | None:
@@ -1299,7 +1339,7 @@ def search(q: str, limit: int = 500, unread_only: bool = False) -> list[dict]:
                i.uploader, i.channel, i.duration, i.webpage_url, i.channel_url,
                i.has_txt,
                CASE WHEN i.summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
-               i.is_read
+               i.is_read, i.bookmark
           FROM items i
           JOIN items_fts f ON f.rowid = i.rowid
         WHERE items_fts MATCH ?
@@ -1320,6 +1360,19 @@ def mark_read(md_path: str, is_read: bool = True) -> bool:
             "UPDATE items SET is_read = ? WHERE md_path = ?",
             (1 if is_read else 0, md_path),
         )
+        return cur.rowcount > 0
+
+
+def set_bookmark_by_id(item_id: int, on: bool) -> bool:
+    """영상 북마크 토글 — 웹 목록의 정수 ID 기준."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return False
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE items SET bookmark = ? WHERE rowid = ?",
+            (1 if on else 0, item_id))
         return cur.rowcount > 0
 
 
