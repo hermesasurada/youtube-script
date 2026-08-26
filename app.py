@@ -102,7 +102,12 @@ WHISPER_DIR = os.environ.get(
     os.path.join(BASE_DIR, "whisper.cpp-windows-vulkan" if IS_WIN else "whisper.cpp"),
 )
 WHISPER_EXE = os.environ.get("WHISPER_EXE", os.path.join(WHISPER_DIR, f"whisper-cli{EXE}"))
-MODEL_PATH  = os.environ.get("MODEL_PATH",  os.path.join(WHISPER_DIR, "ggml-large-v3-turbo-q5_0.bin"))
+# 기본 모델은 large-v3 원본(비 turbo·비양자화). 2026-08-27 실측(6편·61분)에서
+# turbo 계열은 어려운 오디오(다큐·다화자)에서 같은 문장을 수십 회 반복하는 환각으로
+# 구간을 통째로 날렸다 — 손실 세그먼트 q5_0 48 / turbo 213 / large-v3 16.
+# 양자화(q5_0)는 Metal에서 속도 이득이 없어(실측 동률) 정확도만 손해였다.
+# large-v3는 2.5배 느리지만 실시간 8.7배라 큐 주기(30분/건)에 여유가 크다.
+MODEL_PATH  = os.environ.get("MODEL_PATH",  os.path.join(WHISPER_DIR, "ggml-large-v3.bin"))
 
 FFPROBE_EXE     = _resolve_binary("ffprobe")
 FFMPEG_LOCATION = os.path.dirname(_resolve_binary("ffmpeg"))
