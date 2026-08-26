@@ -370,7 +370,10 @@ def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
             if not dry:
                 db.queue_set_status(item["id"], "skipped", "채널 비활성(대기 중 정리)")
             continue
-        if db.find_by_yt_id(item["yt_id"]):
+        # 수동 등록분은 이력이 있어도 취소하지 않는다 — 재처리(손실 복구·모델 교체)를
+        # 노리고 넣은 것이라 '이미 있음'이 곧 스킵 사유가 될 수 없다. 자동 감지분만
+        # 중복으로 정리한다(2026-08-27: 재처리 802초 손실 건이 이 경로로 취소됨).
+        if item.get("channel_id") != "manual" and db.find_by_yt_id(item["yt_id"]):
             if not dry:
                 db.queue_set_status(item["id"], "done", "이미 처리된 이력 확인")
             continue

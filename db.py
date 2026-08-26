@@ -924,10 +924,14 @@ def queue_requeue(yt_id: str, capture: bool | None = None,
         if distill is not None:
             conn.execute("UPDATE watch_queue SET distill = ? WHERE yt_id = ?",
                          (1 if distill else 0, yt_id))
+        # txt_path·kf_attempts도 비운다. 남겨두면 process_video가 '[resume] 기존 전사
+        # 재사용' 경로로 빠져 전사를 건너뛴다 — 전사본 자체를 다시 만들려고 되살린
+        # 경우(모델 교체·손실 복구)에 의도와 정반대로 동작한다(2026-08-27 실측).
         conn.execute(
             """UPDATE watch_queue
                   SET status = 'pending', reason = '', error_kind = NULL,
                       attempt_count = 0, next_retry_at = NULL, claimed_at = NULL,
+                      txt_path = NULL, kf_attempts = 0,
                       position = (SELECT COALESCE(MAX(COALESCE(position, id)), 0) + 1
                                     FROM watch_queue),
                       updated_at = ?
