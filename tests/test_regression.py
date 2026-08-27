@@ -966,3 +966,34 @@ def test_permanent_reasons_are_detected_for_main_pipeline():
     ]
     for r in transient:
         assert not cm._META_PERMANENT_RE.search(r), r
+
+
+# ── whisper 반복 붕괴 감지 ─────────────────────────────────────────────
+
+def _whisper_json(tmp_path, texts):
+    p = tmp_path / "a.mp3.json"
+    p.write_text(json.dumps({"transcription": [{"text": t} for t in texts]}), encoding="utf-8")
+    return str(p)
+
+
+def test_collapse_detected_on_repetition_loop(tmp_path):
+    """같은 문장이 수천 번 반복되면 붕괴로 판정한다(실제 사례 재현)."""
+    texts = ["intro one", "intro two"] + ["I'm excited to be on a rollercoaster ride."] * 500
+    collapsed, detail = app._looks_collapsed(_whisper_json(tmp_path, texts))
+    assert collapsed
+    assert "rollercoaster" in detail
+
+
+def test_collapse_not_triggered_on_normal_transcript(tmp_path):
+    """정상 전사(약간의 중복 포함)는 붕괴로 보지 않는다 — 오탐이 더 비싸다."""
+    texts = [f"sentence number {i}" for i in range(200)]
+    texts.insert(50, texts[50])          # 우연한 연속 중복 몇 개
+    texts.insert(120, texts[120])
+    collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, texts))
+    assert not collapsed
+
+
+def test_collapse_ignores_too_short_output(tmp_path):
+    """세그먼트가 적으면 판정하지 않는다(짧은 영상의 후렴 반복 등)."""
+    collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, ["같은 말"] * 10))
+    assert not collapsed

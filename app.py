@@ -465,8 +465,45 @@ def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, 
     return lang, best[lang]
 
 
+_COLLAPSE_DROP_RATIO = 0.30   # 연속 중복으로 버려지는 세그먼트 비율
+_COLLAPSE_MIN_RUN    = 50     # 같은 문장이 이만큼 연달아 나오면 붕괴로 본다
+_COLLAPSE_CONTEXT    = 64     # 붕괴 시 재전사에 쓸 컨텍스트 상한(토큰)
+
+
+def _looks_collapsed(json_path: str) -> tuple[bool, str]:
+    """whisper가 반복 루프에 빠졌는지 판정한다.
+
+    한번 빠지면 그 반복이 다시 컨텍스트로 들어가 스스로를 강화해서 파일 끝까지
+    못 빠져나온다(2026-08-28 실측: 5시간 팟캐스트가 3분 29초에 붕괴해 같은 문장
+    18,741회로 채워짐 — 고유 문장은 55개뿐이었다).
+    """
+    try:
+        with open(json_path, encoding="utf-8", errors="replace") as f:
+            segs = json.load(f).get("transcription", [])
+    except Exception:
+        return False, ""
+    texts = [s.get("text", "").strip() for s in segs]
+    texts = [t for t in texts if t]
+    if len(texts) < 20:
+        return False, ""
+    prev, run, worst, worst_txt, dropped = "", 0, 0, "", 0
+    for t in texts:
+        if t == prev:
+            run += 1
+            dropped += 1
+            if run > worst:
+                worst, worst_txt = run, t
+        else:
+            run = 0
+        prev = t
+    ratio = dropped / len(texts)
+    if worst >= _COLLAPSE_MIN_RUN or ratio >= _COLLAPSE_DROP_RATIO:
+        return True, f"같은 문장 {worst}회 연속, 중복 {ratio:.0%} ({worst_txt[:40]})"
+    return False, ""
+
+
 def _run_whisper(job_id: str, audio_path: str, language: str,
-                 threads: str, total: float) -> int:
+                 threads: str, total: float, max_context: int | None = None) -> int:
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
 
@@ -487,12 +524,15 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
     try:
         if stop.is_set():
             return -1
+        cmd = [WHISPER_EXE, "-m", MODEL_PATH, "-f", audio_path,
+               "--language", language, "--threads", threads,
+               "--output-json", "--temperature", "0",
+               "--best-of", "5", "--beam-size", "5",
+               "--no-speech-thold", "0.8", "--flash-attn"]
+        if max_context is not None:
+            cmd += ["--max-context", str(max_context)]
         proc = subprocess.Popen(
-            [WHISPER_EXE, "-m", MODEL_PATH, "-f", audio_path,
-             "--language", language, "--threads", threads,
-             "--output-json", "--temperature", "0",
-             "--best-of", "5", "--beam-size", "5",
-             "--no-speech-thold", "0.8", "--flash-attn"],
+            cmd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=BASE_DIR,
         )
         jobs[job_id]["proc"] = proc
@@ -566,6 +606,25 @@ def save_thumbnail(yt_id: str) -> str | None:
     return None
 
 
+def _cleanup_failed_artifacts(audio_path: str, json_path: str, delete_audio: bool) -> None:
+    """전사 실패 시 남은 오디오·whisper JSON을 지운다.
+
+    재시도는 언제나 새로 내려받으므로 남겨둘 이유가 없는데, 정리가 없어서 실패가
+    반복될수록 쌓였다(2026-08-28: 5시간 팟캐스트 5회 실패로 1.4GB, 전체 2.1GB).
+    사용자가 올린 파일(delete_audio=False)은 원본이므로 건드리지 않는다.
+    """
+    targets = [json_path] + ([audio_path] if delete_audio and DELETE_AUDIO_AFTER else [])
+    for path in targets:
+        try:
+            if path and os.path.exists(path):
+                size = os.path.getsize(path)
+                os.remove(path)
+                log.info("failed-job cleanup: %s (%.0f MB)",
+                         os.path.basename(path), size / 1024 / 1024)
+        except OSError as e:
+            log.warning("failed-job cleanup skipped: %s (%s)", os.path.basename(path), e)
+
+
 def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                           delete_audio: bool = False) -> None:
     q = jobs[job_id]["queue"]
@@ -584,6 +643,7 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                           f"{_format_duration(secs)} (분당 {len(body) / mins:.0f}자)")
                 _set_job_error(job_id, "transcribe", detail)
                 log.warning("transcript too sparse: %s — %s", os.path.basename(md_path), detail)
+                _cleanup_failed_artifacts(audio_path, json_path, delete_audio)
                 q.put(f"오류: {detail}")
                 q.put(None)
                 return
@@ -620,6 +680,7 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
         detail = f"Whisper 전사 실패 (종료 코드 {rc}): {tail}"
     _set_job_error(job_id, "transcribe", detail)
     log.warning("transcription failed (rc=%s): %s", rc, os.path.basename(md_path))
+    _cleanup_failed_artifacts(audio_path, json_path, delete_audio)
     q.put(None)
 
 
@@ -642,12 +703,26 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
                       f"{_format_duration(total)} ({actual / total:.0%})")
             _set_job_error(job_id, "download", detail)
             log.warning("audio truncated: %s (%.0f/%.0fs)", os.path.basename(audio_path), actual, total)
+            _cleanup_failed_artifacts(audio_path, audio_path + ".json", delete_audio)
             q.put(f"오류: {detail}")
             q.put(None)
             return
     _stage(q, "transcribe")
     q.put("Whisper 전사 시작...")
     rc = _run_whisper(job_id, audio_path, lang, thr, total)
+    # 반복 붕괴는 컨텍스트 누적이 원인이라 같은 조건으로 다시 돌려도 똑같이 무너진다.
+    # 큐 재시도(다운로드부터 다시)를 태우기 전에, 받아둔 오디오로 즉시 한 번만
+    # 컨텍스트를 제한해 다시 전사한다. 정상 전사에는 추가 비용이 없다.
+    if rc == 0 and not stop.is_set():
+        collapsed, detail = _looks_collapsed(audio_path + ".json")
+        if collapsed:
+            log.warning("whisper collapse detected: %s — %s",
+                        os.path.basename(audio_path), detail)
+            q.put(f"반복 붕괴 감지({detail}) — 컨텍스트 제한으로 재전사")
+            rc = _run_whisper(job_id, audio_path, lang, thr, total,
+                              max_context=_COLLAPSE_CONTEXT)
+            still, detail2 = _looks_collapsed(audio_path + ".json")
+            log.info("collapse retry result: %s", "여전히 붕괴" if still else f"정상화({detail2 or 'OK'})")
     if stop.is_set():
         jobs[job_id]["status"] = "cancelled"
         q.put("중지됨.")
