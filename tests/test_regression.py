@@ -892,3 +892,58 @@ def test_transcribed_video_stays_blocked_even_with_start_sec(monkeypatch):
         assert r.get_json()["duplicate"] == "history"
     pv = c.get("/queue/preview?url=https://youtu.be/0kC3xOZChdA%3Ft%3D266").get_json()
     assert pv["duplicate"] == "history"
+
+
+# ── 본문 표본 기반 언어 감지(무음 인트로 오판 방지) ────────────────────
+
+def test_detect_language_skips_short_audio():
+    """짧은 오디오는 표본을 뽑을 여지가 없어 whisper 기본 감지에 맡긴다."""
+    assert app._detect_language("/nonexistent.mp3", 60, "8") == ("", 0.0)
+
+
+def test_detect_language_majority_across_samples(monkeypatch, tmp_path):
+    """지점마다 결과가 갈려도 확신도 합이 큰 언어를 고른다(삽입 클립 방어)."""
+    probe = tmp_path / "a.mp3"
+    probe.write_bytes(b"x")
+    calls = []
+
+    class R:
+        returncode = 0
+        stdout = ""
+        def __init__(self, err=""): self.stderr = err
+
+    def fake_run(cmd, **kw):
+        if "ffmpeg" in cmd[0]:
+            open(cmd[-1], "wb").write(b"x")     # 잘라낸 표본 파일 생성 흉내
+            return R()
+        calls.append(cmd)
+        # 첫 표본만 영어(삽입 클립), 나머지는 한국어
+        n = len(calls)
+        lang, p = ("en", 0.40) if n == 1 else ("ko", 0.98)
+        return R(f"whisper_full_with_state: auto-detected language: {lang} (p = {p})")
+
+    monkeypatch.setattr(app.subprocess, "run", fake_run)
+    lang, p = app._detect_language(str(probe), 1800, "8")
+    assert lang == "ko"          # 0.98*2 > 0.40
+    assert p == 0.98
+    assert len(calls) == 3       # 25/50/75% 세 지점
+
+
+def test_detect_language_low_confidence_keeps_auto(monkeypatch, tmp_path):
+    """확신도가 낮으면 명시하지 않고 auto로 둔다 — 잘못 고정하는 게 더 나쁘다."""
+    probe = tmp_path / "a.mp3"
+    probe.write_bytes(b"x")
+
+    class R:
+        returncode = 0
+        stdout = ""
+        stderr = "whisper_full_with_state: auto-detected language: en (p = 0.31)"
+
+    def fake_run(cmd, **kw):
+        if "ffmpeg" in cmd[0]:
+            open(cmd[-1], "wb").write(b"x")
+        return R()
+
+    monkeypatch.setattr(app.subprocess, "run", fake_run)
+    lang, p = app._detect_language(str(probe), 1800, "8")
+    assert lang == "en" and p < app._LANG_MIN_P    # 호출부가 이 임계로 걸러낸다

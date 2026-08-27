@@ -408,10 +408,77 @@ def _trim_audio_head(audio_path: str, start_sec: int) -> None:
     _duration_cache.pop(audio_path, None)   # 길이 캐시 무효화(잘라낸 뒤 길이가 바뀐다)
 
 
+_LANG_RE = re.compile(r"auto-detected language:\s*(\w+)\s*\(p\s*=\s*([\d.]+)\)")
+_LANG_PROBE_SEC = 60          # 표본 구간 길이
+_LANG_MIN_TOTAL = 120         # 이보다 짧으면 표본 뽑을 여지가 없어 whisper 기본 감지에 맡긴다
+_LANG_MIN_P     = 0.5         # 이 확신도 미만이면 명시하지 않고 auto로 둔다
+
+
+def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, float]:
+    """오디오 본문 여러 지점을 표본으로 언어를 판정한다.
+
+    whisper는 앞 30초만 보고 언어를 정하는데, 인트로가 무음·음악이면 거기서 낸
+    환각 텍스트를 근거로 엉뚱한 언어를 고른다. 그렇게 한 번 빗나가면 파일 전체가
+    그 언어로 디코딩돼 사실상 백지가 된다(실측 2026-08-27: 45분 한국어 영상이
+    "Thank you for watching!" 환각 때문에 en(p=0.31)으로 판정돼 237자만 남음.
+    같은 파일의 중간 구간을 재면 ko(p=0.99)).
+
+    25/50/75% 지점을 각각 재고 언어별 확신도를 합산해 고른다(다국어 영상에서
+    한 지점이 삽입 클립에 걸려도 주 언어가 이긴다). 반환: (언어코드, 확신도).
+    """
+    if total < _LANG_MIN_TOTAL:
+        return "", 0.0
+    ffmpeg = os.path.join(FFMPEG_LOCATION, "ffmpeg") if FFMPEG_LOCATION else "ffmpeg"
+    scores: dict[str, float] = {}
+    best: dict[str, float] = {}
+    for frac in (0.25, 0.5, 0.75):
+        # whisper-cli의 -dl은 -ot(오프셋)을 무시하고 언제나 파일 앞부분을 본다.
+        # 그래서 표본 구간을 실제로 잘라낸 임시 파일을 만들어 넘긴다(-c copy라 즉시).
+        probe = f"{audio_path}.lang{int(frac * 100)}.mp3"
+        try:
+            cut = subprocess.run(
+                [ffmpeg, "-y", "-loglevel", "error", "-ss", str(int(total * frac)),
+                 "-t", str(_LANG_PROBE_SEC), "-i", audio_path, "-c", "copy", probe],
+                capture_output=True, text=True, timeout=120)
+            if cut.returncode != 0 or not os.path.exists(probe):
+                continue
+            r = subprocess.run(
+                [WHISPER_EXE, "-m", MODEL_PATH, "-f", probe, "-dl", "--threads", threads],
+                capture_output=True, text=True, timeout=180, cwd=BASE_DIR)
+        except Exception as e:
+            log.warning("language probe failed at %.0f%%: %s", frac * 100, e)
+            continue
+        finally:
+            try:
+                os.remove(probe)
+            except OSError:
+                pass
+        m = _LANG_RE.search((r.stdout or "") + (r.stderr or ""))
+        if not m:
+            continue
+        lang, p = m.group(1), float(m.group(2))
+        scores[lang] = scores.get(lang, 0.0) + p
+        best[lang] = max(best.get(lang, 0.0), p)
+    if not scores:
+        return "", 0.0
+    lang = max(scores, key=scores.get)
+    return lang, best[lang]
+
+
 def _run_whisper(job_id: str, audio_path: str, language: str,
                  threads: str, total: float) -> int:
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
+
+    if language == "auto":
+        detected, p = _detect_language(audio_path, total, threads)
+        if detected and p >= _LANG_MIN_P:
+            language = detected
+            q.put(f"언어 감지: {detected} ({p:.0%}) — 본문 표본 기준")
+            log.info("language detected: %s (p=%.2f) %s", detected, p,
+                     os.path.basename(audio_path))
+        elif detected:
+            log.info("language probe inconclusive: %s (p=%.2f) — auto 유지", detected, p)
 
     # 동시 전사 제한: 슬롯을 못 얻으면 대기 안내 후 블로킹 획득.
     if not _transcribe_sem.acquire(blocking=False):
