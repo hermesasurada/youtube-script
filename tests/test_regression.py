@@ -947,3 +947,22 @@ def test_detect_language_low_confidence_keeps_auto(monkeypatch, tmp_path):
     monkeypatch.setattr(app.subprocess, "run", fake_run)
     lang, p = app._detect_language(str(probe), 1800, "8")
     assert lang == "en" and p < app._LANG_MIN_P    # 호출부가 이 임계로 걸러낸다
+
+
+def test_permanent_reasons_are_detected_for_main_pipeline():
+    """비공개·삭제·멤버십은 본편 실패 사유에서도 영구로 판정돼야 한다(재시도 무의미)."""
+    import channel_monitor as cm
+    permanent = [
+        "영상 정보 조회 실패: ERROR: [youtube] a0lDsM_J_rc: Private video. Sign in if you've been",
+        "ERROR: [youtube] x: This video is available to this channel's members on level: 착수",
+        "ERROR: [youtube] y: Video unavailable. This video has been removed by the uploader",
+    ]
+    for r in permanent:
+        assert cm._META_PERMANENT_RE.search(r), r
+    transient = [
+        "HTTP Error 403(스트림 잘림): 300/2739s",
+        "전사 내용이 비어 있습니다: 237자 / 00:45:39 (분당 5자)",
+        "전사 잡 소실(서버 재시작) — 재시도 필요",
+    ]
+    for r in transient:
+        assert not cm._META_PERMANENT_RE.search(r), r

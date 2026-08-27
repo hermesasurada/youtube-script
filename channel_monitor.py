@@ -717,6 +717,17 @@ def _drain_main_one(orders, capture_order) -> None:
                 f"{head}\n{reason}\n{v['url']}"
             )
             return
+        # 비공개 전환·삭제·멤버십 전용은 기다린다고 풀리지 않는다. 재시도 예산을
+        # 태우고 같은 알림을 5번 보내는 대신 즉시 종료한다(캡처 경로에는 이미 있던
+        # 판정을 본편에도 적용 — 2026-08-27: All-In 에피소드가 비공개로 바뀌며 노출).
+        if _META_PERMANENT_RE.search(reason):
+            db.queue_set_status(v["id"], "skipped", reason)
+            log(f"[drain] 처리 불가(영구 사유) → 재시도 안 함: {reason[:110]}")
+            notify(
+                f"ℹ️ 처리 불가 — 비공개·삭제·멤버십 전환 (재시도 안 함)\n"
+                f"{head}\n{reason}\n{v['url']}"
+            )
+            return
         state = db.queue_defer(
             v["id"], reason, error_kind="pipeline_transient",
             retry_after_seconds=_retry_delay(v.get("attempt_count")),
