@@ -465,7 +465,6 @@ def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, 
     return lang, best[lang]
 
 
-_COLLAPSE_DROP_RATIO = 0.30   # 연속 중복으로 버려지는 세그먼트 비율
 _COLLAPSE_MIN_RUN    = 50     # 같은 문장이 이만큼 연달아 나오면 붕괴로 본다
 _COLLAPSE_CONTEXT    = 64     # 붕괴 시 재전사에 쓸 컨텍스트 상한(토큰)
 
@@ -497,7 +496,11 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
             run = 0
         prev = t
     ratio = dropped / len(texts)
-    if worst >= _COLLAPSE_MIN_RUN or ratio >= _COLLAPSE_DROP_RATIO:
+    # 판정은 '같은 문장이 길게 이어지는가'만 본다. 중복 비율 단독 조건은 오탐이 잦았다
+    # — 5시간 대담에서 "Yeah." 같은 맞장구가 연달아 나오면 정상 전사도 비율이 쉽게
+    # 올라간다(2026-08-28: 29만자 정상 전사가 '여전히 붕괴'로 찍혔다). 실제 붕괴는
+    # 언제나 긴 연속 반복을 동반한다(그 사례는 18,740회 대 정상 22회로 자릿수가 다르다).
+    if worst >= _COLLAPSE_MIN_RUN:
         return True, f"같은 문장 {worst}회 연속, 중복 {ratio:.0%} ({worst_txt[:40]})"
     return False, ""
 
@@ -508,14 +511,19 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
     stop = jobs[job_id]["stop_event"]
 
     if language == "auto":
-        detected, p = _detect_language(audio_path, total, threads)
-        if detected and p >= _LANG_MIN_P:
-            language = detected
-            q.put(f"언어 감지: {detected} ({p:.0%}) — 본문 표본 기준")
-            log.info("language detected: %s (p=%.2f) %s", detected, p,
-                     os.path.basename(audio_path))
-        elif detected:
-            log.info("language probe inconclusive: %s (p=%.2f) — auto 유지", detected, p)
+        cached = jobs.get(job_id, {}).get("resolved_language")
+        if cached:                       # 붕괴 재전사 등 같은 오디오를 다시 돌릴 때
+            language = cached
+        else:
+            detected, p = _detect_language(audio_path, total, threads)
+            if detected and p >= _LANG_MIN_P:
+                language = detected
+                jobs.setdefault(job_id, {})["resolved_language"] = detected
+                q.put(f"언어 감지: {detected} ({p:.0%}) — 본문 표본 기준")
+                log.info("language detected: %s (p=%.2f) %s", detected, p,
+                         os.path.basename(audio_path))
+            elif detected:
+                log.info("language probe inconclusive: %s (p=%.2f) — auto 유지", detected, p)
 
     # 동시 전사 제한: 슬롯을 못 얻으면 대기 안내 후 블로킹 획득.
     if not _transcribe_sem.acquire(blocking=False):

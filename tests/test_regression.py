@@ -993,6 +993,18 @@ def test_collapse_not_triggered_on_normal_transcript(tmp_path):
     assert not collapsed
 
 
+def test_collapse_not_triggered_by_short_backchannels(tmp_path):
+    """맞장구가 잦아 중복 비율이 높아도, 긴 연속 반복이 없으면 정상이다.
+
+    실제 사례: 5시간 대담의 29만자 정상 전사가 중복 비율만으로 붕괴로 오판됐다.
+    """
+    texts = []
+    for i in range(300):
+        texts += [f"substantive sentence {i}", "Yeah.", "Yeah.", "Right.", "Right."]
+    collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, texts))
+    assert not collapsed
+
+
 def test_collapse_ignores_too_short_output(tmp_path):
     """세그먼트가 적으면 판정하지 않는다(짧은 영상의 후렴 반복 등)."""
     collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, ["같은 말"] * 10))

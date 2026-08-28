@@ -83,7 +83,7 @@
     }
     .search input {
       flex: 1;
-      min-width: 0;
+      min-width: 6.5rem;   /* 아이콘 토글들이 입력창을 밀어내지 않도록 */
       height: 38px;
       box-sizing: border-box;
       padding: 0 .75rem;
@@ -105,6 +105,27 @@
       background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
     }
     .sort-toggle:active { background: var(--surface2); }
+
+    /* 아이콘 전용 토글(정렬 방향·북마크·미읽음) — 라벨을 빼 검색창 폭을 넓혔다.
+       상태는 색·테두리와 aria-pressed로 전달하고, 북마크·눈은 켜지면 채워진다. */
+    .icon-toggle {
+      flex-shrink: 0;
+      width: 38px; height: 38px;
+      box-sizing: border-box; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--muted);
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .icon-toggle:active { background: var(--surface2); }
+    .icon-toggle.active {
+      color: var(--highlight);
+      border-color: var(--highlight);
+      background: var(--highlight-soft);
+    }
+    .icon-toggle.active svg { fill: currentColor; fill-opacity: .2; }
+    /* 정렬 방향은 항상 켜져 있는 상태라 채우지 않는다(방향만 바뀜) */
+    #m-sort-btn.active svg { fill: none; }
     /* 정렬 기준이 기본값(전사처리일)이 아닐 때 강조 */
     .sort-toggle.active { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
 
@@ -509,16 +530,17 @@
   </header>
 
   <div class="search">
-    <input type="search" id="q" placeholder="제목/업로더 검색…" autocomplete="off" enterkeyhint="search">
+    <input type="search" id="q" placeholder="검색" autocomplete="off" enterkeyhint="search">
     <button class="sort-toggle" id="m-sortkey-btn" type="button" onclick="toggleSortKey()" aria-label="정렬 기준 전환(전사처리일/영상게시일)">전사처리일</button>
-    <button class="sort-toggle" id="m-sort-btn" type="button" onclick="toggleSort()" aria-label="정렬 순서 전환">최신순 ↓</button>
-    <button class="unread-filter-btn" id="bookmark-filter-btn" onclick="toggleBookmarkFilter()">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-      북마크
+    <button class="icon-toggle" id="m-sort-btn" type="button" onclick="toggleSort()"
+            aria-pressed="false" aria-label="최신순 정렬 (누르면 과거순)" title="최신순"></button>
+    <button class="icon-toggle" id="bookmark-filter-btn" type="button" onclick="toggleBookmarkFilter()"
+            aria-pressed="false" aria-label="북마크한 영상만 보기" title="북마크만">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
     </button>
-    <button class="unread-filter-btn" id="unread-filter-btn" onclick="toggleUnreadFilter()">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-      미읽음만
+    <button class="icon-toggle" id="unread-filter-btn" type="button" onclick="toggleUnreadFilter()"
+            aria-pressed="false" aria-label="안 읽은 영상만 보기" title="미읽음만">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
   </div>
 
@@ -642,8 +664,10 @@ async function loadHistory(force) {
   }
   btn.classList.remove('spin');
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
-  $('unread-filter-btn').classList.toggle('active', _unreadOnly);   // 저장된 미읽음 상태 반영
+  $('unread-filter-btn').classList.toggle('active', _unreadOnly);
+  $('unread-filter-btn').setAttribute('aria-pressed', String(_unreadOnly));   // 저장된 미읽음 상태 반영
   $('bookmark-filter-btn').classList.toggle('active', _bookmarkOnly);
+  $('bookmark-filter-btn').setAttribute('aria-pressed', String(_bookmarkOnly));
   applyFilter();
 }
 
@@ -667,9 +691,20 @@ function applyFilter() {
   $('count').textContent = `${FILTERED.length}건`;
 }
 
+/* 정렬 방향 아이콘 — 화살표 + 길이가 다른 막대로 오름/내림을 나타낸다 */
+const SORT_ICON = {
+  desc: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l4 4 4-4"/><path d="M7 20V4"/><path d="M13 4h8"/><path d="M13 9h6"/><path d="M13 14h4"/></svg>',
+  asc:  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4-4 4 4"/><path d="M7 4v16"/><path d="M13 14h8"/><path d="M13 9h6"/><path d="M13 4h4"/></svg>',
+};
+
 function _updateSortBtn() {
   const b = $('m-sort-btn');
-  if (b) b.textContent = _sort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+  if (b) {
+    const asc = _sort === 'asc';
+    b.innerHTML = asc ? SORT_ICON.asc : SORT_ICON.desc;
+    b.title = asc ? '과거순' : '최신순';
+    b.setAttribute('aria-label', asc ? '과거순 정렬 (누르면 최신순)' : '최신순 정렬 (누르면 과거순)');
+  }
   const k = $('m-sortkey-btn');
   if (k) {
     k.textContent = _sortKey === 'upload' ? '영상게시일' : '전사처리일';
@@ -693,6 +728,7 @@ function toggleSortKey() {
 function toggleUnreadFilter() {
   _unreadOnly = !_unreadOnly;
   $('unread-filter-btn').classList.toggle('active', _unreadOnly);
+  $('unread-filter-btn').setAttribute('aria-pressed', String(_unreadOnly));
   _saveUnread();
   applyFilter();
 }
@@ -702,6 +738,7 @@ function toggleUnreadFilter() {
 function toggleBookmarkFilter() {
   _bookmarkOnly = !_bookmarkOnly;
   $('bookmark-filter-btn').classList.toggle('active', _bookmarkOnly);
+  $('bookmark-filter-btn').setAttribute('aria-pressed', String(_bookmarkOnly));
   applyFilter();
 }
 
