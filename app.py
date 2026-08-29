@@ -1261,7 +1261,36 @@ def _md_from_summary_path(save_path: str) -> str | None:
     return os.path.join(RES_DIR, rel)
 
 
+# 한국어 요약에 다른 문자체계가 섞여 들어온 흔적. LLM이 한국어를 쓰다 토큰 단위로
+# 미끄러지면서 생기며, 드물지만(897건 중 3건) 조용히 남는다. 실측된 사례:
+#   "…압도하기 전에 تمويل할 수 있느냐"(financing), "연조ічой과 달리"(연조직),
+#   "민粹주의"(포퓰리즘)
+# 자동 치환은 무엇으로 되돌릴지 알 수 없어 하지 않고 경고만 남긴다.
+_ALIEN_SCRIPT_RE = re.compile(r"[؀-ۿݐ-ݿ֐-׿ऀ-ॿ฀-๿Ѐ-ӿ԰-֏]+")
+# 한자·가나는 한국어 글에서 병기로 정상 등장한다(반(反), 전년比). 한글 음절 사이에
+# 끼어 단어를 깨는 경우만 혼입으로 본다.
+_CJK_INLINE_RE = re.compile(r"(?<=[가-힣])[一-鿿぀-ゟ゠-ヿ]+(?=[가-힣])")
+
+
+def _warn_script_mix(save_path: str, text: str) -> list[str]:
+    """요약에 섞인 이질 문자를 로그로 경고한다(수정하지 않음). 발견 목록 반환."""
+    found = []
+    for pat in (_ALIEN_SCRIPT_RE, _CJK_INLINE_RE):
+        for m in pat.finditer(text or ""):
+            start = max(0, m.start() - 30)
+            found.append(f"{m.group(0)!r} … {text[start:m.end() + 20]!r}")
+    if found:
+        log.warning("summary script mix: %s — %s",
+                    os.path.basename(save_path), " | ".join(found[:4]))
+    return found
+
+
 def _reindex_summary(save_path: str) -> None:
+    try:
+        with open(save_path, encoding="utf-8", errors="replace") as f:
+            _warn_script_mix(save_path, f.read())
+    except OSError:
+        pass
     md = _md_from_summary_path(save_path)
     if md:
         try:

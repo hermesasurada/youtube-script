@@ -1009,3 +1009,25 @@ def test_collapse_ignores_too_short_output(tmp_path):
     """세그먼트가 적으면 판정하지 않는다(짧은 영상의 후렴 반복 등)."""
     collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, ["같은 말"] * 10))
     assert not collapsed
+
+
+# ── 요약 문자체계 혼입 경고 ────────────────────────────────────────────
+
+def test_script_mix_flags_foreign_scripts():
+    """한국어 요약에 아랍/키릴이 섞이면 경고 대상(실제 사례 재현)."""
+    assert app._warn_script_mix("x.md", "비용을 압도하기 전에 تمويل할 수 있느냐다")
+    assert app._warn_script_mix("x.md", "경조직 수술은 연조ічой과 달리 어렵다")
+
+
+def test_script_mix_flags_cjk_inside_word():
+    """한글 음절 사이에 낀 한자는 단어를 깨므로 경고한다."""
+    assert app._warn_script_mix("x.md", "언론의 과격함이 민粹주의를 낳는다")
+
+
+def test_script_mix_allows_normal_hanja_annotation():
+    """한자 병기는 한국어 관행이라 경고하지 않는다 — 오탐이 더 비싸다."""
+    for ok in ("반(反)트럼프 좌파 평론가",
+               "2025년 매출 6억 달러(전년比 +38%)",
+               "거주 주(州)에 따라 세율이 다르다",
+               "RC 상수(τ = R × C)는 지연을 뜻한다"):
+        assert not app._warn_script_mix("x.md", ok), ok
