@@ -1886,11 +1886,22 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 }
 .sum-panel-close:hover { color: var(--text); background: var(--surface2); border-color: var(--border-strong); }
 .sum-panel-body {
-  padding: 1.75rem 2rem 2.5rem;
+  padding: 0 2rem 2.5rem;    /* 상단 여백은 고정 제목(.sum-head-sticky)의 패딩으로 대체 */
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
 }
+
+/* 요약 제목 고정(일반·몰입 공통) — 패널 배경(--surface) 위에 뜬다 */
+.sum-panel-body > .sum-head-sticky,
+.imm-text > .sum-head-sticky {
+  margin: 0 -2rem .5rem; padding: .9rem 2rem .55rem;
+  background: var(--surface);
+  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .3);
+}
+.imm-text > .sum-head-sticky { max-width: none; }   /* 가독 칼럼(660px) 제한은 배경엔 미적용 */
+.imm-text > .sum-head-sticky h1,
+.imm-text > .sum-head-sticky .sum-title-orig { max-width: 660px; }
 
 /* ── 몰입형 읽기(PC): 좌 이미지 / 우 텍스트 동시 보기 ── */
 .sum-immersive-btn {
@@ -2039,7 +2050,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   flex: 0 0 52%; max-width: 52%; overflow-y: auto;
   padding: 1.25rem 1.25rem 2rem; border-right: 1px solid var(--border); background: var(--surface2);
 }
-.imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.5rem 2rem 3rem; }
+.imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 0 2rem 3rem; }
 .imm-text > * { max-width: 660px; }   /* 가독 칼럼 폭 제한 */
 /* 몰입형 우측 본문은 한 단계 작게 */
 .imm-text.sum-md p, .imm-text.sum-md li { font-size: calc(.85rem * var(--reader-scale, 1)); line-height: 1.68; }

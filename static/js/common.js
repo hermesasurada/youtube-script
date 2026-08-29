@@ -192,6 +192,16 @@
       }
     }
 
+    // 제목 고정용 래퍼 — 첫 h1을 감싼다. applyTitleTranslation이 원문 병기를
+    // h1 바로 뒤(afterend)에 넣으므로 병기도 자연히 이 래퍼 안에 들어온다.
+    const h1 = tpl.content.querySelector('h1');
+    if (h1) {
+      const wrap = document.createElement('div');
+      wrap.className = 'sum-head-sticky';
+      h1.replaceWith(wrap);
+      wrap.appendChild(h1);
+    }
+
     const tldrH = h2s.find(h => /한눈\s*요약/.test(h.textContent));
     if (tldrH && tldrH.nextElementSibling && tldrH.nextElementSibling.tagName === 'UL') {
       const ul = tldrH.nextElementSibling;
@@ -599,6 +609,10 @@
 .kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;font-size:.68rem;font-weight:600;flex-shrink:0;background:var(--highlight-soft,rgba(99,102,241,.1));padding:.06rem .38rem;border-radius: 2px;}
 /* ── 외국어 제목의 원문 병기(번역 제목이 H1, 원문은 그 아래 작게) ── */
 .sum-title-orig{margin:-.55rem 0 1.15rem;font-size:.8em;font-weight:400;line-height:1.5;color:var(--muted,#8a8279);opacity:.85;word-break:keep-all;}
+/* ── 제목 고정 래퍼(h1 + 원문 병기) — 배경·패딩은 각 화면 CSS가 지정 ── */
+.sum-head-sticky{position:sticky;top:0;z-index:6;}
+.sum-head-sticky h1{margin-top:0 !important;}
+.sum-head-sticky .sum-title-orig{margin-bottom:0;}
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
 .ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin:.4rem 0 1.4rem;padding-bottom:1.1rem;border-bottom:1px solid var(--border,#e5e5e5);}
 .ys-meta-compact{flex-direction:column;align-items:flex-start;gap:.45rem;}
