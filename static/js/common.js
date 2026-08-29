@@ -166,18 +166,27 @@
         const c = tr.querySelectorAll('td,th');
         if (c.length >= 2) kv[c[0].textContent.trim()] = c[1];
       });
-      const chips = [];
-      if (kv['업로더']) chips.push(`<span class="ys-chip ys-chip-up">${kv['업로더'].innerHTML}</span>`);
-      if (kv['날짜'])   chips.push(`<span class="ys-chip">${kv['날짜'].innerHTML}</span>`);
-      if (kv['길이'])   chips.push(`<span class="ys-chip ys-chip-dur">${kv['길이'].innerHTML}</span>`);
+      // 컴팩트 모드(모바일): 칩 텍스트를 줄이고 정보/링크 두 줄로 고정 배치
+      const compact = !!global.YS_META_COMPACT;
+      let durHtml = kv['길이'] ? kv['길이'].innerHTML : '';
+      if (compact && durHtml && /분/.test(durHtml)) {
+        durHtml = durHtml.replace(/\s*\d+초\s*$/, '');   // '1시간 58분 14초' → '1시간 58분'
+      }
+      const row1 = [], row2 = [];
+      if (kv['업로더']) row1.push(`<span class="ys-chip ys-chip-up">${kv['업로더'].innerHTML}</span>`);
+      if (kv['날짜'])   row1.push(`<span class="ys-chip">${kv['날짜'].innerHTML}</span>`);
+      if (durHtml)      row1.push(`<span class="ys-chip ys-chip-dur">${durHtml}</span>`);
       const urlA = kv['URL'] && kv['URL'].querySelector('a');
-      if (urlA) chips.push(`<a class="ys-chip ys-chip-link" href="${urlA.href}" target="_blank" rel="noopener noreferrer">YouTube에서 보기 ↗</a>`);
-      if (model) chips.push(`<span class="ys-chip ys-chip-model" title="이 요약을 생성한 LLM 모델">🧠 ${escapeHtml(model)}</span>`);
-      if (compress) chips.push(`<span class="ys-chip ys-chip-compress" title="요약본 글자수 / 전사 원문 글자수">🗜 원문 대비 ${escapeHtml(compress)}%</span>`);
+      if (urlA) row2.push(`<a class="ys-chip ys-chip-link" href="${urlA.href}" target="_blank" rel="noopener noreferrer">${compact ? 'YouTube' : 'YouTube에서 보기 ↗'}</a>`);
+      if (model) row2.push(`<span class="ys-chip ys-chip-model" title="이 요약을 생성한 LLM 모델">🧠 ${escapeHtml(model)}</span>`);
+      if (compress) row2.push(`<span class="ys-chip ys-chip-compress" title="요약본 글자수 / 전사 원문 글자수">🗜 ${compact ? '' : '원문 대비 '}${escapeHtml(compress)}%</span>`);
+      const chips = row1.concat(row2);
       if (chips.length) {
         const bar = document.createElement('div');
-        bar.className = 'ys-meta';
-        bar.innerHTML = chips.join('');
+        bar.className = 'ys-meta' + (compact ? ' ys-meta-compact' : '');
+        bar.innerHTML = compact
+          ? `<div class="ys-meta-row">${row1.join('')}</div><div class="ys-meta-row">${row2.join('')}</div>`
+          : chips.join('');
         tbl.replaceWith(bar);
         metaH.remove();
       }
@@ -592,6 +601,8 @@
 .sum-title-orig{margin:-.55rem 0 1.15rem;font-size:.8em;font-weight:400;line-height:1.5;color:var(--muted,#8a8279);opacity:.85;word-break:keep-all;}
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
 .ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin:.4rem 0 1.4rem;padding-bottom:1.1rem;border-bottom:1px solid var(--border,#e5e5e5);}
+.ys-meta-compact{flex-direction:column;align-items:flex-start;gap:.45rem;}
+.ys-meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;width:100%;}
 .ys-chip{display:inline-flex;align-items:center;gap:.35em;font-size:.78rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius: 2px;padding:.26rem .72rem;line-height:1.25;}
 .ys-chip-up{color:var(--text,#222);font-weight:600;}
 .ys-chip-dur{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.02em;}
