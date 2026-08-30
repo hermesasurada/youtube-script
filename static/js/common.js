@@ -611,8 +611,10 @@
 .sum-title-orig{margin:-.55rem 0 1.15rem;font-size:.8em;font-weight:400;line-height:1.5;color:var(--muted,#8a8279);opacity:.85;word-break:keep-all;}
 /* ── 제목 고정 래퍼(h1 + 원문 병기) — 배경·패딩은 각 화면 CSS가 지정 ── */
 .sum-head-sticky{position:sticky;top:0;z-index:6;}
-.sum-head-sticky h1{margin-top:0 !important;}
-.sum-head-sticky .sum-title-orig{margin-bottom:0;}
+/* 상·하 여백은 래퍼 패딩이 전담한다. 내부 마진을 남기면 원문 병기 유무에 따라
+   아래쪽만 달라진다(h1 margin-bottom vs 병기의 음수 margin-top이 상쇄). */
+.sum-head-sticky h1{margin:0 !important;}
+.sum-head-sticky .sum-title-orig{margin:.28rem 0 0 !important;}
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
 .ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin:.4rem 0 1.4rem;padding-bottom:1.1rem;border-bottom:1px solid var(--border,#e5e5e5);}
 .ys-meta-compact{flex-direction:column;align-items:flex-start;gap:.45rem;}
