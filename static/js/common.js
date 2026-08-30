@@ -346,8 +346,11 @@
         + 'font-size:1em;font-weight:700;line-height:1.45;color:#1a1a1a;',
     // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
     // 소제목의 굵기(700)가 뒤따르는 본문까지 번지는 것을 막는다.
-    p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;',
-    li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;',
+    // 본문 글자 크기는 여기서만 준다(2026-08-30 사용자 지시: 본문 15px). 래퍼는
+    // 16px 그대로라 소제목(h3, 1em)·h2·푸터는 종전 크기를 유지한다 — 래퍼를
+    // 줄이면 소제목까지 같이 작아진다.
+    p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;font-size:15px;',
+    li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
   };
