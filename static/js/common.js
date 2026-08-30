@@ -341,7 +341,7 @@
     // 배경 그라디언트로 글자에 살짝 물리게 했다(형광펜 효과).
     // inline-block이라 글자 길이만큼만 칠해진다. 대신 위아래 margin이 인접 문단과
     // 상쇄되지 않으므로(블록끼리면 상쇄됨) 위 여백을 그만큼 줄여 잡았다.
-    h3:   'display:inline-block;margin:1.1em 0 .95em;padding:0 .12em .02em;'
+    h3:   'display:inline-block;margin:1.1em 0 .475em;padding:0 .12em .02em;'
         + 'background-image:linear-gradient(transparent 62%, #dcf7a4 62%);'
         + 'font-size:1em;font-weight:700;line-height:1.45;color:#1a1a1a;',
     // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
@@ -457,7 +457,7 @@
     while (body.firstChild && body.firstChild.nodeType === 3 && !body.firstChild.textContent.trim()) body.firstChild.remove();
     while (body.lastChild && body.lastChild.nodeType === 3 && !body.lastChild.textContent.trim()) body.lastChild.remove();
     const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거 (박스 삽입 전에 잡는다)
-    if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .85em;'));
+    if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .425em;'));
 
     // 한눈 요약은 블로거 복사에서 제외한다(2026-08-26) — 본문 소제목부터 시작.
 
