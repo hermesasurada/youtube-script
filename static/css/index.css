@@ -2067,7 +2067,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 @media (max-width: 900px) { .sum-immersive-btn { display: none !important; } }
 
 /* Markdown styles inside modal */
-.sum-md h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -.032em; line-height: 1.3; margin-bottom: .9rem; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
+.sum-md h1 { font-size: 1.25rem; font-weight: 800; letter-spacing: -.032em; line-height: 1.3; margin-bottom: .9rem; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
 .sum-md h2 { /* 섹션 라벨(스몰캡스) + 우측 헤어라인 */
   display: flex; align-items: center; gap: .7rem;
   font-size: .72rem; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
