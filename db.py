@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS watch_queue (
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_retry_at TEXT,
     error_kind    TEXT,
-    claimed_at    TEXT
+    claimed_at    TEXT,
+    last_fail_reason TEXT                         -- 직전 실패 사유(pending 복귀 시 reason은 지워지므로 별도 보관)
 );
 CREATE INDEX IF NOT EXISTS idx_wq_status ON watch_queue(status);
 """
@@ -301,6 +302,14 @@ def init() -> None:
             if "distill" not in wcols:
                 c.execute("ALTER TABLE watch_queue ADD COLUMN distill INTEGER")
             c.execute("PRAGMA user_version = 14")
+        if ver < 15:
+            # v15: 직전 실패 사유 보관. queue_activate가 pending 복귀 때 reason을
+            # 비우므로, 같은 실패가 반복되는지 판정할 근거가 남지 않았다
+            # (2026-09-01 멤버십 전용 영상이 매번 같은 전사 붕괴로 재시도됨).
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(watch_queue)").fetchall()}
+            if "last_fail_reason" not in wcols:
+                c.execute("ALTER TABLE watch_queue ADD COLUMN last_fail_reason TEXT")
+            c.execute("PRAGMA user_version = 15")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -1122,16 +1131,18 @@ def queue_defer(
         if max_attempts is not None and attempts >= max_attempts:
             conn.execute(
                 """UPDATE watch_queue SET status = 'failed', reason = ?, error_kind = ?,
+                          last_fail_reason = ?,
                           attempt_count = ?, next_retry_at = NULL, claimed_at = NULL, updated_at = ?
                     WHERE id = ?""",
-                (reason, error_kind, attempts, _now(), qid),
+                (reason, error_kind, reason, attempts, _now(), qid),
             )
             return "failed"
         conn.execute(
             """UPDATE watch_queue SET status = 'deferred', reason = ?, error_kind = ?,
+                      last_fail_reason = ?,
                       attempt_count = ?, next_retry_at = ?, claimed_at = NULL, updated_at = ?
                 WHERE id = ?""",
-            (reason, error_kind, attempts, _after(retry_after_seconds), _now(), qid),
+            (reason, error_kind, reason, attempts, _after(retry_after_seconds), _now(), qid),
         )
         return "deferred"
 

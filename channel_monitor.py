@@ -728,6 +728,21 @@ def _drain_main_one(orders, capture_order) -> None:
                 f"{head}\n{reason}\n{v['url']}"
             )
             return
+        # 실패 문구가 직전과 글자 하나까지 같으면 기다린다고 달라지지 않는다. 영구
+        # 사유가 메시지에 드러나지 않는 경우를 잡는 그물이다 — 2026-09-01 멤버십
+        # 전용 영상이 비로그인에는 무음 트랙으로 내려와, 메타·다운로드는 멀쩡히
+        # 성공하고 전사만 두 번 다 '161자 붕괴'로 끝났다(62MB 다운로드 + 1시간
+        # 오디오 whisper 2회를 매 시도마다 반복). 자연 실패는 자·초·길이가 조금씩
+        # 달라 완전 일치가 드물다.
+        prev = (v.get("last_fail_reason") or "").strip()
+        if prev and prev == reason.strip() and (v.get("attempt_count") or 0) >= 1:
+            db.queue_set_status(v["id"], "skipped", f"동일 실패 반복 — 재시도 중단: {reason}")
+            log(f"[drain] 동일 실패 반복 → 재시도 중단: {reason[:110]}")
+            notify(
+                f"ℹ️ 동일 실패 반복 — 재시도 중단\n"
+                f"{head}\n{reason}\n{v['url']}"
+            )
+            return
         state = db.queue_defer(
             v["id"], reason, error_kind="pipeline_transient",
             retry_after_seconds=_retry_delay(v.get("attempt_count")),

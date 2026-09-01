@@ -412,6 +412,40 @@ def test_transient_filter_is_deferred_and_rechecked(monkeypatch):
     assert row["status"] == "pending"
 
 
+def test_last_fail_reason_survives_pending_return(tmp_path, monkeypatch):
+    """직전 실패 사유는 pending 복귀 뒤에도 남아야 한다.
+
+    queue_activate가 reason을 비우므로, 같은 실패가 반복되는지 판정할 근거가
+    사라졌다. 그래서 멤버십 전용 영상(비로그인에는 무음 트랙으로 내려온다)이
+    메타·다운로드는 성공하고 전사만 매번 같은 '161자 붕괴'로 끝나는데도 계속
+    재시도됐다 — 매 시도마다 62MB 다운로드와 1시간 오디오 whisper 2회를
+    반복했다(2026-09-01).
+    """
+    import importlib
+    monkeypatch.setenv("INDEX_DB", str(tmp_path / "t.db"))
+    import db as _db
+    importlib.reload(_db)
+    _db.init()
+
+    _db.enqueue_video("vid1", "http://x", "제목", "ch1", status="pending")
+    qid = _db._conn().execute(
+        "SELECT id FROM watch_queue WHERE yt_id = 'vid1'").fetchone()["id"]
+    reason = "전사 error: 전사 내용이 비어 있습니다: 161자 / 01:07:43 (분당 2자)"
+
+    _db.queue_defer(qid, reason, error_kind="pipeline_transient",
+                    retry_after_seconds=1, increment_attempt=True, max_attempts=5)
+    row = dict(_db._conn().execute(
+        "SELECT * FROM watch_queue WHERE id = ?", (qid,)).fetchone())
+    assert row["last_fail_reason"] == reason
+
+    _db.queue_activate(qid)                       # deferred → pending
+    row = dict(_db._conn().execute(
+        "SELECT * FROM watch_queue WHERE id = ?", (qid,)).fetchone())
+    assert row["reason"] == ""                    # 화면용 사유는 지워지고
+    assert row["last_fail_reason"] == reason      # 판정 근거는 남는다
+    assert row["attempt_count"] == 1              # 재시도 예산은 유지
+
+
 def test_permanent_metadata_errors_are_not_retried():
     """멤버십 전용·삭제 영상은 다시 물어도 답이 같다 — 재시도 예산을 쓰면 안 된다.
 
