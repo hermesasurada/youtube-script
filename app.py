@@ -1,5 +1,6 @@
 import json
 import gzip
+import hashlib
 import logging
 import os
 import queue
@@ -990,6 +991,7 @@ _REMOTE_DATA_ALLOWED = {
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
+    "/history/refresh-meta",  # 제목·썸네일 갱신 — 빠지면 원격 POST가 302로 튕겨 '갱신 실패'로 보인다(2026-09-03)
 }
 _PHONE_UA  = re.compile(r"iPhone|iPod|Windows Phone", re.I)
 _TABLET_UA = re.compile(r"iPad|Tablet|PlayBook|Kindle|Silk", re.I)
@@ -2590,10 +2592,16 @@ def history_refresh_meta():
     # 2) 썸네일은 제목과 무관하게 항상 최신본을 시도한다(제목만 그대로인 경우도 있다).
     try:
         before = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
-        old_size = os.path.getsize(before) if os.path.exists(before) else 0
+        # 크기만 비교하면 같은 크기의 다른 그림을 놓친다 — 내용 해시로 본다.
+        def _digest(path):
+            try:
+                with open(path, "rb") as f:
+                    return hashlib.sha1(f.read()).hexdigest()
+            except OSError:
+                return ""
+        old_sig = _digest(before)
         if save_thumbnail(yt_id, force=True):
-            new_size = os.path.getsize(before) if os.path.exists(before) else 0
-            if new_size and new_size != old_size:
+            if _digest(before) != old_sig:
                 changed.append("thumbnail")
         else:
             notes.append("썸네일을 받지 못했습니다(기존 유지)")

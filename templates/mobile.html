@@ -590,6 +590,10 @@
               aria-label="텔레그램용 복사" title="본문을 텔레그램에서 읽기 좋은 형태로 복사">
         <span class="tg-label">✈️</span>
       </button>
+      <button class="tg-btn" id="rfm-btn" onclick="refreshItemMeta(this)" hidden
+              aria-label="제목·썸네일 갱신" title="제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(못 가져오면 기존 유지)">
+        <span class="tg-label">🔄</span>
+      </button>
       <button class="distill-ctrl" id="distill-ctrl" hidden
               onclick="cycleItemDistill()" aria-label="증류 대상 전환">—</button>
     </header>
@@ -1338,6 +1342,7 @@ async function openSummary(itemId, title) {
   _summaryItemId = itemId;
   $('tg-btn').hidden = true;
   $('blg-btn').hidden = true;
+  $('rfm-btn').hidden = true;
   $('distill-ctrl').hidden = true;
   _setDistillUI(null);
   try {
@@ -1354,11 +1359,58 @@ async function openSummary(itemId, title) {
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
       $('blg-btn').hidden = !_summaryMd;
+      $('rfm-btn').hidden = !_summaryMd;
       $('distill-ctrl').hidden = !_summaryMd;
       _setDistillUI(d.distill);
     }
   } catch (e) {
     $('modal-body').textContent = '오류: ' + e.message;
+  }
+}
+
+/* 제목·썸네일 갱신 — 데스크톱과 같은 엔드포인트. 서버가 실패 시 기존 값을 유지하므로
+   여기서는 결과만 알린다. 제목이 바뀌면 열린 본문의 H1과 번역 병기, 목록 썸네일을
+   즉시 반영한다(썸네일 URL은 그대로라 캐시 우회 쿼리를 붙인다). */
+async function refreshItemMeta(btn) {
+  if (!_summaryItemId) return;
+  const label = btn && btn.querySelector('.tg-label');
+  const setLbl = (t) => { if (label) label.textContent = t; };
+  setLbl('…');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await YS.apiRefreshMeta(_summaryItemId);
+    if (res && res.error) throw new Error(res.error);
+    const changed = (res && res.changed) || [];
+    if (changed.includes('title')) {
+      const body = $('modal-body');
+      const h1 = body.querySelector('h1');
+      if (h1) h1.textContent = res.title || h1.textContent;
+      const orig = body.querySelector('.sum-title-orig');
+      if (orig) orig.remove();
+      YS.applyTitleTranslation(body, res.title_ko || '');
+      const hdrTitle = document.querySelector('.modal-hdr h2');
+      if (hdrTitle) hdrTitle.textContent = res.title_ko || res.title || hdrTitle.textContent;
+    }
+    if (changed.includes('thumbnail')) {
+      document.querySelectorAll('img.hist-thumb').forEach(img => {
+        const base = (img.getAttribute('src') || '').split('?')[0];
+        if (base) img.setAttribute('src', `${base}?v=${Date.now()}`);
+      });
+    }
+    if (changed.length) {
+      setLbl('✓');
+      if (typeof loadHistory === 'function') loadHistory(true);
+    } else if (res && res.notes && res.notes.length) {
+      setLbl('✗'); console.warn('[refresh-meta]', res.notes.join(' / '));
+    } else {
+      setLbl('=');   // 변경 없음
+    }
+  } catch (e) {
+    console.warn('[refresh-meta] 실패', e);
+    setLbl('✗');
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => setLbl('🔄'), 2000);
   }
 }
 
