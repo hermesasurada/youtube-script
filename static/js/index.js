@@ -2180,6 +2180,62 @@ function _copyHtmlLegacy(html, text) {
   return ok;
 }
 
+/* 제목·썸네일 갱신 — 영상이 공개 뒤 제목을 고치거나 썸네일을 바꾸는 일이 잦은데
+   우리 사본은 전사 시점에 굳는다. 가져오지 못하면 서버가 기존 값을 그대로 두므로
+   여기서는 결과만 알린다. 제목이 바뀌면 열려 있는 요약 본문에도 즉시 반영한다. */
+async function refreshItemMeta(btn) {
+  if (!_summaryItemId) return;
+  const label = btn && btn.querySelector('.rfm-label');
+  const setLbl = (t, color) => {
+    if (label) label.textContent = t;
+    if (btn) btn.style.color = color || '';
+  };
+  setLbl('갱신 중…');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await YS.apiRefreshMeta(_summaryItemId);
+    if (res && res.error) throw new Error(res.error);
+    const changed = (res && res.changed) || [];
+    if (changed.includes('title')) {
+      // 본문 H1은 원제를 담고 있다 — 새 제목으로 바꾼 뒤 번역 병기를 다시 적용한다.
+      _titleKo = res.title_ko || '';
+      for (const root of [document.getElementById('sum-panel-body'),
+                          document.querySelector('.imm-text')]) {
+        if (!root) continue;
+        const h1 = root.querySelector('h1');
+        if (h1) h1.textContent = res.title || h1.textContent;
+        const orig = root.querySelector('.sum-title-orig');
+        if (orig) orig.remove();                  // 이전 병기 제거 후 재적용
+        YS.applyTitleTranslation(root, _titleKo);
+      }
+    }
+    if (changed.includes('thumbnail')) {
+      // 사본 URL은 그대로라 브라우저 캐시를 우회해야 새 그림이 보인다.
+      document.querySelectorAll('img.hist-thumb').forEach(img => {
+        const base = (img.getAttribute('src') || '').split('?')[0];
+        if (base) img.setAttribute('src', `${base}?v=${Date.now()}`);
+      });
+    }
+    const what = [changed.includes('title') && '제목',
+                  changed.includes('thumbnail') && '썸네일'].filter(Boolean).join('·');
+    if (what) {
+      setLbl(`${what} 갱신됨`, 'var(--success)');
+      if (typeof loadHistory === 'function') loadHistory();   // 목록의 제목·썸네일도 갱신
+    } else if (res && res.notes && res.notes.length) {
+      setLbl('갱신 불가(기존 유지)', 'var(--error)');
+      console.warn('[refresh-meta]', res.notes.join(' / '));
+    } else {
+      setLbl('변경 없음');
+    }
+  } catch (e) {
+    console.warn('[refresh-meta] 실패', e);
+    setLbl('갱신 실패(기존 유지)', 'var(--error)');
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => setLbl('메타 갱신'), 2200);
+  }
+}
+
 async function copySummaryForBlogger(btn) {
   if (!_summaryMd) return;
   const label = btn && btn.querySelector('.blg-label');

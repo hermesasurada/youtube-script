@@ -581,8 +581,11 @@ def _set_job_error(job_id: str, stage: str, message: object) -> str:
 _THUMB_SOURCES = ("mqdefault", "hqdefault", "sddefault", "maxresdefault")
 
 
-def save_thumbnail(yt_id: str) -> str | None:
+def save_thumbnail(yt_id: str, *, force: bool = False) -> str | None:
     """영상 썸네일을 res/thumbs/{yt_id}.jpg 로 내려받는다(이미 있으면 그대로 둔다).
+
+    force=True면 사본이 있어도 다시 받는다(메타 갱신 버튼). 새 사본이 실패하면
+    기존 파일은 건드리지 않는다 — 갱신 실패가 기존 썸네일을 지우면 안 된다.
 
     전사 시점에 한 번만 받아 두고, 이후 조회는 이 사본만 쓴다(외부 재요청 없음).
     나중에 비공개·멤버십 전용으로 바뀌면 원본 URL이 막히므로 그 전에 확보해 둔다.
@@ -592,7 +595,7 @@ def save_thumbnail(yt_id: str) -> str | None:
     if not yt_id or not re.fullmatch(r"[\w-]{5,20}", yt_id):
         return None
     dest = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
-    if os.path.exists(dest) and os.path.getsize(dest) > 1024:
+    if not force and os.path.exists(dest) and os.path.getsize(dest) > 1024:
         return dest
     os.makedirs(THUMB_DIR, exist_ok=True)
     for name in _THUMB_SOURCES:
@@ -2516,6 +2519,109 @@ def summary_content():
                       "title_ko": db.get_title_ko(abs_path)})
     except Exception as e:
         return _json({"error": str(e)}, 500)
+
+
+@app.route("/history/refresh-meta", methods=["POST"])
+def history_refresh_meta():
+    """제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(요약 뷰어의 갱신 버튼).
+
+    영상이 공개 뒤 제목을 고치거나 썸네일을 바꾸는 일이 잦은데, 우리 사본은 전사
+    시점에 굳는다. 가져오지 못하면(비공개·멤버십 전환·네트워크) 기존 값을 그대로
+    둔다 — 갱신 실패가 멀쩡한 제목·썸네일을 지우면 안 된다.
+
+    제목이 바뀌면 세 곳을 함께 고친다: 전사 md의 front matter, 요약 md의 H1,
+    그리고 items(재색인). 번역은 원문이 바뀐 뒤 다시 만든다.
+    """
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    if not item:
+        return _json({"error": "item_id 필요"}, 400)
+
+    yt_id = (item.get("yt_id") or "").strip()
+    if not yt_id:
+        return _json({"error": "영상 id가 없는 항목입니다."}, 400)
+
+    changed, notes = [], []
+
+    # 1) 현재 메타 조회 — 실패해도 썸네일 갱신은 따로 시도한다.
+    new_title = ""
+    try:
+        if yt_dlp is None:
+            raise RuntimeError("yt-dlp를 사용할 수 없습니다")
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            info = ydl.extract_info(item.get("webpage_url")
+                                    or f"https://www.youtube.com/watch?v={yt_id}",
+                                    download=False)
+        new_title = _nfc((info.get("title") or "").strip())
+    except Exception as e:
+        notes.append(f"제목 조회 실패: {str(e)[:120]}")
+
+    old_title = (item.get("title") or "").strip()
+    if new_title and new_title != old_title:
+        md_path = item.get("md_path") or ""
+        try:
+            if md_path and os.path.isfile(md_path):
+                meta, body = _parse_md(md_path)
+                meta["title"] = new_title
+                document_io.atomic_write_text(
+                    md_path,
+                    document_io.render_markdown(meta, body, key_order=_MD_META_ORDER))
+            # 요약 md의 첫 H1도 함께 — 뷰어가 읽는 제목은 이쪽이다.
+            sm = item.get("summary_path") or ""
+            if sm and os.path.isfile(sm):
+                with open(sm, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                new_text, n = re.subn(r"^# .*$", "# " + new_title.replace("\\", "\\\\"),
+                                      text, count=1, flags=re.M)
+                if n:
+                    document_io.atomic_write_text(sm, new_text)
+            for path in (md_path, item.get("summary_path") or ""):
+                if path and os.path.isfile(path):
+                    try:
+                        db.upsert(path)
+                    except Exception:
+                        pass
+            changed.append("title")
+        except Exception as e:
+            notes.append(f"제목 반영 실패: {str(e)[:120]}")
+
+    # 2) 썸네일은 제목과 무관하게 항상 최신본을 시도한다(제목만 그대로인 경우도 있다).
+    try:
+        before = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
+        old_size = os.path.getsize(before) if os.path.exists(before) else 0
+        if save_thumbnail(yt_id, force=True):
+            new_size = os.path.getsize(before) if os.path.exists(before) else 0
+            if new_size and new_size != old_size:
+                changed.append("thumbnail")
+        else:
+            notes.append("썸네일을 받지 못했습니다(기존 유지)")
+    except Exception as e:
+        notes.append(f"썸네일 갱신 실패: {str(e)[:120]}")
+
+    # 3) 제목이 바뀌었으면 번역도 다시 만든다(원문이 그대로면 기존 번역이 유효).
+    title_ko = db.get_title_ko(item.get("summary_path") or item.get("md_path") or "")
+    if "title" in changed:
+        try:
+            db.set_title_ko(yt_id, "")               # 이전 번역 비우고
+            db.mark_korean_titles()                  # 한국어 원제면 번역 대상에서 제외
+            out = _translate_titles([new_title])
+            if out and out[0] and out[0] != new_title:
+                db.set_title_ko(yt_id, out[0])
+                title_ko = out[0]
+                changed.append("title_ko")
+            else:
+                title_ko = ""
+        except Exception as e:
+            notes.append(f"번역 실패: {str(e)[:120]}")
+
+    return _json({
+        "changed": changed,
+        "title": new_title or old_title,
+        "title_ko": title_ko or "",
+        "notes": notes,
+    })
 
 
 @app.route("/thumb/<yt_id>")

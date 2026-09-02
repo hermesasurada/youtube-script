@@ -320,6 +320,17 @@
     return r.ok ? r.json() : null;
   }
 
+  /* 제목·썸네일을 지금 유튜브 기준으로 다시 가져온다. 실패해도 서버가 기존 값을
+     유지하므로 호출 측은 결과의 changed/notes만 보고 알리면 된다. */
+  async function apiRefreshMeta(ref) {
+    const r = await fetch('/history/refresh-meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(_historyRef(ref, 'path')),
+    });
+    return r.json();
+  }
+
   async function apiSummaryContent(ref) {
     const r = await fetch('/summary/content', {
       method: 'POST',
@@ -595,6 +606,7 @@
     apiBookmark,
     apiDeleteItem,
     apiSummaryContent,
+    apiRefreshMeta,
     ensureReaderAssets,
     applyTitleTranslation,
   };
