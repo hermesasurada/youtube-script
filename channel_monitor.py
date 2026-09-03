@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 import argparse
 import json
 import os
@@ -608,6 +609,27 @@ def drain() -> None:
     _drain_kf_retry_one(capture_order)
 
 
+def _live_status(url: str) -> str:
+    """yt-dlp live_status(is_live / post_live / was_live / ""). 조회 실패면 ""."""
+    try:
+        import yt_dlp
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as y:
+            return str(y.extract_info(url, download=False).get("live_status") or "")
+    except Exception:
+        return ""
+
+
+def _age_hours(stamp: str | None) -> float:
+    try:
+        return (datetime.now() - datetime.strptime(str(stamp), "%Y-%m-%d %H:%M:%S")).total_seconds() / 3600
+    except Exception:
+        return 0.0
+
+
+_KF_POST_LIVE_WAIT_S = 3600      # VOD 처리 대기 간격
+_KF_POST_LIVE_MAX_H  = 48        # 이 시간이 지나도 post_live면 그냥 시도한다
+
+
 def _drain_kf_retry_one(capture_order) -> None:
     """캡처 재시도 큐에서 1건 — 본편과 별도 슬롯(주기당 본편 1 + 캡처 1).
 
@@ -622,6 +644,14 @@ def _drain_kf_retry_one(capture_order) -> None:
     txt_path = v.get("txt_path")
     if not txt_path:
         db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
+        return
+    # 라이브 종료 직후(post_live)는 VOD 처리가 끝날 때까지 영상 포맷이 비거나 DASH
+    # 세그먼트만 아주 느리게 내려온다(2026-09-03 집코노미 라이브: 종료 7분 뒤 캡처가
+    # '빈 파일'로 실패, 40분 뒤에도 360p 10MB에 4분). 단 한 번뿐인 재시도를 지금
+    # 태우지 말고 한 시간 뒤로 미룬다. 48시간이 지나도 그대로면 그냥 시도한다.
+    if _live_status(v["url"]) == "post_live" and _age_hours(v.get("added_at")) < _KF_POST_LIVE_MAX_H:
+        db.queue_defer_kf_retry(v["id"], _KF_POST_LIVE_WAIT_S, "VOD 처리 대기(라이브 종료 직후)")
+        log(f"[kf-retry] post_live → {_KF_POST_LIVE_WAIT_S // 60}분 뒤 재시도: {title}")
         return
     log(f"[kf-retry] 캡처 재시도: {title}")
     try:

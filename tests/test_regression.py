@@ -483,6 +483,37 @@ def test_no_speech_verdict_is_permanent():
     assert not channel_monitor._META_PERMANENT_RE.search(plain)
 
 
+def test_capture_download_retry_trigger_covers_empty_file():
+    """캡처 영상 다운로드 폴백은 403만이 아니라 빈 파일·포맷 없음도 탄다.
+
+    (2026-09-03 집코노미 라이브: 종료 직후 'The downloaded file is empty'로 첫 시도에서
+    raise돼 대체 클라이언트 폴백을 못 탔다.)
+    """
+    import keyframe_report as kr
+    assert kr._is_retryable_download_error("ERROR: The downloaded file is empty")
+    assert kr._is_retryable_download_error("HTTP Error 403: Forbidden")
+    assert kr._is_retryable_download_error("Requested format is not available")
+    assert not kr._is_retryable_download_error("Private video. Sign in if you have been granted access")
+    assert not kr._is_retryable_download_error("")
+
+
+def test_kf_retry_claim_honors_next_retry_at(tmp_path, monkeypatch):
+    """post_live로 미뤄둔 캡처 재시도는 due 전에는 꺼내지 않는다."""
+    import importlib
+    monkeypatch.setenv("INDEX_DB", str(tmp_path / "t.db"))
+    import db as _db
+    importlib.reload(_db); _db.init()
+    _db.enqueue_video("vid1", "http://x", "제목", "ch1", status="pending")
+    qid = _db._conn().execute("SELECT id FROM watch_queue WHERE yt_id='vid1'").fetchone()["id"]
+    _db.queue_mark_kf_retry(qid, "/tmp/x.md", reason="캡처 실패")
+    assert _db.queue_claim_kf_retry() is not None          # 즉시 due
+    _db.queue_set_status(qid, "kf_retry")                  # claim이 processing으로 바꿨으니 되돌림
+    _db.queue_defer_kf_retry(qid, 3600, "VOD 처리 대기")
+    assert _db.queue_claim_kf_retry() is None              # 1시간 뒤까지 잠금
+    _db.queue_defer_kf_retry(qid, -1, "due 지남")
+    assert _db.queue_claim_kf_retry()["id"] == qid
+
+
 def test_permanent_metadata_errors_are_not_retried():
     """멤버십 전용·삭제 영상은 다시 물어도 답이 같다 — 재시도 예산을 쓰면 안 된다.
 
