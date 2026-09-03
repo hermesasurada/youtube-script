@@ -169,6 +169,19 @@ def _exclude_opening_candidates(
 
 # ── 프레임 확보 ───────────────────────────────────────────────────────
 
+_RETRYABLE_DL_RE = re.compile(
+    r"403|downloaded file is empty|Requested format is not available|missing a URL|SABR", re.I)
+
+
+def _is_retryable_download_error(msg: str) -> bool:
+    """세션·클라이언트를 바꾸면 풀릴 수 있는 다운로드 실패인가.
+
+    403(IP 차단), 빈 파일·포맷 없음(SABR-only 실험 세션, 라이브 종료 직후 VOD 미처리).
+    비공개·멤버십·삭제 같은 영구 사유는 여기 없다 — 그건 호출 측이 _META_PERMANENT_RE로 본다.
+    """
+    return bool(_RETRYABLE_DL_RE.search(msg or ""))
+
+
 def download_video(url: str, out_noext: str) -> str | None:
     import yt_dlp
     log(f"[1] 영상 다운로드(≤{VIDEO_MAXH}p): {url}")
@@ -178,8 +191,10 @@ def download_video(url: str, out_noext: str) -> str | None:
         "ffmpeg_location": FFMPEG_DIR, "quiet": True, "no_warnings": True,
         "socket_timeout": 60, "retries": 5,
     }
-    # 403 재시도: 1차 즉시 → 2차 75초 뒤 → 3차 대체 클라이언트(tv_simply·web_embedded).
-    # IP 단위 차단으로 웹 계열이 전부 막혀도 이 둘은 통과한다(2026-08-18 실측).
+    # 재시도: 1차 즉시 → 2차 75초 뒤 → 3차 대체 클라이언트(tv_simply·web_embedded).
+    # IP 단위 차단(403)으로 웹 계열이 전부 막혀도 이 둘은 통과한다(2026-08-18 실측).
+    # 403만 재시도하던 것을 '빈 파일'·'포맷 없음'(SABR-only 세션, 라이브 종료 직후)까지
+    # 넓혔다 — 2026-09-03 집코노미 라이브 캡처가 첫 시도에서 바로 raise돼 폴백을 못 탔다.
     retry_wait = {1: 0, 2: 75}
     for attempt in (1, 2, 3):
         try:
@@ -191,10 +206,10 @@ def download_video(url: str, out_noext: str) -> str | None:
             break
         except Exception as e:
             wait = retry_wait.get(attempt)
-            if wait is None or "403" not in str(e):
+            if wait is None or not _is_retryable_download_error(str(e)):
                 raise
             nxt = "대체 클라이언트" if attempt == 2 else "새 세션"
-            log(f"[1] 403 차단 — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도({attempt}/2)")
+            log(f"[1] 다운로드 실패({str(e)[:60]}) — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도({attempt}/2)")
             if wait:
                 time.sleep(wait)
     for ext in ("mp4", "mkv", "webm", "m4v"):

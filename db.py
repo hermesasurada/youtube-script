@@ -871,7 +871,8 @@ def queue_claim_kf_retry() -> dict | None:
         try:
             row = conn.execute(
                 "SELECT * FROM watch_queue WHERE status = 'kf_retry' "
-                "ORDER BY COALESCE(position, id), id LIMIT 1").fetchone()
+                "AND COALESCE(next_retry_at, '') <= ? "          # post_live 대기분은 due 전엔 안 꺼낸다
+                "ORDER BY COALESCE(position, id), id LIMIT 1", (_now(),)).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -1181,6 +1182,20 @@ def queue_mark_kf_retry(qid: int, txt_path: str, reason: str = "") -> None:
             "kf_attempts = kf_attempts + 1, reason = ?, updated_at = ?, claimed_at = NULL "
             "WHERE id = ?",
             (txt_path, reason, _now(), qid),
+        )
+
+
+def queue_defer_kf_retry(qid: int, retry_after_seconds: int | float, reason: str = "") -> None:
+    """캡처 재시도를 나중으로 미룬다(시도 횟수는 세지 않는다).
+
+    라이브 종료 직후(post_live)는 VOD 처리가 끝날 때까지 영상 포맷이 없거나 아주
+    느리다 — 단 한 번뿐인 재시도를 그때 태우면 그대로 '포기'로 끝난다(2026-09-03).
+    """
+    with _lock:
+        _conn().execute(
+            "UPDATE watch_queue SET status = 'kf_retry', next_retry_at = ?, reason = ?, "
+            "updated_at = ?, claimed_at = NULL WHERE id = ?",
+            (_after(retry_after_seconds), reason, _now(), qid),
         )
 
 
