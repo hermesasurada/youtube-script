@@ -2125,8 +2125,12 @@ def _spawn_drain() -> bool:
         out_path = os.path.join(_MONITOR_LOG_DIR, "youtube-monitor.out.log")
         err_path = os.path.join(_MONITOR_LOG_DIR, "youtube-monitor.err.log")
         with open(out_path, "a", encoding="utf-8") as out, open(err_path, "a", encoding="utf-8") as err:
+            # -u: 자식의 stdout을 버퍼링하지 않는다. 파일로 리다이렉트된 stdout은 블록
+            # 버퍼링이라, 자식이 갑자기 죽으면 '[drain] 처리 시작' 같은 줄이 통째로
+            # 사라져 큐가 왜 processing으로 남았는지 추적할 수 없었다(2026-09-03
+            # GOOGLE IS BACK: 전사는 끝났는데 요약 호출 없이 고아가 됨, 로그 0줄).
             subprocess.Popen(
-                [sys.executable, _MONITOR_PY, "--drain-only"],
+                [sys.executable, "-u", _MONITOR_PY, "--drain-only"],
                 cwd=os.path.dirname(_MONITOR_PY),
                 stdout=out,
                 stderr=err,
