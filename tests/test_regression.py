@@ -456,7 +456,8 @@ def test_declared_language_overrides_weak_probe():
     assert app._norm_lang("en-US") == "en"
     assert app._norm_lang("ko") == "ko"
     assert app._norm_lang(None) == ""
-    assert app._norm_lang("zxx-weird-1") == ""            # 코드가 아니면 버린다
+    assert app._norm_lang("1234") == ""                   # 코드가 아니면 버린다
+    assert app._norm_lang("zxx-weird-1") == "zxx"         # 첫 서브태그만 쓴다
     # 약한 표본(ru 0.63) vs 선언 ko → ko 쓰고 ru를 대체 후보로
     assert app._choose_language("ru", 0.63, "ko") == ("ko", "ru")
     # 강한 표본(en 0.97)은 선언(ko)을 이긴다 — 업로더 기본값이 틀린 경우
