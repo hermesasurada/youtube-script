@@ -414,6 +414,33 @@ _LANG_RE = re.compile(r"auto-detected language:\s*(\w+)\s*\(p\s*=\s*([\d.]+)\)")
 _LANG_PROBE_SEC = 60          # 표본 구간 길이
 _LANG_MIN_TOTAL = 120         # 이보다 짧으면 표본 뽑을 여지가 없어 whisper 기본 감지에 맡긴다
 _LANG_MIN_P     = 0.5         # 이 확신도 미만이면 명시하지 않고 auto로 둔다
+_LANG_OVERRIDE_P = 0.85       # 표본 판정이 이보다 약하면 제작자 선언 언어가 이긴다
+
+
+def _norm_lang(value) -> str:
+    """yt-dlp language(ko / en-US / None) → whisper 언어코드(ko / en). 모르면 ""."""
+    code = str(value or "").strip().lower().split("-")[0]
+    return code if re.fullmatch(r"[a-z]{2,3}", code) else ""
+
+
+def _choose_language(detected: str, p: float, declared: str) -> tuple[str, str]:
+    """표본 감지 결과와 제작자 선언 언어로 (쓸 언어, 백지일 때 시도할 대체 언어)를 정한다.
+
+    표본이 음악·무음에 걸리면 whisper는 엉뚱한 언어를 그럭저럭한 확신도로 낸다
+    (2026-09-03 지식채널e: 5분 한국어 영상의 25/50/75% 표본이 전부 음악 구간이라
+    ru(p=0.63)로 판정 → 러시아어로 디코딩돼 33자만 남음. 두 번 다 같은 결과라
+    '동일 실패 반복' 규칙이 영구 실패로 굳힐 케이스). 제작자 선언 언어가 있고
+    표본 판정이 약하면(p < _LANG_OVERRIDE_P) 선언 언어를 쓴다. 선언 언어도 틀릴 수
+    있으므로(업로더 기본값 en 등) 반대편을 대체 후보로 남겨, 결과가 백지면 한 번 더
+    돌린다.
+    """
+    if detected and p >= _LANG_MIN_P:
+        if declared and declared != detected and p < _LANG_OVERRIDE_P:
+            return declared, detected
+        return detected, (declared if declared and declared != detected else "")
+    if declared:
+        return declared, (detected or "")
+    return "", ""
 
 
 def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, float]:
@@ -518,12 +545,18 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
             language = cached
         else:
             detected, p = _detect_language(audio_path, total, threads)
-            if detected and p >= _LANG_MIN_P:
-                language = detected
-                jobs.setdefault(job_id, {})["resolved_language"] = detected
-                q.put(f"언어 감지: {detected} ({p:.0%}) — 본문 표본 기준")
-                log.info("language detected: %s (p=%.2f) %s", detected, p,
-                         os.path.basename(audio_path))
+            declared = jobs.get(job_id, {}).get("declared_language") or ""
+            chosen, alt = _choose_language(detected, p, declared)
+            if chosen:
+                language = chosen
+                jobs.setdefault(job_id, {})["resolved_language"] = chosen
+                jobs[job_id]["alt_language"] = alt
+                how = ("제작자 선언 언어 우선(표본 %s %.0f%%)" % (detected, p * 100)
+                       if chosen == declared and detected and chosen != detected
+                       else "본문 표본 기준")
+                q.put(f"언어 감지: {chosen} — {how}")
+                log.info("language detected: %s (p=%.2f, declared=%s, alt=%s) %s",
+                         chosen, p, declared or "-", alt or "-", os.path.basename(audio_path))
             elif detected:
                 log.info("language probe inconclusive: %s (p=%.2f) — auto 유지", detected, p)
 
@@ -683,6 +716,20 @@ def _cleanup_failed_artifacts(audio_path: str, json_path: str, delete_audio: boo
             log.warning("failed-job cleanup skipped: %s (%s)", os.path.basename(path), e)
 
 
+def _transcript_sparse(job_id: str, transcript: str | None) -> str:
+    """길이 대비 본문이 사실상 비어 있으면(무음·잘린 오디오·언어 오판) 사유 문자열, 아니면 ""."""
+    if transcript is None:
+        return ""
+    secs = float(jobs[job_id].get("clip_duration")
+                 or (jobs[job_id].get("meta") or {}).get("duration") or 0)
+    mins = secs / 60
+    body = _TS_TAG_RE.sub("", transcript).strip()   # [mm:ss] 마커는 본문 길이에서 제외
+    if mins >= 1 and len(body) / mins < MIN_CHARS_PER_MIN:
+        return (f"전사 내용이 비어 있습니다: {len(body)}자 / "
+                f"{_format_duration(secs)} (분당 {len(body) / mins:.0f}자)")
+    return ""
+
+
 def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                           delete_audio: bool = False) -> None:
     q = jobs[job_id]["queue"]
@@ -692,13 +739,8 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
         # 방어 B: 길이 대비 본문이 사실상 비어 있으면(무음·잘린 오디오) 성공 처리하지 않는다.
         # 저장까지 하면 요약 LLM 호출과 캡처가 낭비되고 빈 요약본이 이력에 남는다.
         if transcript is not None:
-            secs = float(jobs[job_id].get("clip_duration")
-                         or (jobs[job_id].get("meta") or {}).get("duration") or 0)
-            mins = secs / 60
-            body = _TS_TAG_RE.sub("", transcript).strip()   # [mm:ss] 마커는 본문 길이에서 제외
-            if mins >= 1 and len(body) / mins < MIN_CHARS_PER_MIN:
-                detail = (f"전사 내용이 비어 있습니다: {len(body)}자 / "
-                          f"{_format_duration(secs)} (분당 {len(body) / mins:.0f}자)")
+            detail = _transcript_sparse(job_id, transcript)
+            if detail:
                 _set_job_error(job_id, "transcribe", detail)
                 log.warning("transcript too sparse: %s — %s", os.path.basename(md_path), detail)
                 _cleanup_failed_artifacts(audio_path, json_path, delete_audio)
@@ -781,6 +823,21 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
                               max_context=_COLLAPSE_CONTEXT)
             still, detail2 = _looks_collapsed(audio_path + ".json")
             log.info("collapse retry result: %s", "여전히 붕괴" if still else f"정상화({detail2 or 'OK'})")
+    # 언어 오판 폴백: 결과가 백지에 가깝고 대체 언어 후보가 있으면 그 언어로 한 번만
+    # 다시 돌린다. 어느 쪽이 맞는지는 결과가 말해 준다 — 백지가 아닌 쪽이 정답이다.
+    if rc == 0 and not stop.is_set() and lang == "auto":
+        alt = jobs[job_id].get("alt_language") or ""
+        used = jobs[job_id].get("resolved_language") or ""
+        if alt and alt != used:
+            sparse = _transcript_sparse(
+                job_id, _parse_transcript(audio_path + ".json", jobs[job_id].get("start_offset") or 0))
+            if sparse:
+                log.warning("sparse with lang=%s (%s) — retry with alt lang=%s: %s",
+                            used, sparse, alt, os.path.basename(audio_path))
+                q.put(f"언어 오판 의심({used}: {sparse}) — {alt}로 재전사")
+                jobs[job_id]["resolved_language"] = alt
+                jobs[job_id]["alt_language"] = ""
+                rc = _run_whisper(job_id, audio_path, alt, thr, total)
     if stop.is_set():
         jobs[job_id]["status"] = "cancelled"
         q.put("중지됨.")
@@ -848,6 +905,9 @@ def run_job(job_id: str, params: dict) -> None:
     jobs[job_id]["start_offset"]   = start_sec
     jobs[job_id]["clip_duration"]  = clip
     jobs[job_id]["meta"] = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
+    # 제작자가 선언한 언어(yt-dlp `language`, 예: ko / en-US). whisper 표본 감지가 음악
+    # 인트로에 걸려 빗나갈 때 이걸 우선한다 — 아래 _choose_language 참조.
+    jobs[job_id]["declared_language"] = _norm_lang(info.get("language"))
     if start_sec:
         # md 프론트매터에는 구간 정보를 남기고 duration은 실제 전사 길이로 맞춘다.
         jobs[job_id]["meta"]["clip_start"] = start_sec

@@ -446,6 +446,29 @@ def test_last_fail_reason_survives_pending_return(tmp_path, monkeypatch):
     assert row["attempt_count"] == 1              # 재시도 예산은 유지
 
 
+def test_declared_language_overrides_weak_probe():
+    """제작자 선언 언어가 약한 표본 판정을 이기고, 반대편은 대체 후보로 남는다.
+
+    (2026-09-03 지식채널e: 음악 인트로 표본이 ru(p=0.63)로 판정돼 한국어 5분 영상이
+    33자로 끝남. 두 번 다 같아 '동일 실패 반복' 규칙이 영구 실패로 굳힐 케이스.)
+    """
+    import app
+    assert app._norm_lang("en-US") == "en"
+    assert app._norm_lang("ko") == "ko"
+    assert app._norm_lang(None) == ""
+    assert app._norm_lang("zxx-weird-1") == ""            # 코드가 아니면 버린다
+    # 약한 표본(ru 0.63) vs 선언 ko → ko 쓰고 ru를 대체 후보로
+    assert app._choose_language("ru", 0.63, "ko") == ("ko", "ru")
+    # 강한 표본(en 0.97)은 선언(ko)을 이긴다 — 업로더 기본값이 틀린 경우
+    assert app._choose_language("en", 0.97, "ko") == ("en", "ko")
+    # 표본과 선언이 같으면 대체 없음
+    assert app._choose_language("ko", 0.7, "ko") == ("ko", "")
+    # 표본이 불확실(p<0.5)하면 선언 언어, 표본은 대체
+    assert app._choose_language("en", 0.31, "ko") == ("ko", "en")
+    # 둘 다 없으면 auto 유지
+    assert app._choose_language("", 0.0, "") == ("", "")
+
+
 def test_permanent_metadata_errors_are_not_retried():
     """멤버십 전용·삭제 영상은 다시 물어도 답이 같다 — 재시도 예산을 쓰면 안 된다.
 
