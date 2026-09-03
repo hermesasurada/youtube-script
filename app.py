@@ -740,6 +740,8 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
         # 저장까지 하면 요약 LLM 호출과 캡처가 낭비되고 빈 요약본이 이력에 남는다.
         if transcript is not None:
             detail = _transcript_sparse(job_id, transcript)
+            if detail and jobs[job_id].get("no_speech"):
+                detail += f" — 두 언어({jobs[job_id]['no_speech']}) 모두 백지, 음성 없는 영상"
             if detail:
                 _set_job_error(job_id, "transcribe", detail)
                 log.warning("transcript too sparse: %s — %s", os.path.basename(md_path), detail)
@@ -838,6 +840,13 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
                 jobs[job_id]["resolved_language"] = alt
                 jobs[job_id]["alt_language"] = ""
                 rc = _run_whisper(job_id, audio_path, alt, thr, total)
+                # 두 언어 모두 백지면 언어 문제가 아니라 말이 없는 오디오다(2026-09-03
+                # 지식채널e: 화면 자막+배경음악 구성, 유튜브 ASR도 5분에 가사 8줄뿐).
+                # 표시해 두면 finish가 사유에 남기고 모니터는 재시도 없이 종료한다.
+                if rc == 0 and _transcript_sparse(
+                        job_id, _parse_transcript(audio_path + ".json",
+                                                  jobs[job_id].get("start_offset") or 0)):
+                    jobs[job_id]["no_speech"] = f"{used}·{alt}"
     if stop.is_set():
         jobs[job_id]["status"] = "cancelled"
         q.put("중지됨.")

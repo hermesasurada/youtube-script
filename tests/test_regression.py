@@ -470,6 +470,19 @@ def test_declared_language_overrides_weak_probe():
     assert app._choose_language("", 0.0, "") == ("", "")
 
 
+def test_no_speech_verdict_is_permanent():
+    """두 언어로 전사해도 백지면 말이 없는 오디오다 — 재시도하지 않는다.
+
+    (2026-09-03 지식채널e: 화면 자막+배경음악 구성. ko 17자, ru 33자. 유튜브 ASR도
+    5분에 가사 8줄뿐. 언어 오판 방어를 통과하고도 백지면 영구 사유다.)
+    """
+    reason = "전사 error: 전사 내용이 비어 있습니다: 33자 / 00:05:12 (분당 6자) — 두 언어(ko·ru) 모두 백지, 음성 없는 영상"
+    assert channel_monitor._META_PERMANENT_RE.search(reason)
+    # 표식이 없는 보통의 희박 실패는 여전히 일시 실패로 재시도 대상
+    plain = "전사 error: 전사 내용이 비어 있습니다: 33자 / 00:05:12 (분당 6자)"
+    assert not channel_monitor._META_PERMANENT_RE.search(plain)
+
+
 def test_permanent_metadata_errors_are_not_retried():
     """멤버십 전용·삭제 영상은 다시 물어도 답이 같다 — 재시도 예산을 쓰면 안 된다.
 

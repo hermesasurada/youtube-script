@@ -329,7 +329,8 @@ _META_PERMANENT_RE = re.compile(
     r"copyright|"
     r"sign in to confirm your age|age[- ]restricted|inappropriate|"      # 로그인 필요
     r"not available in your country|blocked it in your country|"         # 지역 차단
-    r"does not exist|no longer available",
+    r"does not exist|no longer available|"
+    r"음성 없는 영상",                                                    # 두 언어 모두 백지(app._finish_transcription)
     re.I,
 )
 
