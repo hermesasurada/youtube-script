@@ -1,6 +1,7 @@
 import json
 import gzip
 import hashlib
+import html as _htmlmod
 import logging
 import os
 import queue
@@ -580,6 +581,51 @@ def _set_job_error(job_id: str, stage: str, message: object) -> str:
 
 
 _THUMB_SOURCES = ("mqdefault", "hqdefault", "sddefault", "maxresdefault")
+
+
+_WATCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def fetch_localized_title(yt_id: str, lang: str = "ko") -> str:
+    """유튜브가 해당 언어 시청자에게 보여주는 제목(현지화 제목). 없으면 "".
+
+    제작자가 언어별 제목을 달아 두면 유튜브는 한국 시청자에게 그 제목을 보여주는데,
+    yt-dlp(lang=ko 포함)·oEmbed·og:title은 전부 원제만 준다. 시청 페이지를
+    Accept-Language: ko 로 받으면 플레이어 메타(videoDetails / primaryInfo)에 현지화
+    제목이 실린다. og:title(원제)과 다른 것만 현지화 제목으로 인정한다.
+    """
+    yt_id = (yt_id or "").strip()
+    if not re.fullmatch(r"[\w-]{5,20}", yt_id):
+        return ""
+    req = urllib.request.Request(
+        f"https://www.youtube.com/watch?v={yt_id}",
+        headers={"User-Agent": _WATCH_UA,
+                 "Accept-Language": f"{lang}-KR,{lang};q=0.9,en;q=0.5"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        page = r.read().decode("utf-8", "replace")
+    og = re.search(r'<meta property="og:title" content="([^"]*)"', page)
+    original = _nfc(_htmlmod.unescape(og.group(1)).strip()) if og else ""
+    cands: list[str] = []
+    i = page.find("ytInitialPlayerResponse")
+    if i >= 0:
+        j = page.find("{", i)
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(page[j:])
+            cands.append((obj.get("videoDetails") or {}).get("title") or "")
+        except Exception:
+            pass
+    m = re.search(r'"videoPrimaryInfoRenderer":\{"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"', page)
+    if m:
+        try:
+            cands.append(json.loads('"' + m.group(1) + '"'))
+        except Exception:
+            cands.append(m.group(1))
+    for t in cands:
+        t = _nfc((t or "").strip())
+        if t and t != original:
+            return t
+    return ""
 
 
 def save_thumbnail(yt_id: str, *, force: bool = False) -> str | None:
@@ -2608,9 +2654,24 @@ def history_refresh_meta():
     except Exception as e:
         notes.append(f"썸네일 갱신 실패: {str(e)[:120]}")
 
-    # 3) 제목이 바뀌었으면 번역도 다시 만든다(원문이 그대로면 기존 번역이 유효).
-    title_ko = db.get_title_ko(item.get("summary_path") or item.get("md_path") or "")
-    if "title" in changed:
+    # 3) 한국어 제목. 유튜브가 한국 시청자에게 보여주는 현지화 제목이 있으면 그걸
+    #    쓴다 — 제작자가 단 제목이 LLM 번역보다 낫고, 사용자가 유튜브에서 보는 것과
+    #    일치한다(2026-09-03 모더나 건: 원제는 그대로인데 한국어 제목만 바뀌어
+    #    '변경 없음'으로 보였다). 없으면 원제가 바뀐 경우에만 LLM으로 다시 번역한다.
+    cur_ko = db.get_title_ko(item.get("summary_path") or item.get("md_path") or "") or ""
+    title_ko = cur_ko
+    final_title = new_title or old_title
+    try:
+        localized = fetch_localized_title(yt_id)
+    except Exception as e:
+        localized = ""
+        notes.append(f"현지화 제목 조회 실패: {str(e)[:120]}")
+    if localized and localized != final_title:
+        if localized != cur_ko:
+            db.set_title_ko(yt_id, localized)
+            title_ko = localized
+            changed.append("title_ko")
+    elif "title" in changed:
         try:
             db.set_title_ko(yt_id, "")               # 이전 번역 비우고
             db.mark_korean_titles()                  # 한국어 원제면 번역 대상에서 제외

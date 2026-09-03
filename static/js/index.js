@@ -2196,8 +2196,9 @@ async function refreshItemMeta(btn) {
     const res = await YS.apiRefreshMeta(_summaryItemId);
     if (res && res.error) throw new Error(res.error);
     const changed = (res && res.changed) || [];
-    if (changed.includes('title')) {
+    if (changed.includes('title') || changed.includes('title_ko')) {
       // 본문 H1은 원제를 담고 있다 — 새 제목으로 바꾼 뒤 번역 병기를 다시 적용한다.
+      // 원제는 그대로고 유튜브의 한국어 제목만 바뀐 경우도 여기로 온다.
       _titleKo = res.title_ko || '';
       for (const root of [document.getElementById('sum-panel-body'),
                           document.querySelector('.imm-text')]) {
@@ -2217,6 +2218,7 @@ async function refreshItemMeta(btn) {
       });
     }
     const what = [changed.includes('title') && '제목',
+                  !changed.includes('title') && changed.includes('title_ko') && '한국어 제목',
                   changed.includes('thumbnail') && '썸네일'].filter(Boolean).join('·');
     if (what) {
       setLbl(`${what} 갱신됨`, 'var(--success)');

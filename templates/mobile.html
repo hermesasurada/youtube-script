@@ -1381,7 +1381,7 @@ async function refreshItemMeta(btn) {
     const res = await YS.apiRefreshMeta(_summaryItemId);
     if (res && res.error) throw new Error(res.error);
     const changed = (res && res.changed) || [];
-    if (changed.includes('title')) {
+    if (changed.includes('title') || changed.includes('title_ko')) {
       const body = $('modal-body');
       const h1 = body.querySelector('h1');
       if (h1) h1.textContent = res.title || h1.textContent;
