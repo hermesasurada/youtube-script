@@ -205,9 +205,10 @@
     const tldrH = h2s.find(h => /한눈\s*요약/.test(h.textContent));
     if (tldrH && tldrH.nextElementSibling && tldrH.nextElementSibling.tagName === 'UL') {
       const ul = tldrH.nextElementSibling;
-      const card = document.createElement('section');
+      // 기본 접힘(open 미설정) — 본문부터 읽고 필요할 때 펼친다(2026-09-03 사용자 지시).
+      const card = document.createElement('details');
       card.className = 'ys-tldr';
-      card.innerHTML = '<div class="ys-tldr-label">✦ 한눈 요약</div>';
+      card.innerHTML = '<summary class="ys-tldr-label"><span class="ys-tldr-chev" aria-hidden="true">▸</span>✦ 한눈 요약</summary>';
       ul.replaceWith(card);
       card.appendChild(ul);
       tldrH.remove();
@@ -645,7 +646,12 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 /* ── 한눈 요약 callout ── */
 .ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:1rem 1.25rem 1.05rem 1.35rem;background:linear-gradient(135deg,var(--highlight-soft,rgba(99,102,241,.08)),transparent 78%),var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;}
 .ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}
-.ys-tldr-label{font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--highlight,#2563eb);margin-bottom:.55rem;}
+.ys-tldr-label{font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--highlight,#2563eb);margin-bottom:.55rem;list-style:none;cursor:pointer;user-select:none;display:flex;align-items:center;gap:.4rem;}
+.ys-tldr-label::-webkit-details-marker{display:none;}
+.ys-tldr-chev{font-size:.6rem;line-height:1;transition:transform .15s;}
+.ys-tldr[open] .ys-tldr-chev{transform:rotate(90deg);}
+.ys-tldr:not([open]){padding-bottom:.85rem;}
+.ys-tldr:not([open]) .ys-tldr-label{margin-bottom:0;}
 .ys-tldr ul{margin:0 !important;padding-left:1.15rem !important;}
 .ys-tldr li{margin-bottom:.3rem;}  /* font-size/line-height는 본문 .sum-md li 규칙을 물려받아 동일 크기(일반·몰입 모두) */
 .ys-tldr li::marker{color:var(--highlight,#2563eb);}
@@ -664,7 +670,9 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-lb-cap:empty{display:none;}
 .ys-lb-cap b{color:#9db4ff;font-family:ui-monospace,monospace;margin-right:.4rem;}
 .kf-ico{display:none;}  /* 좌측 강조 바가 마커 역할 — 글리프 중복 제거 */
-.kf-time{margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}
+/* 소제목 우측 시각 pill은 표시하지 않는다(2026-09-03 사용자 지시). 요소는 남긴다 —
+   목차(_tocLabel)와 시각 이동이 이 값을 읽는다. */
+.kf-time{display:none;margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 틴트, 시각 pill은 우측 정렬 */
 .sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius: 2px;margin:1.7rem 0 .75rem;}`;
     const st = document.createElement("style");
