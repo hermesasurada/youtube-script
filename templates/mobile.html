@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <title>이력조회</title>
+  <title>유튜브 전사내역</title>
   <!-- 작은 로컬 marked는 선로드하고, 본문용 웹폰트·KaTeX는 요약 뒤에 로딩한다. -->
   <style>
     @font-face {
@@ -163,18 +163,8 @@
       display: flex; align-items: center; justify-content: center;
       color: var(--muted); font-size: 11px; background: var(--surface2);
     }
-    .hist-bm-btn {
-      position: absolute;
-      top: .4rem; right: .4rem;
-      display: flex; align-items: center; justify-content: center;
-      width: 45px; height: 45px;             /* 터치 여유 */
-      border: none; border-radius: 5px;
-      background: rgba(0,0,0,.45);
-      color: rgba(255,255,255,.7);
-      cursor: pointer;
-    }
-    .hist-bm-btn.on { color: var(--highlight); }
-    .hist-bm-btn.on svg { fill: currentColor; }
+    .hist-icon-btn-bm.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+    .hist-icon-btn-bm.on svg { fill: currentColor; }
     .hist-thumb-dur {
       position: absolute; right: .45rem; bottom: .45rem;
       background: rgba(0,0,0,.78); color: #fff;
@@ -479,7 +469,13 @@
     .modal-body.markdown h1, .modal-body.markdown h2, .modal-body.markdown h3 {
       margin: 1.1em 0 .4em; line-height: 1.3;
     }
-    .modal-body.markdown h1 { font-size: 18px; }
+    /* 요약 제목: 한 줄로 두고 넘치면 가로 스크롤(2026-09-04 사용자 지시). 줄바꿈된 긴
+       제목이 고정 헤더를 두세 줄 차지하던 것을 없앤다. 스크롤바는 숨긴다. */
+    .modal-body.markdown h1 {
+      font-size: 15px; white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+      -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px;
+    }
+    .modal-body.markdown h1::-webkit-scrollbar { display: none; }
     /* 요약 상단은 여백을 줄이고, 제목(+원문 병기)은 스크롤해도 상단에 고정 */
     .modal-body.markdown { padding-top: 0; }
     .modal-body.markdown > .sum-head-sticky {
@@ -523,7 +519,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>이력조회</h1>
+    <h1>유튜브 전사내역</h1>
     <span class="count" id="count">—</span>
     <button class="icon-btn" id="queue-btn" onclick="openQueueM()" aria-label="처리 큐">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -802,9 +798,12 @@ function renderCard(item) {
         ? `<a class="hist-card-uploader" href="${attrEsc(item.channel_url)}" target="_blank" rel="noopener">${esc(item.uploader)}</a>`
         : `<span class="hist-card-uploader">${esc(item.uploader)}</span>`)
     : '';
-  const sumBtn = item.has_summary
-    ? `<button class="hist-icon-btn hist-icon-btn-summary" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openSummary(Number(this.dataset.id),this.dataset.title)" aria-label="요약">${SVG.summary}</button>`
-    : `<button class="hist-icon-btn hist-icon-btn-summary" disabled aria-label="요약 없음">${SVG.summary}</button>`;
+  // 요약 보기는 카드 자체가 링크라 버튼이 중복이었다 — 그 자리에 북마크를 둔다
+  // (2026-09-04 사용자 지시). 썸네일 우상단의 북마크 버튼은 없앤다.
+  const bmBtn = `<button class="hist-icon-btn hist-icon-btn-bm${item.bookmark ? ' on' : ''}"
+    data-id="${item.item_id}" data-on="${item.bookmark ? '1' : '0'}"
+    onclick="event.stopPropagation();toggleBookmark(this)"
+    aria-label="${item.bookmark ? '북마크 해제' : '북마크'}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>`;
   const txtBtn = item.has_txt
     ? `<button class="hist-icon-btn" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openTranscript(Number(this.dataset.id),this.dataset.title)" aria-label="전사">${SVG.transcript}</button>`
     : `<button class="hist-icon-btn" disabled aria-label="전사 없음">${SVG.transcript}</button>`;
@@ -825,18 +824,14 @@ function renderCard(item) {
   const clickable = item.has_summary
     ? ` hist-card-clickable" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="openSummary(Number(this.dataset.id),this.dataset.title)`
     : '';
-  const bmBtn = `<button class="hist-bm-btn${item.bookmark ? ' on' : ''}"
-    data-id="${item.item_id}" data-on="${item.bookmark ? '1' : '0'}"
-    onclick="event.stopPropagation();toggleBookmark(this)"
-    aria-label="${item.bookmark ? '북마크 해제' : '북마크'}"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>`;
   return `<article class="hist-card${unreadClass}${clickable}">
-    <div class="hist-thumb-wrap">${thumb}${dur}${bmBtn}</div>
+    <div class="hist-thumb-wrap">${thumb}${dur}</div>
     <div class="hist-card-body">
       <h3 class="hist-card-title">${unreadDot}${esc(item.title)}</h3>
       <div class="hist-card-meta">${uploader}</div>
       <div class="hist-card-footer">
         <span class="hist-card-date">${fmtDate(histDisplayDate(item))}</span>
-        <div class="hist-card-actions">${readBtn}${sumBtn}${txtBtn}${ytBtn}${delBtn}</div>
+        <div class="hist-card-actions">${readBtn}${bmBtn}${txtBtn}${ytBtn}${delBtn}</div>
       </div>
     </div>
   </article>`;
