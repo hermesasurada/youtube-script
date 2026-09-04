@@ -471,11 +471,14 @@
     }
     /* 요약 제목: 한 줄로 두고 넘치면 가로 스크롤(2026-09-04 사용자 지시). 줄바꿈된 긴
        제목이 고정 헤더를 두세 줄 차지하던 것을 없앤다. 스크롤바는 숨긴다. */
-    .modal-body.markdown h1 {
+    .modal-body.markdown h1,
+    .modal-body.markdown .sum-title-orig {   /* 원문(영문) 병기도 같은 규칙 — 아니면 그쪽만 두 줄이 된다 */
       font-size: 15px; white-space: nowrap; overflow-x: auto; overflow-y: hidden;
       -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px;
     }
-    .modal-body.markdown h1::-webkit-scrollbar { display: none; }
+    .modal-body.markdown h1::-webkit-scrollbar,
+    .modal-body.markdown .sum-title-orig::-webkit-scrollbar { display: none; }
+    .modal-body.markdown .sum-title-orig { font-size: 12.5px; }   /* 병기는 제목보다 작게 유지 */
     /* 요약 상단은 여백을 줄이고, 제목(+원문 병기)은 스크롤해도 상단에 고정 */
     .modal-body.markdown { padding-top: 0; }
     .modal-body.markdown > .sum-head-sticky {
