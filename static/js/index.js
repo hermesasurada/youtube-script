@@ -78,7 +78,7 @@ function handleChannelsOverlayClick(e) {
 }
 const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
 const MONITOR_NONE = 'none';
-const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT-5.6 Sol', grok: 'Grok', none: '없음' };
+const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
 
 function applyMonitorModelLabels(labels) {

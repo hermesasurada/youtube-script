@@ -154,7 +154,7 @@ CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "900"))
 
 # GPT 옵션은 로컬에 로그인된 Codex CLI를 단일턴 모델 호출기로 사용한다.
 GPT_BIN       = llm_gateway.resolve_codex_bin()
-GPT_MODEL     = os.environ.get("GPT_MODEL", "gpt-5.6-sol")
+GPT_MODEL     = os.environ.get("GPT_MODEL", "gpt-6-astra")
 GPT_TIMEOUT   = int(os.environ.get("GPT_TIMEOUT", "900"))
 
 # 요약 폴백: Claude 실패(한도/장애/오류) 시 Grok CLI로 재시도.
@@ -1589,7 +1589,8 @@ def _model_label(model_id: str) -> str:
         return ("Grok Composer" if "composer" in low else "Grok") + ver
     if low.startswith("gpt"):
         v = re.search(r"(\d+(?:\.\d+)?)", mid)
-        return "GPT" + (f" {v.group(1)}" if v else "")
+        tail = re.sub(r"^gpt-?\d+(?:\.\d+)?-?", "", low)   # 'astra' / 'sol' / ''
+        return "GPT" + (f" {v.group(1)}" if v else "") + (f" {tail.title()}" if tail else "")
     return mid or "?"
 
 
@@ -1598,7 +1599,7 @@ def _monitor_model_labels() -> dict[str, str]:
     grok_id = GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok"
     return {
         "opus": "Opus 5",
-        "gpt": "GPT-5.6 Sol",
+        "gpt": _model_label(GPT_MODEL),
         "grok": _model_label(grok_id),
         "none": "없음",
     }

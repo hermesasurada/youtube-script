@@ -33,7 +33,7 @@ SCENE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("SCENE_THRESHOLD", "0.3
 MAX_CANDIDATES  = int(os.environ.get("MAX_CANDIDATES", "40"))
 MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 간격(초)
 VISION_MODEL    = os.environ.get("VISION_MODEL", "opus")   # 캡션 품질 우선(요약과 동일 티어)
-GPT_VISION_MODEL = os.environ.get("GPT_VISION_MODEL", os.environ.get("GPT_MODEL", "gpt-5.6-sol"))
+GPT_VISION_MODEL = os.environ.get("GPT_VISION_MODEL", os.environ.get("GPT_MODEL", "gpt-6-astra"))
 # Claude 비전 3회 실패 시 Grok 폴백(요약 폴백과 동일 기조). grok CLI는 이미지 옵션이 없지만
 # 프롬프트의 @경로를 읽어 비전이 동작한다 — 캡처를 통째로 잃는 것보다 낫다.
 GROK_VISION_FALLBACK = os.environ.get("GROK_VISION_FALLBACK", "1") != "0"

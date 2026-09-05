@@ -21,7 +21,7 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 
 ```
 URL/파일 → yt-dlp(오디오) → whisper.cpp(--output-json) → 전사 .md(res/{date}/)
-        → Opus 5/GPT-5.6 Sol/Grok-4.5 순차 요약 → humanize_korean → 요약 .md(res/summary/{date}/) → db.upsert(인덱싱)
+        → Opus 5/GPT-6 Astra/Grok-4.5 순차 요약 → humanize_korean → 요약 .md(res/summary/{date}/) → db.upsert(인덱싱)
         → (옵션) keyframe_report → res/summary/{date}/{stem}.frames/*.jpg + 요약 md에 스트립 주입
 ```
 
@@ -79,7 +79,7 @@ curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"v
 | `MAX_CONCURRENT_KEYFRAMES` | 1 | 동시 키프레임 처리 수(세마포어 직렬화) |
 | `CLAUDE_BIN` | (자동탐색) | claude CLI 경로(미설정 시 호출 때마다 최신 설치본 탐색) |
 | `CLAUDE_TIMEOUT` | 900 | 요약 Claude CLI wall-clock 제한(초) |
-| `CODEX_BIN` / `GPT_MODEL` / `GPT_TIMEOUT` | (자동탐색) / gpt-5.6-sol / 900 | GPT 폴백용 Codex CLI 경로·모델·제한(초) |
+| `CODEX_BIN` / `GPT_MODEL` / `GPT_TIMEOUT` | (자동탐색) / gpt-6-astra / 900 | GPT 폴백용 Codex CLI 경로·모델·제한(초) |
 | `VISION_MODEL` | opus | 키프레임 분류·캡션 모델 (Claude) |
 | `GROK_MODEL` | (빈 값) | Grok 폴백 모델. **비우면 `-m` 없이 grok CLI 기본 모델**을 쓴다(CLI 업데이트를 자동으로 따라감) |
 | `GROK_VISION_FALLBACK` / `GROK_VISION_MODEL` | 1 / (빈 값) | 비전 Claude 3회 실패 시 Grok 폴백(모델은 요약과 동일 기조 — 비우면 CLI 기본) |
@@ -97,7 +97,7 @@ curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"v
 1. yt-dlp로 저해상도 영상 다운로드(임시 디렉터리).
 2. **하이브리드 후보 추출** — 균등 간격(`fps=1/N`, 전 구간 커버) + 장면전환(`select='gt(scene,…)'`).
 3. **근접 중복 제거**(6초) — 장면전환 프레임은 보존, 인접 균등 프레임만 솎음. 상한 40.
-4. **비전 분류** — 자동모니터 팝업에 저장한 Opus 5/GPT-5.6 Sol/Grok-4.5 순서대로 폴백. 수동 캡처는 기존 Opus 5 → Grok-4.5 정책을 유지한다. 모든 모델이 실패해야 `vision_failed`(캡처만 생략, 요약은 유지).
+4. **비전 분류** — 자동모니터 팝업에 저장한 Opus 5/GPT-6 Astra/Grok-4.5 순서대로 폴백. 수동 캡처는 기존 Opus 5 → Grok-4.5 정책을 유지한다. 모든 모델이 실패해야 `vision_failed`(캡처만 생략, 요약은 유지).
 5. 살아남은 프레임을 시간 라벨(`[mm:ss]`) 기준 섹션에 배정해 요약 md 소제목 직후에 가로 스크롤 스트립으로 주입.
 
 ## 의존성
