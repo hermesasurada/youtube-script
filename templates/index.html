@@ -175,8 +175,8 @@
           <option value="mono">고정폭</option>
         </select>
       </label>
-      <button class="sum-blogger-btn" id="sum-blogger-btn" onclick="copySummaryForBlogger(this)"
-              title="이미지를 제외한 본문을 구글 블로거 포스팅용 서식으로 클립보드에 복사">📋 <span class="blg-label">블로거용 복사</span></button>
+      <button class="sum-blogger-btn" id="sum-publish-btn" onclick="publishSummaryToBlog(this)"
+              title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">📤 <span class="pub-label">블로그 발행</span></button>
       <button class="sum-blogger-btn" id="sum-telegram-btn" onclick="copySummaryForTelegram(this)"
               title="같은 본문을 텔레그램에서 읽기 좋은 형태(굵은 소제목·줄바꿈)로 클립보드에 복사">✈️ <span class="tg-label">텔레그램용 복사</span></button>
       <button class="sum-blogger-btn" id="sum-refresh-btn" onclick="refreshItemMeta(this)"

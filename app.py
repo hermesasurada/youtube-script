@@ -1107,6 +1107,7 @@ _REMOTE_DATA_ALLOWED = {
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
     "/history/refresh-meta",  # 제목·썸네일 갱신 — 빠지면 원격 POST가 302로 튕겨 '갱신 실패'로 보인다(2026-09-03)
+    "/history/publish-blog",  # 블로그스팟 발행(원격에서도 — 폰에서 읽고 바로 올린다)
 }
 _PHONE_UA  = re.compile(r"iPhone|iPod|Windows Phone", re.I)
 _TABLET_UA = re.compile(r"iPad|Tablet|PlayBook|Kindle|Silk", re.I)
@@ -2637,7 +2638,8 @@ def summary_content():
             content = f.read()
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         return _json({"content": content, "distill": db.get_item_distill(abs_path),
-                      "title_ko": db.get_title_ko(abs_path)})
+                      "title_ko": db.get_title_ko(abs_path),
+                      "blog_url": (item or {}).get("blog_url") or ""})   # 뷰어 버튼 초기 상태(📤/🔗)
     except Exception as e:
         return _json({"error": str(e)}, 500)
 
@@ -2764,6 +2766,42 @@ def history_refresh_meta():
         "title_ko": title_ko or "",
         "notes": notes,
     })
+
+
+@app.route("/history/publish-blog", methods=["POST"])
+def history_publish_blog():
+    """요약을 내 블로그스팟에 바로 발행한다 — 공통 라이브러리 hermes_blogger(wm과 토큰 공유).
+
+    본문 HTML은 뷰어가 '블로거용 내보내기' 렌더러(mdToBloggerHtml)로 만들어 보낸다 —
+    제목은 글 제목 필드로만 가고 본문엔 없다(mdToBloggerHtml이 H1을 뺀다). 이미 발행된
+    영상은 다시 올리지 않고 기존 URL을 돌려준다. 라벨은 채널명.
+    """
+    import hermes_blogger as bl
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    if not item:
+        return _json({"error": "item_id 필요"}, 400)
+    if item.get("blog_url"):
+        return _json({"status": "exists", "url": item["blog_url"]})
+    html = (data.get("html") or "").strip()
+    title = (data.get("title") or item.get("title_ko") or item.get("title") or "").strip()
+    if not html or not title:
+        return _json({"status": "error", "code": "bad_request", "message": "title/html 필요"}, 400)
+    if not bl.configured():
+        return _json({"status": "error", "code": "not_configured",
+                      "message": "블로그 연동 미설정 — 서버에서 hermes-blogger auth 실행 필요"})
+    uploader = (item.get("uploader") or "").strip()
+    labels = [uploader] if uploader and uploader != "—" else []
+    try:
+        res = bl.publish(title, html, labels)
+    except bl.BloggerError as e:
+        log.warning("blog publish failed item=%s: %s", item["item_id"], e)
+        return _json({"status": "error", "code": "api", "message": str(e)})
+    db.set_blog_publish(item["item_id"], res.get("url") or "", str(res.get("id") or ""))
+    log.info("blog published item=%s -> %s", item["item_id"], res.get("url"))
+    return _json({"status": "ok", "url": res.get("url"), "id": res.get("id")})
 
 
 @app.route("/thumb/<yt_id>")

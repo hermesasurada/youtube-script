@@ -514,6 +514,27 @@ def test_kf_retry_claim_honors_next_retry_at(tmp_path, monkeypatch):
     assert _db.queue_claim_kf_retry()["id"] == qid
 
 
+def test_publish_blog_route_publishes_once_and_records(monkeypatch):
+    """블로그 발행 라우트: 발행 → items 기록, 두 번째는 exists, 없는 항목은 404."""
+    import sys, types
+    fake = types.SimpleNamespace(
+        configured=lambda: True,
+        publish=lambda title, html, labels=None, **k: {"id": "p1", "url": "https://x.blogspot.com/p1.html"},
+        BloggerError=RuntimeError)
+    monkeypatch.setitem(sys.modules, "hermes_blogger", fake)
+    item = {"item_id": 7, "title": "T", "title_ko": "제목", "uploader": "a16z", "blog_url": None}
+    monkeypatch.setattr(db, "get_history_item", lambda i: dict(item) if int(i) == 7 else None)
+    saved = {}
+    monkeypatch.setattr(db, "set_blog_publish", lambda i, u, p: saved.update({"i": i, "u": u, "p": p}) or True)
+    c = app.app.test_client()
+    r = c.post("/history/publish-blog", json={"item_id": 7, "html": "<p>x</p>"}).get_json()
+    assert r["status"] == "ok" and r["url"].endswith("/p1.html")
+    assert saved == {"i": 7, "u": "https://x.blogspot.com/p1.html", "p": "p1"}
+    item["blog_url"] = r["url"]                                   # 기록된 뒤에는 다시 올리지 않는다
+    assert c.post("/history/publish-blog", json={"item_id": 7, "html": "<p>x</p>"}).get_json()["status"] == "exists"
+    assert c.post("/history/publish-blog", json={"item_id": 9, "html": "<p>x</p>"}).status_code == 404
+
+
 def test_permanent_metadata_errors_are_not_retried():
     """멤버십 전용·삭제 영상은 다시 물어도 답이 같다 — 재시도 예산을 쓰면 안 된다.
 

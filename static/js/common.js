@@ -332,6 +332,16 @@
     return r.json();
   }
 
+  /* 요약을 블로그스팟에 발행(즉시 공개). 서버가 hermes_blogger로 올리고 items에 기록한다. */
+  async function apiPublishBlog(ref, title, html) {
+    const r = await fetch('/history/publish-blog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ..._historyRef(ref, 'path'), title, html }),
+    });
+    return r.json();
+  }
+
   async function apiSummaryContent(ref) {
     const r = await fetch('/summary/content', {
       method: 'POST',
@@ -608,6 +618,7 @@
     apiDeleteItem,
     apiSummaryContent,
     apiRefreshMeta,
+    apiPublishBlog,
     ensureReaderAssets,
     applyTitleTranslation,
   };

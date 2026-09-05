@@ -2238,29 +2238,44 @@ async function refreshItemMeta(btn) {
   }
 }
 
-async function copySummaryForBlogger(btn) {
-  if (!_summaryMd) return;
-  const label = btn && btn.querySelector('.blg-label');
-  const setLbl = (t, color) => {
-    if (label) label.textContent = t;
-    if (btn) btn.style.color = color || '';
-  };
-  const { html, text } = YS.mdToBloggerHtml(_summaryMd);
-  let ok = false;
+/* 블로그 발행 — '블로거용 복사'를 대체(2026-09-05). 같은 렌더러(mdToBloggerHtml)로 만든
+   HTML을 서버에 보내 hermes_blogger로 바로 공개 발행한다(wm과 토큰 공유). 발행된 영상은
+   버튼이 '🔗 블로그에서 보기'가 되고 누르면 글을 연다. */
+let _blogUrl = '';
+function _setPubBtn(url) {
+  _blogUrl = url || '';
+  const b = document.getElementById('sum-publish-btn');
+  if (!b) return;
+  const l = b.querySelector('.pub-label');
+  if (b.firstChild && b.firstChild.nodeType === 3) b.firstChild.textContent = _blogUrl ? '🔗 ' : '📤 ';
+  if (l) l.textContent = _blogUrl ? '블로그에서 보기' : '블로그 발행';
+  b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
+  b.style.color = _blogUrl ? 'var(--success)' : '';
+  b.disabled = false;
+}
+
+async function publishSummaryToBlog(btn) {
+  if (_blogUrl) { window.open(_blogUrl, '_blank', 'noopener'); return; }
+  if (!_summaryMd || !_summaryItemId) return;
+  const label = btn && btn.querySelector('.pub-label');
+  const setLbl = (t, color) => { if (label) label.textContent = t; if (btn) btn.style.color = color || ''; };
+  if (!confirm('블로그스팟에 바로 발행할까요? (초안이 아니라 즉시 공개됩니다)')) return;
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd);
+  btn.disabled = true; setLbl('발행 중…');
   try {
-    if (navigator.clipboard && window.ClipboardItem) {      // HTTPS·localhost
-      await navigator.clipboard.write([new ClipboardItem({
-        'text/html':  new Blob([html], { type: 'text/html' }),
-        'text/plain': new Blob([text], { type: 'text/plain' }),
-      })]);
-      ok = true;
+    const d = await YS.apiPublishBlog(_summaryItemId, _titleKo || title, html);
+    if (d && (d.status === 'ok' || d.status === 'exists')) {
+      _setPubBtn(d.url);
+      if (typeof loadHistory === 'function') loadHistory(true);
+    } else {
+      setLbl(d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패', 'var(--error)');
+      console.warn('[blog]', d);
+      setTimeout(() => _setPubBtn(''), 2200);
     }
   } catch (e) {
-    console.warn('[blogger] clipboard API 실패 → 레거시 폴백', e);
+    setLbl('발행 실패', 'var(--error)'); console.warn('[blog]', e);
+    setTimeout(() => _setPubBtn(''), 2200);
   }
-  if (!ok) ok = _copyHtmlLegacy(html, text);                // 원격(비보안 컨텍스트) 경로
-  setLbl(ok ? '복사됨' : '복사 실패', ok ? 'var(--success)' : 'var(--error)');
-  setTimeout(() => setLbl('블로거용 복사'), 1600);
 }
 
 /* 텔레그램용 복사 — 범위는 블로거와 동일하되 텔레그램이 살리는 서식(<b>/<i>/<a>)과
@@ -2410,6 +2425,7 @@ async function openSummaryModal(itemId, title) {
     if (data.error) throw new Error(data.error);
     _summaryMd = data.content || '';
     _titleKo   = data.title_ko || '';                      // 외국어 제목의 한국어 번역
+    _setPubBtn(data.blog_url);                               // 발행 여부에 따라 📤 / 🔗
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기

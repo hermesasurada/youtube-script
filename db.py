@@ -310,6 +310,13 @@ def init() -> None:
             if "last_fail_reason" not in wcols:
                 c.execute("ALTER TABLE watch_queue ADD COLUMN last_fail_reason TEXT")
             c.execute("PRAGMA user_version = 15")
+        if ver < 16:
+            # v16: 블로그스팟 발행 기록(hermes_blogger). 중복 발행 방지 + 뷰어의 '블로그에서 보기'.
+            icols = {r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()}
+            for col in ("blog_url", "blog_post_id", "blog_published_at"):
+                if col not in icols:
+                    c.execute(f"ALTER TABLE items ADD COLUMN {col} TEXT")
+            c.execute("PRAGMA user_version = 16")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -323,6 +330,15 @@ def get_title_ko(path: str) -> str | None:
         return None
     v = (r["title_ko"] or "").strip()
     return v or None
+
+
+def set_blog_publish(item_id: int, url: str, post_id: str) -> bool:
+    """블로그스팟 발행 결과 기록 — 같은 영상을 두 번 올리지 않는 근거."""
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE items SET blog_url = ?, blog_post_id = ?, blog_published_at = ? WHERE rowid = ?",
+            (url, post_id, _now(), int(item_id)))
+        return cur.rowcount > 0
 
 
 def set_title_ko(yt_id: str, value: str) -> bool:
@@ -1344,7 +1360,7 @@ def get_history_item(item_id: int) -> dict | None:
         return None
     r = _conn().execute(
         """SELECT rowid AS item_id, md_path, summary_path, title, has_txt,
-                  yt_id, webpage_url
+                  yt_id, webpage_url, title_ko, uploader, blog_url, blog_post_id
              FROM items WHERE rowid = ?""",
         (item_id,),
     ).fetchone()
