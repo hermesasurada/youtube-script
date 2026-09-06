@@ -67,7 +67,10 @@ function handlePromptOverlayClick(e) {
 async function openChannelsModal() {
   document.getElementById('channels-overlay').hidden = false;
   document.body.style.overflow = 'hidden';
-  await loadChannels();
+  if (_channelsCache) renderChannels(_channelsCache);
+  else document.getElementById('channels-list').innerHTML =
+    '<li class="utility-loading"><span></span><span></span><span></span></li>';
+  requestAnimationFrame(() => { loadChannels({force: !!_channelsCache}); });
 }
 function closeChannelsModal() {
   document.getElementById('channels-overlay').hidden = true;
@@ -80,6 +83,8 @@ const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
 const MONITOR_NONE = 'none';
 const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+let _channelsCache = null;
+let _channelsRequest = null;
 
 function applyMonitorModelLabels(labels) {
   if (!labels || typeof labels !== 'object') return;
@@ -156,6 +161,10 @@ async function changeMonitorModelOrder(kind, index, selected) {
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders;
     applyMonitorModelLabels(d.model_labels);
+    if (_channelsCache) {
+      _channelsCache.model_orders = d.model_orders;
+      _channelsCache.model_labels = d.model_labels;
+    }
     status.textContent = '저장됨';
   } catch (e) {
     monitorModelOrders[kind] = original;
@@ -167,59 +176,83 @@ async function changeMonitorModelOrder(kind, index, selected) {
   }
 }
 
-async function loadChannels() {
+function renderChannels(d) {
   const list = document.getElementById('channels-list');
   const qEl  = document.getElementById('channels-queue');
-  list.innerHTML = '<li class="channels-empty">불러오는 중…</li>';
-  qEl.textContent = '';
+  monitorModelOrders = d.model_orders || monitorModelOrders;
+  applyMonitorModelLabels(d.model_labels);
+  renderMonitorModelOrders();
+  const q = d.queue || {};
+  const parts = [];
+  if (q.pending)    parts.push(`대기 ${q.pending}`);
+  if (q.processing) parts.push(`처리중 ${q.processing}`);
+  if (q.kf_retry)   parts.push(`캡처재시도 ${q.kf_retry}`);
+  if (q.done)       parts.push(`완료 ${q.done}`);
+  if (q.failed)     parts.push(`실패 ${q.failed}`);
+  qEl.textContent = parts.length ? parts.join(' · ') : '큐 비어있음';
+  const chans = d.channels || [];
+  const count = document.getElementById('channels-count');
+  if (count) count.textContent = `${chans.filter(c => c.enabled).length} ON · 전체 ${chans.length}`;
+  if (!chans.length) { list.innerHTML = '<li class="channels-empty">등록된 채널이 없습니다.</li>'; return; }
+  list.innerHTML = `<li class="channel-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></li>` + chans.map(c => {
+    const on = !!c.enabled;
+    const sub = (c.handle ? '@' + c.handle : c.channel_id) +
+                (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
+    const noLimit = c.min_duration === 0
+      ? ' <span class="channel-nolimit" title="길이제한 면제 — 짧은 영상도 수집">∞</span>'
+      : (c.min_duration != null
+        ? ` <span class="channel-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
+    const dis = c.distill == null ? true : !!c.distill;
+    const cap = c.capture == null ? true : !!c.capture;
+    return `<li class="channel-row">
+      <div class="channel-meta">
+        <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
+        <span class="channel-sub">${esc(sub)}</span>
+      </div>
+      <button class="channel-distill ${cap ? 'on' : ''}" role="switch" aria-checked="${cap}"
+              title="영상 캡처(키프레임) 포함 — 끄면 이 채널 영상은 요약만"
+              onclick="toggleChannelCapture(${c.id}, ${cap ? 'false' : 'true'}, this)">캡처</button>
+      <button class="channel-distill ${dis ? 'on' : ''}" role="switch" aria-checked="${dis}"
+              title="지식증류(옵시디언 볼트) 대상 — 끄면 증류에서 제외"
+              onclick="toggleChannelDistill(${c.id}, ${dis ? 'false' : 'true'}, this)">증류</button>
+      <button class="channel-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
+              title="자동 수집 ON/OFF"
+              onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)">
+        <span class="channel-toggle-knob"></span>
+      </button>
+    </li>`;
+  }).join('');
+}
+
+async function _fetchChannels(force = false) {
+  if (_channelsCache && !force) return _channelsCache;
+  if (_channelsRequest) return _channelsRequest;
+  _channelsRequest = fetch('/channels', {cache: 'no-store'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) throw new Error(d.error);
+      _channelsCache = d;
+      return d;
+    })
+    .finally(() => { _channelsRequest = null; });
+  return _channelsRequest;
+}
+
+async function loadChannels({force = false} = {}) {
+  const list = document.getElementById('channels-list');
   try {
-    const d = await (await fetch('/channels')).json();
-    if (d.error) throw new Error(d.error);
-    monitorModelOrders = d.model_orders || monitorModelOrders;
-    applyMonitorModelLabels(d.model_labels);
-    renderMonitorModelOrders();
-    const q = d.queue || {};
-    const parts = [];
-    if (q.pending)    parts.push(`대기 ${q.pending}`);
-    if (q.processing) parts.push(`처리중 ${q.processing}`);
-    if (q.done)       parts.push(`완료 ${q.done}`);
-    if (q.failed)     parts.push(`실패 ${q.failed}`);
-    qEl.textContent = parts.length ? '큐: ' + parts.join(' · ') : '큐 비어있음';
-    const chans = d.channels || [];
-    if (!chans.length) { list.innerHTML = '<li class="channels-empty">등록된 채널이 없습니다.</li>'; return; }
-    list.innerHTML = `<li class="channel-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></li>` + chans.map(c => {
-      const on = !!c.enabled;
-      const sub = (c.handle ? '@' + c.handle : c.channel_id) +
-                  (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
-      // min_duration 뱃지: 0=면제(∞), 그 외 값=커스텀 최소길이(N분+). NULL=전역 기본(3분, 표시 없음)
-      const noLimit = c.min_duration === 0
-        ? ' <span class="channel-nolimit" title="길이제한 면제 — 짧은 영상도 수집">∞</span>'
-        : (c.min_duration != null
-          ? ` <span class="channel-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
-      const dis = c.distill == null ? true : !!c.distill;   // 기본은 증류 대상
-      const cap = c.capture == null ? true : !!c.capture;   // 기본은 캡처 포함
-      return `<li class="channel-row">
-        <div class="channel-meta">
-          <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
-          <span class="channel-sub">${esc(sub)}</span>
-        </div>
-        <button class="channel-distill ${cap ? 'on' : ''}" role="switch" aria-checked="${cap}"
-                title="영상 캡처(키프레임) 포함 — 끄면 이 채널 영상은 요약만"
-                onclick="toggleChannelCapture(${c.id}, ${cap ? 'false' : 'true'}, this)">캡처</button>
-        <button class="channel-distill ${dis ? 'on' : ''}" role="switch" aria-checked="${dis}"
-                title="지식증류(옵시디언 볼트) 대상 — 끄면 증류에서 제외"
-                onclick="toggleChannelDistill(${c.id}, ${dis ? 'false' : 'true'}, this)">증류</button>
-        <button class="channel-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
-                title="자동 수집 ON/OFF"
-                onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)">
-          <span class="channel-toggle-knob"></span>
-        </button>
-      </li>`;
-    }).join('');
+    const d = await _fetchChannels(force);
+    if (!document.getElementById('channels-overlay').hidden) renderChannels(d);
   } catch (e) {
-    list.innerHTML = `<li class="channels-empty">오류: ${esc(e.message)}</li>`;
+    if (!document.getElementById('channels-overlay').hidden) {
+      list.innerHTML = `<li class="channels-empty">오류: ${esc(e.message)}</li>`;
+    }
   }
 }
+
+const _prefetchChannels = () => { _fetchChannels(false).catch(() => {}); };
+if ('requestIdleCallback' in window) requestIdleCallback(_prefetchChannels, {timeout: 1800});
+else setTimeout(_prefetchChannels, 700);
 async function toggleChannelCapture(id, enable, btn) {
   btn.disabled = true;
   try {
@@ -231,6 +264,8 @@ async function toggleChannelCapture(id, enable, btn) {
     btn.classList.toggle('on', d.capture);
     btn.setAttribute('aria-checked', String(d.capture));
     btn.setAttribute('onclick', `toggleChannelCapture(${id}, ${d.capture ? 'false' : 'true'}, this)`);
+    const cached = _channelsCache && _channelsCache.channels.find(c => c.id === id);
+    if (cached) cached.capture = d.capture;
   } catch (e) {
     alert('변경 실패: ' + e.message);
   } finally { btn.disabled = false; }
@@ -247,6 +282,12 @@ async function toggleChannel(id, enable, btn) {
     btn.classList.toggle('on', d.enabled);
     btn.setAttribute('aria-checked', String(d.enabled));
     btn.setAttribute('onclick', `toggleChannel(${id}, ${d.enabled ? 'false' : 'true'}, this)`);
+    const cached = _channelsCache && _channelsCache.channels.find(c => c.id === id);
+    if (cached) {
+      cached.enabled = d.enabled;
+      const count = document.getElementById('channels-count');
+      if (count) count.textContent = `${_channelsCache.channels.filter(c => c.enabled).length} ON · 전체 ${_channelsCache.channels.length}`;
+    }
   } catch (e) {
     alert('토글 실패: ' + e.message);
   } finally {
@@ -266,6 +307,8 @@ async function toggleChannelDistill(id, enable, btn) {
     btn.classList.toggle('on', d.distill);
     btn.setAttribute('aria-checked', String(d.distill));
     btn.setAttribute('onclick', `toggleChannelDistill(${id}, ${d.distill ? 'false' : 'true'}, this)`);
+    const cached = _channelsCache && _channelsCache.channels.find(c => c.id === id);
+    if (cached) cached.distill = d.distill;
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
   } finally {
@@ -1130,11 +1173,12 @@ async function refreshQueueModal() {
       v.status === 'failed'
         ? `<button class="q-requeue" title="재시도 초기화 후 큐 복귀" onclick="requeueItem(${v.id})">↻ 복귀</button>`
         : '')).join('');
-    body.innerHTML =
-      `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">유휴면 바로, 이후 20분에 1건</span></div>`
-      + (mainRows || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
-      + (kf.length ? `<div class="q-sec">캡처 재시도 대기 · ${kf.length}건 <span class="q-hint">본편과 별도 슬롯</span></div>${kfRows}` : '')
-      + (recent ? `<div class="q-sec">최근 처리</div>${recent}` : '');
+    const group = (title, count, hint, rows, empty = '') => `<section class="q-group">`
+      + `<div class="q-sec"><span>${title} · ${count}건</span>${hint ? `<span class="q-hint">${hint}</span>` : ''}</div>`
+      + (rows || `<div class="q-empty">${empty}</div>`) + `</section>`;
+    body.innerHTML = group('본편 대기', main.length, '유휴면 바로, 이후 20분에 1건', mainRows, '대기 중인 영상이 없습니다.')
+      + (kf.length ? group('캡처 재시도', kf.length, '본편과 별도 슬롯', kfRows) : '')
+      + (recent ? group('최근 처리', d.recent.length, '', recent) : '');
   } catch (e) {
     body.innerHTML = `<div class="q-empty">불러오기 실패: ${_attrEsc(e.message)}</div>`;
   }

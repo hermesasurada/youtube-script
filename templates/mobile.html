@@ -252,7 +252,7 @@
       display: flex; flex-direction: column;
       z-index: 101;
       transform: translateY(100%);
-      transition: transform .22s ease;
+      transition: transform .16s ease-out;
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
     }
@@ -267,6 +267,7 @@
       margin: 0; font-size: 15px; font-weight: 600; flex: 1; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    .modal-title { display: none; }
     /* 읽기 진행바(헤더 아래, 스크롤에 따라 채워짐) */
     .read-progress {
       flex-shrink: 0; height: 3px; width: 0%;
@@ -538,6 +539,63 @@
     .ch-row { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: .7rem; }
     .ch-distill { justify-self: center; margin-right: 0; }
     .ch-toggle { justify-self: end; }
+
+    /* 관리 화면: 큐·채널 모니터를 본문 리더와 분리한 간결한 유틸리티 UI */
+    .modal.utility .modal-hdr { min-height: 58px; background: var(--surface); }
+    .modal.utility .modal-title { display: block; letter-spacing: -.01em; }
+    .modal.utility :is(.font-ctrl, .fs-ctrl, .tg-btn, .distill-ctrl) { display: none !important; }
+    .modal.utility .read-progress { display: none; }
+    .modal.utility .modal-body { background: var(--bg); padding: .85rem .9rem 1.5rem; }
+    .modal-body.queue, .modal-body.channels { display: flex; flex-direction: column; gap: .75rem; }
+    .m-utility-note {
+      margin: 0; padding: .65rem .75rem; border-radius: var(--radius);
+      background: var(--surface2); color: var(--muted); font-size: 12px; line-height: 1.5;
+    }
+    .m-utility-card,
+    .mq-group,
+    .ch-list-shell {
+      overflow: hidden; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 10px;
+    }
+    .m-utility-section-head,
+    .mq-group .mq-sec {
+      display: flex; align-items: baseline; justify-content: space-between; gap: .5rem;
+      margin: 0; padding: .6rem .7rem; background: var(--surface2);
+      border-bottom: 1px solid var(--border); color: var(--text);
+      font-size: 11.5px; font-weight: 700;
+    }
+    .m-utility-section-head small { color: var(--muted); font: 10.5px var(--font-mono); font-weight: 400; }
+    .m-utility-loading { display: grid; gap: .45rem; padding-top: .1rem; }
+    .m-utility-loading span {
+      display: block; height: 54px; border-radius: var(--radius);
+      background: linear-gradient(90deg, var(--surface) 20%, var(--surface2) 45%, var(--surface) 70%);
+      background-size: 220% 100%; animation: mShimmer 1.4s linear infinite;
+    }
+    @keyframes mShimmer { to { background-position: -220% 0; } }
+
+    .mq-add-card { padding: .75rem; }
+    .mq-add-card .m-utility-section-head { margin: -.75rem -.75rem .7rem; }
+    .mq-add { margin-bottom: .5rem; }
+    .mq-add input, .mq-add button { height: 38px; border-radius: var(--radius); }
+    .mq-add input { background: var(--bg); }
+    .mq-add input:focus { border-color: var(--highlight); }
+    .mq-options { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .mq-cap-chip { margin: 0; border-color: transparent; border-radius: 999px; }
+    .mq-add-pv { min-height: 0; margin: .5rem 0 0; }
+    .mq-add-pv:empty { display: none; }
+    .mq-group .mq-row { margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+    .mq-group .mq-row:last-child { border-bottom: 0; }
+    .mq-group .ch-empty { padding: .9rem .7rem; }
+    .mq-st { border: 0; border-radius: 999px; background: var(--surface2); }
+    .mq-ctl button { border-color: transparent; border-radius: var(--radius-sm); }
+
+    .modal-body.channels .model-order-card { padding: .8rem; border-radius: 10px; background: var(--surface); }
+    .modal-body.channels .model-order-select { border-color: transparent; background-color: var(--surface2); }
+    .modal-body.channels .ch-queue { border: 0; background: var(--surface); }
+    .ch-list-shell .ch-list-head { background: var(--surface2); }
+    .ch-list-shell .ch-row { background: transparent; }
+    .ch-list-shell .ch-row:first-of-type { border-top: 0; }
+    .ch-distill, .ch-toggle { border-color: transparent; background-color: var(--surface2); }
     :where(button, input, select, textarea, a):focus-visible {
       outline: 2px solid var(--highlight); outline-offset: 2px;
     }
@@ -590,6 +648,7 @@
       <button class="icon-btn" onclick="closeModal()" aria-label="닫기">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
       </button>
+      <h2 class="modal-title" id="modal-title"></h2>
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
         <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
           <option value="sans">Noto Sans KR</option>
@@ -928,10 +987,12 @@ function _updateReadProgress() {
 }
 document.getElementById('modal-body').addEventListener('scroll', _updateReadProgress, { passive: true });
 
-function openModal(title) {
+function openModal(title, kind = 'content') {
   $('modal-body').textContent = '로드 중…';
   $('modal-body').className = 'modal-body';
   $('modal-body').scrollTop = 0;
+  $('modal-title').textContent = title || '';
+  $('modal').classList.toggle('utility', kind === 'utility');
   $('read-progress').style.width = '0%';   // 열 때 진행바 초기화
   $('modal-bd').classList.add('open');
   $('modal').classList.add('open');
@@ -964,7 +1025,7 @@ const _Q_ST = {
 async function openQueueM() {
   $('fs-ctrl').hidden = true;
   $('font-ctrl').hidden = true;
-  openModal('처리 큐');
+  openModal('영상 처리 큐', 'utility');
   $('modal-body').className = 'modal-body queue';
   await loadQueueM();
 }
@@ -1056,24 +1117,26 @@ async function loadQueueM() {
     let n = 0, k = 0;
     const keepUrl = $('mq-add-url') ? $('mq-add-url').value : '';
     const keepPv = $('mq-add-pv') ? $('mq-add-pv').innerHTML : '';
-    body.innerHTML =
-      `<div class="mq-add"><input type="url" id="mq-add-url" placeholder="https://youtu.be/..."
+    const mainRows = main.map(v => row(v, ++n, v.status === 'pending')).join('');
+    const kfRows = kf.map(v => row(v, ++k, true)).join('');
+    const recentRows = d.recent.map(v => row(v, '', false,
+      v.status === 'failed' ? `<button class="mq-requeue" onclick="mqRequeue(${v.id})">↻</button>` : '')).join('');
+    const group = (title, count, rows, empty = '') => `<section class="mq-group">`
+      + `<div class="mq-sec"><span>${title}</span><span>${count}건</span></div>`
+      + (rows || `<div class="ch-empty">${empty}</div>`) + `</section>`;
+    body.innerHTML = `<section class="m-utility-card mq-add-card">
+       <div class="m-utility-section-head"><span>새 영상 추가</span><small>YouTube URL</small></div>
+       <div class="mq-add"><input type="url" id="mq-add-url" placeholder="https://youtu.be/..."
          oninput="mqPreviewDebounced()"><button class="mq-paste" onclick="mqPaste()" title="클립보드에서 붙여넣기">📋</button><button id="mq-add-btn" onclick="mqAdd()" disabled>추가</button></div>
-       <button type="button" class="mq-cap-chip on" id="mq-add-capture-btn" role="switch" aria-checked="true"
-               onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">영상 캡처 포함</button>
+       <div class="mq-options"><button type="button" class="mq-cap-chip on" id="mq-add-capture-btn" role="switch" aria-checked="true"
+               onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">캡처 포함</button>
        <button type="button" class="mq-cap-chip on" id="mq-add-distill-btn" role="switch" aria-checked="true"
-               onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">지식 증류 포함</button>
-       <div class="mq-add-pv" id="mq-add-pv"></div>`
-      + `<p class="ch-hint">유휴면 바로 시작, 이후 20분에 본편 1건 + 캡처 1건.</p>`
-      + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
-      + (main.map(v => row(v, ++n, v.status === 'pending')).join('')
-         || '<div class="ch-empty">대기 중인 영상이 없습니다.</div>')
-      + (kf.length ? `<div class="mq-sec">캡처 재시도 · ${kf.length}건</div>`
-         + kf.map(v => row(v, ++k, true)).join('') : '')
-      + (d.recent.length ? `<div class="mq-sec">최근 처리</div>`
-         + d.recent.map(v => row(v, '', false,
-             v.status === 'failed'
-               ? `<button class="mq-requeue" onclick="mqRequeue(${v.id})">↻</button>` : '')).join('') : '');
+               onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">증류 포함</button></div>
+       <div class="mq-add-pv" id="mq-add-pv"></div></section>`
+      + `<p class="m-utility-note">유휴면 바로 시작하고, 이후 20분마다 본편 1건과 캡처 1건을 처리합니다.</p>`
+      + group('본편 대기', main.length, mainRows, '대기 중인 영상이 없습니다.')
+      + (kf.length ? group('캡처 재시도', kf.length, kfRows) : '')
+      + (recentRows ? group('최근 처리', d.recent.length, recentRows) : '');
     if (keepUrl) { $('mq-add-url').value = keepUrl; $('mq-add-pv').innerHTML = keepPv;
       if (_mqPv) $('mq-add-btn').disabled = false; }
   } catch (e) {
@@ -1105,14 +1168,18 @@ async function mqCancel(id) {
 async function openChannels() {
   $('fs-ctrl').hidden = true;             // 글자크기 컨트롤은 요약 전용
   $('font-ctrl').hidden = true;           // 글꼴 컨트롤도 요약 전용
-  openModal('채널 자동 모니터');
+  openModal('채널 자동 모니터', 'utility');
   $('modal-body').className = 'modal-body channels';
-  await loadChannels();
+  if (_mobileChannelsCache) renderChannelsM(_mobileChannelsCache);
+  else $('modal-body').innerHTML = '<div class="m-utility-loading"><span></span><span></span><span></span></div>';
+  requestAnimationFrame(() => { loadChannels({ force: !!_mobileChannelsCache }); });
 }
 const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
 const MONITOR_NONE = 'none';
 const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+let _mobileChannelsCache = null;
+let _mobileChannelsRequest = null;
 
 function applyMonitorModelLabels(labels) {
   if (!labels || typeof labels !== 'object') return;
@@ -1196,6 +1263,10 @@ async function changeMonitorModelOrder(kind, index, selected) {
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders;
     applyMonitorModelLabels(d.model_labels);
+    if (_mobileChannelsCache) {
+      _mobileChannelsCache.model_orders = d.model_orders;
+      _mobileChannelsCache.model_labels = d.model_labels;
+    }
     status.textContent = '저장됨';
   } catch (e) {
     monitorModelOrders[kind] = original;
@@ -1207,34 +1278,30 @@ async function changeMonitorModelOrder(kind, index, selected) {
   }
 }
 
-async function loadChannels() {
+function renderChannelsM(d) {
   const body = $('modal-body');
-  body.innerHTML = '<div class="ch-loading">불러오는 중…</div>';
-  try {
-    const d = await (await fetch('/channels', { cache: 'no-store' })).json();
-    if (d.error) throw new Error(d.error);
-    monitorModelOrders = d.model_orders || monitorModelOrders;
-    applyMonitorModelLabels(d.model_labels);
-    const q = d.queue || {}, parts = [];
-    if (q.pending)    parts.push(`대기 ${q.pending}`);
-    if (q.processing) parts.push(`처리중 ${q.processing}`);
-    if (q.kf_retry)   parts.push(`캡처재시도 ${q.kf_retry}`);
-    if (q.done)       parts.push(`완료 ${q.done}`);
-    if (q.failed)     parts.push(`실패 ${q.failed}`);
-    const qline = parts.length ? '큐: ' + parts.join(' · ') : '큐 비어있음';
-    const chans = d.channels || [];
-    const rows = chans.length ? `<div class="ch-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></div>` + chans.map(c => {
-      const on = !!c.enabled;
-      const sub = (c.handle ? '@' + c.handle : c.channel_id) +
-                  (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
-      // min_duration 뱃지: 0=면제(∞), 그 외 값=커스텀 최소길이(N분+). NULL=전역 기본(3분, 표시 없음)
-      const noLimit = c.min_duration === 0
-        ? ' <span class="ch-nolimit" title="길이제한 면제 — 짧은 영상도 수집">∞</span>'
-        : (c.min_duration != null
-          ? ` <span class="ch-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
-      const dis = c.distill == null ? true : !!c.distill;   // 기본은 증류 대상
-      const cap = c.capture == null ? true : !!c.capture;   // 기본은 캡처 포함
-      return `<div class="ch-row">
+  monitorModelOrders = d.model_orders || monitorModelOrders;
+  applyMonitorModelLabels(d.model_labels);
+  const q = d.queue || {}, parts = [];
+  if (q.pending)    parts.push(`대기 ${q.pending}`);
+  if (q.processing) parts.push(`처리중 ${q.processing}`);
+  if (q.kf_retry)   parts.push(`캡처재시도 ${q.kf_retry}`);
+  if (q.done)       parts.push(`완료 ${q.done}`);
+  if (q.failed)     parts.push(`실패 ${q.failed}`);
+  const qline = parts.length ? parts.join(' · ') : '큐 비어있음';
+  const chans = d.channels || [];
+  const rows = chans.length ? `<div class="ch-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></div>` + chans.map(c => {
+    const on = !!c.enabled;
+    const sub = (c.handle ? '@' + c.handle : c.channel_id) +
+                (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
+    // min_duration 뱃지: 0=면제(∞), 그 외 값=커스텀 최소길이(N분+). NULL=전역 기본(3분, 표시 없음)
+    const noLimit = c.min_duration === 0
+      ? ' <span class="ch-nolimit" title="길이제한 면제 — 짧은 영상도 수집">∞</span>'
+      : (c.min_duration != null
+        ? ` <span class="ch-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
+    const dis = c.distill == null ? true : !!c.distill;   // 기본은 증류 대상
+    const cap = c.capture == null ? true : !!c.capture;   // 기본은 캡처 포함
+    return `<div class="ch-row">
         <div class="ch-meta"><span class="ch-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span><span class="ch-sub">${esc(sub)}</span></div>
         <button class="ch-distill ${cap ? 'on' : ''}" role="switch" aria-checked="${cap}"
                 aria-label="영상 캡처 포함" onclick="toggleChannelCapture(${c.id}, ${cap ? 'false' : 'true'}, this)">캡처</button>
@@ -1243,14 +1310,42 @@ async function loadChannels() {
         <button class="ch-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
                 aria-label="자동 수집" onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)"><span class="ch-knob"></span></button>
       </div>`;
-    }).join('') : '<div class="ch-empty">등록된 채널이 없습니다.</div>';
-    body.innerHTML = `<p class="ch-hint">등록 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다(20분 주기).</p>`
-      + monitorModelControlsHtml() + `<div class="ch-queue">${esc(qline)}</div>${rows}`;
-    renderMonitorModelOrders();
+  }).join('') : '<div class="ch-empty">등록된 채널이 없습니다.</div>';
+  body.innerHTML = `<p class="m-utility-note">등록 채널의 새 영상을 20분마다 확인해 전사·요약·캡처합니다.</p>`
+    + monitorModelControlsHtml() + `<div class="ch-queue">${esc(qline)}</div>`
+    + `<section class="ch-list-shell"><div class="m-utility-section-head"><span>등록 채널</span>`
+    + `<small id="mobile-channels-count">${chans.filter(c => c.enabled).length} ON · 전체 ${chans.length}</small></div>${rows}</section>`;
+  renderMonitorModelOrders();
+}
+
+async function _fetchChannelsM(force = false) {
+  if (_mobileChannelsCache && !force) return _mobileChannelsCache;
+  if (_mobileChannelsRequest) return _mobileChannelsRequest;
+  _mobileChannelsRequest = fetch('/channels', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) throw new Error(d.error);
+      _mobileChannelsCache = d;
+      return d;
+    })
+    .finally(() => { _mobileChannelsRequest = null; });
+  return _mobileChannelsRequest;
+}
+
+async function loadChannels({ force = false } = {}) {
+  try {
+    const d = await _fetchChannelsM(force);
+    if ($('modal').classList.contains('open') && $('modal-body').classList.contains('channels')) renderChannelsM(d);
   } catch (e) {
-    body.innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
+    if ($('modal-body').classList.contains('channels')) {
+      $('modal-body').innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
+    }
   }
 }
+
+const _prefetchChannelsM = () => { _fetchChannelsM(false).catch(() => {}); };
+if ('requestIdleCallback' in window) requestIdleCallback(_prefetchChannelsM, { timeout: 1800 });
+else setTimeout(_prefetchChannelsM, 700);
 /* 영상 캡처 토글 — 끄면 그 채널 신규 영상은 요약만 하고 키프레임을 만들지 않는다 */
 async function toggleChannelCapture(id, enable, btn) {
   btn.disabled = true;
@@ -1263,6 +1358,8 @@ async function toggleChannelCapture(id, enable, btn) {
     btn.classList.toggle('on', d.capture);
     btn.setAttribute('aria-checked', String(d.capture));
     btn.setAttribute('onclick', `toggleChannelCapture(${id}, ${d.capture ? 'false' : 'true'}, this)`);
+    const cached = _mobileChannelsCache && _mobileChannelsCache.channels.find(c => c.id === id);
+    if (cached) cached.capture = d.capture;
   } catch (e) {
     alert('캡처 설정 실패: ' + e.message);
   } finally { btn.disabled = false; }
@@ -1280,6 +1377,8 @@ async function toggleChannelDistill(id, enable, btn) {
     btn.classList.toggle('on', d.distill);
     btn.setAttribute('aria-checked', String(d.distill));
     btn.setAttribute('onclick', `toggleChannelDistill(${id}, ${d.distill ? 'false' : 'true'}, this)`);
+    const cached = _mobileChannelsCache && _mobileChannelsCache.channels.find(c => c.id === id);
+    if (cached) cached.distill = d.distill;
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
   } finally {
@@ -1298,6 +1397,12 @@ async function toggleChannel(id, enable, btn) {
     btn.classList.toggle('on', d.enabled);
     btn.setAttribute('aria-checked', String(d.enabled));
     btn.setAttribute('onclick', `toggleChannel(${id}, ${d.enabled ? 'false' : 'true'}, this)`);
+    const cached = _mobileChannelsCache && _mobileChannelsCache.channels.find(c => c.id === id);
+    if (cached) {
+      cached.enabled = d.enabled;
+      const count = $('mobile-channels-count');
+      if (count) count.textContent = `${_mobileChannelsCache.channels.filter(c => c.enabled).length} ON · 전체 ${_mobileChannelsCache.channels.length}`;
+    }
   } catch (e) {
     alert('토글 실패: ' + e.message);
   } finally {

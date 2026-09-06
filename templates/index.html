@@ -205,32 +205,40 @@
 
 <!-- ═══ Transcript modal ═══ -->
 <!-- ═══ 처리 큐 modal ═══ -->
-<div class="sum-overlay" id="queue-overlay" hidden
+<div class="sum-overlay utility-overlay" id="queue-overlay" hidden
      onclick="if (event.target === this) closeQueueModal()">
-  <div class="sum-panel queue-panel">
-    <div class="sum-panel-hdr">
-      <span class="sum-panel-badge sum-panel-badge-alt">처리 큐</span>
-      <button class="btn-sm btn-ghost" onclick="refreshQueueModal()" title="새로고침">↻</button>
+  <div class="sum-panel utility-panel queue-panel">
+    <div class="sum-panel-hdr utility-panel-hdr">
+      <div class="utility-heading">
+        <span class="sum-panel-badge sum-panel-badge-alt">큐</span>
+        <div><span class="sum-panel-title">영상 처리 큐</span><span class="utility-subtitle">대기 순서와 영상별 옵션을 관리합니다</span></div>
+      </div>
+      <button class="btn-sm btn-ghost utility-refresh" onclick="refreshQueueModal()" title="새로고침">↻ 새로고침</button>
       <button class="sum-panel-close" onclick="closeQueueModal()" title="닫기">×</button>
     </div>
-    <div class="sum-panel-body">
+    <div class="sum-panel-body utility-panel-body queue-modal-body">
       <!-- URL 추가: 메타(제목·채널)가 확인되면 버튼이 활성화된다 -->
-      <div class="q-add">
-        <input type="text" id="q-add-url" placeholder="https://youtu.be/..."
-               oninput="qPreviewDebounced()" onpaste="setTimeout(qPreviewDebounced, 50)">
-        <button class="q-paste-btn" id="q-paste-btn" onclick="qPasteUrl()" title="클립보드에서 붙여넣기">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        </button>
-        <button type="button" class="q-cap-chip on" id="q-add-capture-btn" role="switch"
-                aria-checked="true" onclick="qToggleAddCapture(this)"
-                title="이 영상의 요약에 키프레임 캡처를 포함할지">캡처</button>
-        <button type="button" class="q-cap-chip on" id="q-add-distill-btn" role="switch"
-                aria-checked="true" onclick="qToggleAddCapture(this)"
-                title="이 영상을 지식증류(옵시디언 볼트) 대상에 포함할지">증류</button>
-        <button id="q-add-btn" onclick="qAddToQueue()" disabled>큐에 추가</button>
+      <section class="utility-card q-add-card">
+        <div class="utility-section-head"><span>새 영상 추가</span><small>YouTube URL</small></div>
+        <div class="q-add">
+          <input type="text" id="q-add-url" placeholder="https://youtu.be/..."
+                 oninput="qPreviewDebounced()" onpaste="setTimeout(qPreviewDebounced, 50)">
+          <button class="q-paste-btn" id="q-paste-btn" onclick="qPasteUrl()" title="클립보드에서 붙여넣기">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button type="button" class="q-cap-chip on" id="q-add-capture-btn" role="switch"
+                  aria-checked="true" onclick="qToggleAddCapture(this)"
+                  title="이 영상의 요약에 키프레임 캡처를 포함할지">캡처</button>
+          <button type="button" class="q-cap-chip on" id="q-add-distill-btn" role="switch"
+                  aria-checked="true" onclick="qToggleAddCapture(this)"
+                  title="이 영상을 지식증류(옵시디언 볼트) 대상에 포함할지">증류</button>
+          <button id="q-add-btn" onclick="qAddToQueue()" disabled>추가</button>
+        </div>
+        <div class="q-add-preview" id="q-add-preview"></div>
+      </section>
+      <div id="queue-modal-body" class="utility-stack">
+        <div class="utility-loading"><span></span><span></span><span></span></div>
       </div>
-      <div class="q-add-preview" id="q-add-preview"></div>
-      <div id="queue-modal-body"></div>
     </div>
   </div>
 </div>
@@ -252,15 +260,17 @@
 </div>
 
 <!-- ═══ Prompt editor modal ═══ -->
-<div class="sum-overlay" id="prompt-overlay" hidden onclick="handlePromptOverlayClick(event)">
-  <div class="sum-panel" id="prompt-panel">
-    <div class="sum-panel-hdr">
-      <span class="sum-panel-badge">프롬프트</span>
-      <span class="sum-panel-title">요약 프롬프트 편집</span>
+<div class="sum-overlay utility-overlay" id="prompt-overlay" hidden onclick="handlePromptOverlayClick(event)">
+  <div class="sum-panel utility-panel" id="prompt-panel">
+    <div class="sum-panel-hdr utility-panel-hdr">
+      <div class="utility-heading">
+        <span class="sum-panel-badge">프롬프트</span>
+        <div><span class="sum-panel-title">요약 프롬프트</span><span class="utility-subtitle">전사 내용을 요약하는 기준과 출력 형식</span></div>
+      </div>
       <button class="sum-panel-close" onclick="closePromptModal()" title="닫기">×</button>
     </div>
-    <div class="prompt-modal-body">
-      <p class="prompt-hint">요약 생성에 사용됩니다. <code>{transcript}</code> 위치에 전사 본문이 삽입되므로 반드시 포함해야 합니다.</p>
+    <div class="prompt-modal-body utility-panel-body">
+      <p class="prompt-hint utility-note">요약 생성에 사용됩니다. <code>{transcript}</code> 위치에 전사 본문이 삽입되므로 반드시 포함해야 합니다.</p>
       <textarea id="prompt-text" spellcheck="false" placeholder="요약 프롬프트…"></textarea>
       <div class="prompt-warn" id="prompt-warn" hidden></div>
       <div class="prompt-modal-actions">
@@ -275,15 +285,19 @@
 </div>
 
 <!-- ═══ Channel monitor modal ═══ -->
-<div class="sum-overlay" id="channels-overlay" hidden onclick="handleChannelsOverlayClick(event)">
-  <div class="sum-panel" id="channels-panel">
-    <div class="sum-panel-hdr">
-      <span class="sum-panel-badge">모니터</span>
-      <span class="sum-panel-title">채널 자동 모니터</span>
+<div class="sum-overlay utility-overlay" id="channels-overlay" hidden onclick="handleChannelsOverlayClick(event)">
+  <div class="sum-panel utility-panel" id="channels-panel">
+    <div class="sum-panel-hdr utility-panel-hdr">
+      <div class="utility-heading">
+        <span class="sum-panel-badge">모니터</span>
+        <div><span class="sum-panel-title">채널 자동 모니터</span><span class="utility-subtitle">신규 영상 수집과 후속 처리 정책</span></div>
+      </div>
+      <button class="btn-sm btn-ghost utility-refresh" onclick="loadChannels({force:true})" title="새로고침">↻ 새로고침</button>
       <button class="sum-panel-close" onclick="closeChannelsModal()" title="닫기">×</button>
     </div>
-    <div class="channels-modal-body">
-      <p class="prompt-hint">등록된 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다(20분 주기). 토글로 채널별 ON/OFF.</p>
+    <div class="channels-modal-body utility-panel-body">
+      <p class="prompt-hint utility-note">등록된 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다. 채널 확인과 영상 처리는 20분 주기로 실행됩니다.</p>
+      <div class="utility-section-head"><span>LLM 폴백</span><small>왼쪽부터 실행</small></div>
       <div class="model-order-card">
         <div class="model-order-head">
           <span>LLM 처리 순서</span>
@@ -294,6 +308,7 @@
         <p class="model-order-hint">실패 시 오른쪽으로 넘어가고, 없음에서 멈춥니다.</p>
       </div>
       <div class="channels-queue" id="channels-queue"></div>
+      <div class="utility-section-head channels-list-title"><span>등록 채널</span><small id="channels-count">—</small></div>
       <ul class="channels-list" id="channels-list"></ul>
     </div>
   </div>
