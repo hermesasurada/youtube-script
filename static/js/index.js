@@ -2130,6 +2130,7 @@ async function copyUrl() {
 let _summaryMd = '';      // 현재 열린 요약 원문(마크다운) — 몰입형 재구성·블로거 복사에 사용
 let _titleKo = '';        // 현재 열린 요약의 번역 제목(외국어 제목일 때만 값이 있다)
 let _summaryItemId = 0;   // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
+let _summaryRead = false;
 
 let _distill = null;      // 현재 영상의 증류 상태 {override, channel, effective}
 
@@ -2186,42 +2187,6 @@ async function setItemDistill(value) {
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
   }
-}
-
-/* 구글 블로거 포스팅용 복사 — 이미지 제외, 인라인 스타일 서식 HTML을 클립보드에.
-   text/html + text/plain 을 함께 넣어 블로거 작성(리치텍스트)·HTML 보기 어디에 붙여도 되게 한다. */
-/* 비보안 컨텍스트(http + 비 localhost, 예: Tailscale IP 접속) 대비 레거시 복사.
-   navigator.clipboard는 HTTPS/localhost에서만 존재하므로 원격 접속 시엔 이 경로가 쓰인다.
-   contenteditable 요소를 선택해 execCommand('copy') → 브라우저가 text/html+text/plain을
-   함께 넣어주므로 서식이 유지된다. */
-function _copyHtmlLegacy(html, text) {
-  let ok = false;
-  // copy 이벤트를 가로채 clipboardData에 html+plain을 직접 넣는다(서식 보장 + 성공 판정 확실).
-  const onCopy = (e) => {
-    e.clipboardData.setData('text/html', html);
-    e.clipboardData.setData('text/plain', text);
-    e.preventDefault();
-    ok = true;
-  };
-  document.addEventListener('copy', onCopy, true);
-  // execCommand('copy')는 선택 영역이 없으면 copy 이벤트를 안 쏘는 브라우저가 있어 임시 선택을 만든다
-  const holder = document.createElement('div');
-  holder.contentEditable = 'true';
-  holder.textContent = ' ';
-  holder.setAttribute('style', 'position:fixed;left:-99999px;top:0;opacity:0;');
-  document.body.appendChild(holder);
-  const sel = window.getSelection();
-  const saved = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-  const range = document.createRange();
-  range.selectNodeContents(holder);
-  sel.removeAllRanges();
-  sel.addRange(range);
-  try { document.execCommand('copy'); } catch { /* ok는 false로 남는다 */ }
-  document.removeEventListener('copy', onCopy, true);
-  sel.removeAllRanges();
-  if (saved) sel.addRange(saved);
-  holder.remove();
-  return ok;
 }
 
 /* 제목·썸네일 갱신 — 영상이 공개 뒤 제목을 고치거나 썸네일을 바꾸는 일이 잦은데
@@ -2294,7 +2259,8 @@ function _setPubBtn(url) {
   if (b.firstChild && b.firstChild.nodeType === 3) b.firstChild.textContent = _blogUrl ? '🔗 ' : '📤 ';
   if (l) l.textContent = _blogUrl ? '블로그에서 보기' : '블로그 발행';
   b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
-  b.style.color = _blogUrl ? 'var(--success)' : '';
+  b.classList.toggle('published', !!_blogUrl);
+  b.style.color = '';
   b.disabled = false;
 }
 
@@ -2322,33 +2288,33 @@ async function publishSummaryToBlog(btn) {
   }
 }
 
-/* 텔레그램용 복사 — 범위는 블로거와 동일하되 텔레그램이 살리는 서식(<b>/<i>/<a>)과
-   줄바꿈만으로 구성한다. 4096자를 넘으면 라벨로 알려 나눠 보내게 한다. */
-async function copySummaryForTelegram(btn) {
-  if (!_summaryMd) return;
-  const label = btn && btn.querySelector('.tg-label');
-  const setLbl = (t, color) => {
-    if (label) label.textContent = t;
-    if (btn) btn.style.color = color || '';
-  };
-  const { html, text, length, parts, overLimit } = YS.mdToTelegram(_summaryMd);
-  let ok = false;
+function _setSummaryReadUI(isRead) {
+  _summaryRead = !!isRead;
+  const btn = document.getElementById('sum-read-btn');
+  if (!btn) return;
+  btn.classList.toggle('active', _summaryRead);
+  btn.querySelector('.read-icon').textContent = _summaryRead ? '✓' : '○';
+  btn.querySelector('.read-label').textContent = _summaryRead ? '읽음' : '읽음 처리';
+  btn.title = _summaryRead ? '읽음 상태입니다. 클릭하면 안읽음으로 변경' : '읽음으로 표시';
+}
+
+async function toggleSummaryRead(btn) {
+  if (!_summaryItemId) return;
+  const next = !_summaryRead;
+  btn.disabled = true;
   try {
-    if (navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({
-        'text/html':  new Blob([html], { type: 'text/html' }),
-        'text/plain': new Blob([text], { type: 'text/plain' }),
-      })]);
-      ok = true;
-    }
+    const result = await YS.apiMarkRead(_summaryItemId, next);
+    if (!result) throw new Error('상태 변경 실패');
+    if (result.revision) _historyRevision = result.revision;
+    const item = _historyItems.find(i => i.item_id === _summaryItemId);
+    if (item) item.is_read = next;
+    _setSummaryReadUI(next);
+    applyHistoryFilter(true);
   } catch (e) {
-    console.warn('[telegram] clipboard API 실패 → 레거시 폴백', e);
+    console.warn('[read] 상태 변경 실패', e);
+  } finally {
+    btn.disabled = false;
   }
-  if (!ok) ok = _copyHtmlLegacy(html, text);
-  if (!ok) setLbl('복사 실패', 'var(--error)');
-  else if (overLimit) setLbl(`복사됨 (${parts}개로 나눠 보내기)`, 'var(--warn, #b45309)');
-  else setLbl('복사됨', 'var(--success)');
-  setTimeout(() => setLbl('텔레그램용 복사'), overLimit ? 3200 : 1600);
 }
 let _immersive = false;
 
@@ -2416,8 +2382,10 @@ async function openSummaryModal(itemId, title) {
   const bodyEl   = document.getElementById('sum-panel-body');
 
   _summaryItemId = itemId;                              // 증류 설정 변경 대상
+  _setSummaryReadUI(false);
   _setDistillUI(null);                                   // 값 로드 전에는 기본 표시
   bodyEl.innerHTML    = '<p class="sum-loading">불러오는 중…</p>';
+  document.getElementById('sum-panel-footer').hidden = true;
   overlay.hidden      = false;
   document.body.style.overflow = 'hidden';
   _applyReaderScale();                                   // 저장된 글자크기 배율 반영
@@ -2434,6 +2402,7 @@ async function openSummaryModal(itemId, title) {
     _summaryMd = data.content || '';
     _titleKo   = data.title_ko || '';                      // 외국어 제목의 한국어 번역
     _setPubBtn(data.blog_url);                               // 발행 여부에 따라 📤 / 🔗
+    _setSummaryReadUI(data.is_read);
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
@@ -2443,6 +2412,7 @@ async function openSummaryModal(itemId, title) {
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
     const hasImg = !!bodyEl.querySelector('.kf-strip');
     document.getElementById('sum-immersive-btn').hidden = !hasImg;
+    document.getElementById('sum-panel-footer').hidden = false;
     // 마지막으로 고른 보기 상태를 기억(기본 'immersive'). 버튼이 보이는 폭(>900px)에서만 자동 몰입(되돌리기 보장)
     const pref = localStorage.getItem('immViewMode') || 'immersive';
     if (hasImg && window.innerWidth > 900 && pref === 'immersive') _setImmersive(true);

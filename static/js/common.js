@@ -377,7 +377,7 @@
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
   };
 
-  /* 요약 md → 내보내기용 본문 DOM. 블로거·텔레그램이 같은 범위를 쓰도록 여기서 한 번만 추린다.
+  /* 요약 md → 블로그 발행용 본문 DOM.
      남기는 것: '핵심 내용'의 소제목(h3)과 본문. 버리는 것: 이미지·마커·H1·메타표·한눈 요약·목차.
      반환: {root(DocumentFragment), title, url} */
   function _summaryBodyDom(md) {
@@ -495,99 +495,6 @@
     return { html: body.outerHTML, text, title };
   }
 
-  /* ── 텔레그램용 변환 ──────────────────────────────────────────────────
-     텔레그램은 <b> <i> <a> <code> <s> <u> 정도만 살리고 블록 태그(h3/p/div)는
-     통째로 무시한다. 그래서 문단 구조를 '줄바꿈'으로 바꿔야 읽힌다.
-     본문 범위는 블로거용과 동일(_summaryBodyDom). 메시지 4096자 제한이 있어
-     길이도 함께 돌려준다. */
-  const TG_LIMIT = 4096;
-
-  /* 인라인 서식만 남긴 HTML(텔레그램이 무시하는 태그·속성은 벗겨낸다) */
-  function _tgInline(el) {
-    const walk = (node) => {
-      let out = '';
-      node.childNodes.forEach(n => {
-        if (n.nodeType === 3) { out += escapeHtml(n.textContent); return; }
-        if (n.nodeType !== 1) return;
-        const inner = walk(n);
-        const tag = n.tagName;
-        if (tag === 'STRONG' || tag === 'B')      out += `<b>${inner}</b>`;
-        else if (tag === 'EM' || tag === 'I')     out += `<i>${inner}</i>`;
-        else if (tag === 'CODE')                  out += `<code>${inner}</code>`;
-        else if (tag === 'A' && n.getAttribute('href'))
-          out += `<a href="${attrEscape(n.getAttribute('href'))}">${inner}</a>`;
-        else out += inner;                        // 그 외 태그는 벗기고 내용만
-      });
-      return out;
-    };
-    return walk(el).replace(/\s+/g, ' ').trim();
-  }
-
-  function mdToTelegram(md) {
-    const { root, title, url } = _summaryBodyDom(md);
-    const blocks = [];   // {html, text, heading} — heading은 분할 가능 지점 표시
-    const add = (h, t, heading = false) => { if (t) blocks.push({ html: h, text: t, heading }); };
-
-    if (title) add(`<b>${escapeHtml(title)}</b>`, title, true);
-
-    [...root.children].forEach(el => {
-      const tag = el.tagName;
-      if (/^H[1-6]$/.test(tag)) {
-        const t = el.textContent.trim();
-        add(`▪️ <b>${escapeHtml(t)}</b>`, `▪️ ${t}`, true);       // 소제목: 불릿+굵게
-      } else if (tag === 'P') {
-        add(_tgInline(el), el.textContent.trim());
-      } else if (tag === 'UL' || tag === 'OL') {
-        el.querySelectorAll('li').forEach(li => {
-          add(`• ${_tgInline(li)}`, `• ${li.textContent.trim()}`);
-        });
-      } else if (tag === 'BLOCKQUOTE') {
-        add(`<i>${_tgInline(el)}</i>`, el.textContent.trim());
-      }
-    });
-    if (url) add(`🔗 ${attrEscape(url)}`, `🔗 ${url}`);
-
-    // 4096자를 넘으면 파트로 나눈다. 소제목 단위(섹션)로 통째 옮기는 것을 우선하고,
-    // 한 섹션이 혼자서도 제한을 넘으면 그 섹션만 문단 단위로 쪼갠다.
-    const RESERVE = 60;                       // 파트 구분선이 차지할 여유
-    const CAP = TG_LIMIT - RESERVE;
-    const cost = (b) => b.text.length + 2;    // 블록 사이 '\n\n'
-    const sections = [];                      // 소제목~다음 소제목 전까지를 한 덩어리로
-    blocks.forEach(b => {
-      if (b.heading || !sections.length) sections.push([b]);
-      else sections[sections.length - 1].push(b);
-    });
-
-    const parts = [];
-    let cur = [], len = 0;
-    const flush = () => { if (cur.length) { parts.push(cur); cur = []; len = 0; } };
-    for (const sec of sections) {
-      const secLen = sec.reduce((s, b) => s + cost(b), 0);
-      if (secLen > CAP) {                     // 섹션 자체가 큼 → 문단 단위로 채운다
-        for (const b of sec) {
-          if (len && len + cost(b) > CAP) flush();
-          cur.push(b); len += cost(b);
-        }
-      } else {
-        if (len && len + secLen > CAP) flush();
-        cur.push(...sec); len += secLen;
-      }
-    }
-    flush();
-
-    const n = parts.length;
-    const joinPart = (part, key) => part.map(b => b[key]).join('\n\n');
-    const stitch = (key) => parts
-      .map((p, i) => (n > 1 ? `━━━━━ ${i + 1}/${n} ━━━━━\n\n` : '') + joinPart(p, key))
-      .join('\n\n');
-
-    const outText = stitch('text').trim();
-    return {
-      html: stitch('html').trim(), text: outText,
-      length: outText.length, limit: TG_LIMIT, parts: n, overLimit: n > 1,
-    };
-  }
-
   /* 외국어 제목이면 렌더된 본문의 H1을 '번역 제목 + 원문(작고 연하게)' 2단으로 바꾼다.
      원문은 지우지 않고 아래에 남겨, 검색·대조가 되게 한다. */
   function applyTitleTranslation(rootEl, titleKo) {
@@ -618,7 +525,6 @@
   global.YS = {
     renderMarkdown,
     mdToBloggerHtml,
-    mdToTelegram,
     escapeHtml,
     attrEscape,
     fmtDate,

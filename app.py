@@ -2640,6 +2640,7 @@ def summary_content():
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         return _json({"content": content, "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),
+                      "is_read": bool((item or {}).get("is_read")),
                       "blog_url": (item or {}).get("blog_url") or ""})   # 뷰어 버튼 초기 상태(📤/🔗)
     except Exception as e:
         return _json({"error": str(e)}, 500)

@@ -291,16 +291,6 @@
       line-height: 1; cursor: pointer; padding: 0;
     }
     .fs-btn:active { background: var(--surface2); }
-    /* 텔레그램용 복사 — 요약 볼 때만 노출. 복사 후 라벨이 잠깐 텍스트로 바뀐다 */
-    .tg-btn {
-      min-width: 30px; height: 30px; flex-shrink: 0; padding: 0 .45rem;
-      display: inline-flex; align-items: center; justify-content: center;
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      background: var(--surface); color: var(--text); font-size: 14px;
-      line-height: 1; cursor: pointer;
-    }
-    .tg-btn[hidden] { display: none; }
-    .tg-btn:active { background: var(--surface2); }
     /* 증류 선택 — 제목을 없앤 자리라 auto margin으로 헤더 가장 우측에 붙인다 */
     /* 증류 토글 — 탭할 때마다 채널 따름 → 포함 → 제외로 순환 */
     .distill-ctrl {
@@ -314,9 +304,6 @@
     .distill-ctrl.set { border-color: var(--highlight); background: var(--highlight-soft);
       color: var(--highlight); font-weight: 600; }
     .distill-ctrl .dist-eff { color: var(--muted); font-size: 11px; font-weight: 400; }
-    .tg-btn.done   { color: var(--success, #16a34a); border-color: currentColor; font-size: 11.5px; }
-    .tg-btn.warn   { color: #b45309; border-color: currentColor; font-size: 11.5px; }
-    .tg-btn.err    { color: var(--error, #dc2626); border-color: currentColor; font-size: 11.5px; }
     .font-ctrl {
       display: inline-flex; align-items: center; flex-shrink: 0;
       height: 30px; padding: 0 .25rem 0 .4rem;
@@ -543,7 +530,7 @@
     /* 관리 화면: 큐·채널 모니터를 본문 리더와 분리한 간결한 유틸리티 UI */
     .modal.utility .modal-hdr { min-height: 58px; background: var(--surface); }
     .modal.utility .modal-title { display: block; letter-spacing: -.01em; }
-    .modal.utility :is(.font-ctrl, .fs-ctrl, .tg-btn, .distill-ctrl) { display: none !important; }
+    .modal.utility :is(.font-ctrl, .fs-ctrl, .summary-actions) { display: none !important; }
     .modal.utility .read-progress { display: none; }
     .modal.utility .modal-body { background: var(--bg); padding: .85rem .9rem 1.5rem; }
     .modal-body.queue, .modal-body.channels { display: flex; flex-direction: column; gap: .75rem; }
@@ -596,6 +583,28 @@
     .ch-list-shell .ch-row { background: transparent; }
     .ch-list-shell .ch-row:first-of-type { border-top: 0; }
     .ch-distill, .ch-toggle { border-color: transparent; background-color: var(--surface2); }
+
+    .summary-actions {
+      flex-shrink: 0; display: flex; align-items: center; gap: .35rem;
+      min-height: 54px; padding: .55rem .75rem max(.55rem, env(safe-area-inset-bottom));
+      border-top: 1px solid var(--border); background: var(--surface);
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .summary-actions::-webkit-scrollbar { display: none; }
+    .summary-actions[hidden] { display: none; }
+    .summary-action-btn,
+    .summary-actions .distill-ctrl {
+      flex: 0 0 auto; height: 34px; padding: 0 .65rem;
+      display: inline-flex; align-items: center; justify-content: center; gap: .3rem;
+      border: 1px solid transparent; border-radius: var(--radius);
+      background: var(--surface2); color: var(--muted); font: inherit; font-size: 11.5px;
+      line-height: 1; white-space: nowrap; cursor: pointer;
+    }
+    .summary-actions .distill-ctrl { margin-left: 0; }
+    .summary-action-btn.primary { margin-left: auto; background: var(--highlight); color: #fff; }
+    .summary-action-btn.active,
+    .summary-action-btn.done { color: var(--highlight); background: var(--highlight-soft); }
+    .summary-action-btn.err { color: var(--error, #dc2626); }
     :where(button, input, select, textarea, a):focus-visible {
       outline: 2px solid var(--highlight); outline-offset: 2px;
     }
@@ -666,23 +675,19 @@
         <button class="fs-btn" onclick="adjustFs(-1)" aria-label="글자 작게">−</button>
         <button class="fs-btn" onclick="adjustFs(1)" aria-label="글자 크게">+</button>
       </div>
-      <button class="tg-btn" id="pub-btn" onclick="publishToBlog(this)" hidden
-              aria-label="블로그 발행" title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">
-        <span class="tg-label">📤</span>
-      </button>
-      <button class="tg-btn" id="tg-btn" onclick="copyForTelegram(this)" hidden
-              aria-label="텔레그램용 복사" title="본문을 텔레그램에서 읽기 좋은 형태로 복사">
-        <span class="tg-label">✈️</span>
-      </button>
-      <button class="tg-btn" id="rfm-btn" onclick="refreshItemMeta(this)" hidden
-              aria-label="제목·썸네일 갱신" title="제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(못 가져오면 기존 유지)">
-        <span class="tg-label">🔄</span>
-      </button>
-      <button class="distill-ctrl" id="distill-ctrl" hidden
-              onclick="cycleItemDistill()" aria-label="증류 대상 전환">—</button>
     </header>
     <div class="read-progress" id="read-progress"></div>
     <div class="modal-body" id="modal-body"></div>
+    <footer class="summary-actions" id="summary-actions" hidden>
+      <button class="summary-action-btn" id="summary-read-btn" onclick="toggleSummaryReadM(this)">
+        <span class="read-icon">○</span><span class="read-label">읽음 처리</span>
+      </button>
+      <button class="summary-action-btn" id="rfm-btn" onclick="refreshItemMeta(this)"
+              title="제목·썸네일 갱신"><span class="action-label">🔄 메타 갱신</span></button>
+      <button class="distill-ctrl" id="distill-ctrl" onclick="cycleItemDistill()" aria-label="증류 대상 전환">증류 —</button>
+      <button class="summary-action-btn primary" id="pub-btn" onclick="publishToBlog(this)"
+              title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)"><span class="action-label">📤 블로그 발행</span></button>
+    </footer>
   </div>
 
 <script>
@@ -991,6 +996,7 @@ function openModal(title, kind = 'content') {
   $('modal-body').textContent = '로드 중…';
   $('modal-body').className = 'modal-body';
   $('modal-body').scrollTop = 0;
+  $('summary-actions').hidden = true;
   $('modal-title').textContent = title || '';
   $('modal').classList.toggle('utility', kind === 'utility');
   $('read-progress').style.width = '0%';   // 열 때 진행바 초기화
@@ -1459,7 +1465,36 @@ function setReaderFont(key) {
   _applyReaderFont();
 }
 
-let _summaryMd = '';   // 현재 열린 요약 원문 — 텔레그램용 복사에 사용
+let _summaryMd = '';   // 현재 열린 요약 원문 — 블로그 발행에 사용
+let _summaryReadM = false;
+
+function _setSummaryReadUIM(isRead) {
+  _summaryReadM = !!isRead;
+  const btn = $('summary-read-btn');
+  btn.classList.toggle('active', _summaryReadM);
+  btn.querySelector('.read-icon').textContent = _summaryReadM ? '✓' : '○';
+  btn.querySelector('.read-label').textContent = _summaryReadM ? '읽음' : '읽음 처리';
+  btn.title = _summaryReadM ? '읽음 상태입니다. 탭하면 안읽음으로 변경' : '읽음으로 표시';
+}
+
+async function toggleSummaryReadM(btn) {
+  if (!_summaryItemId) return;
+  const next = !_summaryReadM;
+  btn.disabled = true;
+  try {
+    const result = await YS.apiMarkRead(_summaryItemId, next);
+    if (!result) throw new Error('상태 변경 실패');
+    if (result.revision) HISTORY_REVISION = result.revision;
+    const item = ALL.find(i => i.item_id === _summaryItemId);
+    if (item) item.is_read = next;
+    _setSummaryReadUIM(next);
+    applyFilter();
+  } catch (e) {
+    console.warn('[read] 상태 변경 실패', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 async function openSummary(itemId, title) {
   openModal(title);
@@ -1469,10 +1504,8 @@ async function openSummary(itemId, title) {
   _applyReaderFont();
   _summaryMd = '';
   _summaryItemId = itemId;
-  $('tg-btn').hidden = true;
-  $('pub-btn').hidden = true;
-  $('rfm-btn').hidden = true;
-  $('distill-ctrl').hidden = true;
+  _setSummaryReadUIM(false);
+  $('summary-actions').hidden = true;
   _setDistillUI(null);
   try {
     const [d] = await Promise.all([
@@ -1487,11 +1520,10 @@ async function openSummary(itemId, title) {
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
-      $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
-      $('pub-btn').hidden = !_summaryMd; _setPubBtnM(d.blog_url);
-      $('rfm-btn').hidden = !_summaryMd;
-      $('distill-ctrl').hidden = !_summaryMd;
+      _setSummaryReadUIM(d.is_read);
+      _setPubBtnM(d.blog_url);
       _setDistillUI(d.distill);
+      $('summary-actions').hidden = !_summaryMd;
     }
   } catch (e) {
     $('modal-body').textContent = '오류: ' + e.message;
@@ -1503,7 +1535,7 @@ async function openSummary(itemId, title) {
    즉시 반영한다(썸네일 URL은 그대로라 캐시 우회 쿼리를 붙인다). */
 async function refreshItemMeta(btn) {
   if (!_summaryItemId) return;
-  const label = btn && btn.querySelector('.tg-label');
+  const label = btn && btn.querySelector('.action-label');
   const setLbl = (t) => { if (label) label.textContent = t; };
   setLbl('…');
   if (btn) btn.disabled = true;
@@ -1540,36 +1572,8 @@ async function refreshItemMeta(btn) {
     setLbl('✗');
   } finally {
     if (btn) btn.disabled = false;
-    setTimeout(() => setLbl('🔄'), 2000);
+    setTimeout(() => setLbl('🔄 메타 갱신'), 2000);
   }
-}
-
-/* 비보안 컨텍스트(원격 http 접속)에는 navigator.clipboard가 없다 —
-   copy 이벤트를 가로채 clipboardData에 직접 넣는 경로로 폴백한다(데스크톱과 동일 방식). */
-function _copyHtmlLegacy(html, text) {
-  let ok = false;
-  const onCopy = (e) => {
-    e.clipboardData.setData('text/html', html);
-    e.clipboardData.setData('text/plain', text);
-    e.preventDefault();
-    ok = true;
-  };
-  document.addEventListener('copy', onCopy, true);
-  const holder = document.createElement('div');
-  holder.contentEditable = 'true';
-  holder.textContent = ' ';
-  holder.setAttribute('style', 'position:fixed;left:-99999px;top:0;opacity:0;');
-  document.body.appendChild(holder);
-  const sel = window.getSelection();
-  const saved = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-  const range = document.createRange();
-  range.selectNodeContents(holder);
-  sel.removeAllRanges(); sel.addRange(range);
-  try { document.execCommand('copy'); } catch { /* ok=false 유지 */ }
-  document.removeEventListener('copy', onCopy, true);
-  sel.removeAllRanges(); if (saved) sel.addRange(saved);
-  holder.remove();
-  return ok;
 }
 
 let _summaryItemId = 0;  // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
@@ -1584,7 +1588,7 @@ function _setDistillUI(d) {
   const ov = d ? d.override : null;
   const set = ov !== null && ov !== undefined;
   box.classList.toggle('set', set);
-  if (!d) { box.textContent = '—'; box.title = ''; return; }
+  if (!d) { box.textContent = '증류 —'; box.title = ''; return; }
   const chan = d.channel ? '포함' : '제외';
   // 자동수집 채널이 아니면 따를 채널 설정 자체가 없다 → '채널'이 아니라 '기본'으로 설명한다.
   const reg  = d.registered !== false;
@@ -1593,13 +1597,13 @@ function _setDistillUI(d) {
                       : `자동수집 채널이 아니라 기본값 적용 → ${chan}`;
   if (!set) {
     // 좁은 헤더라 값만 남기고 '따름'은 ↪ 기호로 구분한다(전체 설명은 툴팁)
-    box.textContent = `↪${chan}`;
+    box.textContent = `증류 ↪ ${chan}`;
     box.title = `${srcDesc}. 탭하면 이 영상만 '포함'으로`;
   } else if (ov) {
-    box.textContent = '✓포함';
+    box.textContent = '증류 ✓ 포함';
     box.title = `이 영상만 포함(${src} 설정은 ${chan}). 탭하면 '제외'로`;
   } else {
-    box.textContent = '✕제외';
+    box.textContent = '증류 ✕ 제외';
     box.title = `이 영상만 제외(${src} 설정은 ${chan}). 탭하면 '${src} 따름'으로`;
   }
 }
@@ -1626,37 +1630,13 @@ async function setItemDistill(value) {
   }
 }
 
-/* 내보내기 복사 공통 — build()가 {html,text}(+텔레그램은 parts/overLimit)를 준다.
-   원격 http(비보안)에는 navigator.clipboard가 없어 레거시 경로로 폴백한다. */
-async function _copyExport(btn, icon, build) {
-  if (!_summaryMd) return;
-  const lbl = btn.querySelector('.tg-label');
-  const { html, text, parts, overLimit } = build(_summaryMd);
-  let ok = false;
-  try {
-    if (navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({
-        'text/html':  new Blob([html], { type: 'text/html' }),
-        'text/plain': new Blob([text], { type: 'text/plain' }),
-      })]);
-      ok = true;
-    }
-  } catch (e) { /* 레거시로 폴백 */ }
-  if (!ok) ok = _copyHtmlLegacy(html, text);
-  if (!ok)              { lbl.textContent = '실패';            btn.className = 'tg-btn err'; }
-  else if (overLimit)   { lbl.textContent = `복사됨 ${parts}개`; btn.className = 'tg-btn warn'; }
-  else                  { lbl.textContent = '복사됨';           btn.className = 'tg-btn done'; }
-  setTimeout(() => { lbl.textContent = icon; btn.className = 'tg-btn'; }, overLimit ? 3000 : 1600);
-}
-
-const copyForTelegram = (btn) => _copyExport(btn, '✈️', YS.mdToTelegram);
 /* 블로그 발행 — '블로거용 복사'를 대체(2026-09-05). 데스크톱과 같은 엔드포인트. */
 let _blogUrl = '';
 function _setPubBtnM(url) {
   _blogUrl = url || '';
   const b = $('pub-btn'); if (!b) return;
-  b.querySelector('.tg-label').textContent = _blogUrl ? '🔗' : '📤';
-  b.className = _blogUrl ? 'tg-btn done' : 'tg-btn';
+  b.querySelector('.action-label').textContent = _blogUrl ? '🔗 블로그에서 보기' : '📤 블로그 발행';
+  b.className = _blogUrl ? 'summary-action-btn primary done' : 'summary-action-btn primary';
   b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.disabled = false;
 }
@@ -1664,14 +1644,14 @@ async function publishToBlog(btn) {
   if (_blogUrl) { window.open(_blogUrl, '_blank', 'noopener'); return; }
   if (!_summaryMd || !_summaryItemId) return;
   if (!confirm('블로그스팟에 바로 발행할까요? (즉시 공개됩니다)')) return;
-  const lbl = btn.querySelector('.tg-label');
+  const lbl = btn.querySelector('.action-label');
   const { html, title } = YS.mdToBloggerHtml(_summaryMd);
   btn.disabled = true; lbl.textContent = '…';
   try {
     const d = await YS.apiPublishBlog(_summaryItemId, title, html);
     if (d && (d.status === 'ok' || d.status === 'exists')) { _setPubBtnM(d.url); if (typeof loadHistory === 'function') loadHistory(true); return; }
-    lbl.textContent = d && d.code === 'not_configured' ? '미설정' : '✗'; btn.className = 'tg-btn err'; console.warn('[blog]', d);
-  } catch (e) { lbl.textContent = '✗'; btn.className = 'tg-btn err'; }
+    lbl.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패'; btn.className = 'summary-action-btn err'; console.warn('[blog]', d);
+  } catch (e) { lbl.textContent = '발행 실패'; btn.className = 'summary-action-btn err'; }
   setTimeout(() => _setPubBtnM(''), 2200);
 }
 
@@ -1679,9 +1659,7 @@ async function openTranscript(itemId, title) {
   openModal(title);
   $('fs-ctrl').hidden = true;   // 전사 보기엔 글자크기 조절 숨김(요약 전용)
   $('font-ctrl').hidden = true;
-  $('tg-btn').hidden = true;    // 내보내기 복사·증류 설정은 요약 전용
-  $('pub-btn').hidden = true;
-  $('distill-ctrl').hidden = true;
+  $('summary-actions').hidden = true;
   _summaryMd = '';
   try {
     const r = await fetch('/history/text', {

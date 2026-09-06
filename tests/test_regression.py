@@ -171,11 +171,13 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     assert client.post("/history/text", json={"item_id": item["item_id"]}).get_json()["text"] == "전사 본문"
     summary_payload = client.post("/summary/content", json={"item_id": item["item_id"]}).get_json()
     assert "요약 본문" in summary_payload["content"]
+    assert summary_payload["is_read"] is False
 
     marked = client.patch(
         "/history/mark_read", json={"item_id": item["item_id"], "is_read": True}
     ).get_json()
     assert marked["ok"] is True and marked["revision"] != payload["revision"]
+    assert client.post("/summary/content", json={"item_id": item["item_id"]}).get_json()["is_read"] is True
 
 
 def test_history_read_update_does_not_rebuild_fts():

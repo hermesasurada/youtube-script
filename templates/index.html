@@ -183,22 +183,24 @@
         </label>
         <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
       </div>
-      <div class="sum-tool-group sum-action-tools" aria-label="요약 처리 및 공유">
-        <button class="sum-blogger-btn sum-primary-action" id="sum-publish-btn" onclick="publishSummaryToBlog(this)"
-                title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">📤 <span class="pub-label">블로그 발행</span></button>
-        <button class="sum-blogger-btn" id="sum-telegram-btn" onclick="copySummaryForTelegram(this)"
-                title="같은 본문을 텔레그램에서 읽기 좋은 형태(굵은 소제목·줄바꿈)로 클립보드에 복사">✈️ <span class="tg-label">텔레그램용 복사</span></button>
-        <button class="sum-blogger-btn" id="sum-refresh-btn" onclick="refreshItemMeta(this)"
-                title="제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(가져오지 못하면 기존 유지)">🔄 <span class="rfm-label">메타 갱신</span></button>
-        <button class="sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
-                aria-label="증류 대상 전환">증류 —</button>
-      </div>
       <button class="sum-panel-close" onclick="closeSummaryModal()" title="닫기">×</button>
     </div>
     <div class="sum-panel-body sum-md" id="sum-panel-body"></div>
     <div class="sum-immersive-body" id="sum-immersive-body" hidden>
       <div class="imm-gallery"></div>
       <div class="imm-text sum-md"></div>
+    </div>
+    <div class="sum-panel-footer" id="sum-panel-footer" hidden aria-label="요약 작업">
+      <button class="sum-blogger-btn sum-read-btn" id="sum-read-btn" onclick="toggleSummaryRead(this)">
+        <span class="read-icon">○</span><span class="read-label">읽음 처리</span>
+      </button>
+      <button class="sum-blogger-btn" id="sum-refresh-btn" onclick="refreshItemMeta(this)"
+              title="제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(가져오지 못하면 기존 유지)">🔄 <span class="rfm-label">메타 갱신</span></button>
+      <button class="sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
+              aria-label="증류 대상 전환">증류 —</button>
+      <span class="sum-footer-spacer"></span>
+      <button class="sum-blogger-btn sum-primary-action" id="sum-publish-btn" onclick="publishSummaryToBlog(this)"
+              title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">📤 <span class="pub-label">블로그 발행</span></button>
     </div>
   </div>
 </div>

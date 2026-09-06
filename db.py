@@ -1381,7 +1381,7 @@ def get_history_item(item_id: int) -> dict | None:
     if item_id <= 0:
         return None
     r = _conn().execute(
-        """SELECT rowid AS item_id, md_path, summary_path, title, has_txt,
+        """SELECT rowid AS item_id, md_path, summary_path, title, has_txt, is_read,
                   yt_id, webpage_url, title_ko, uploader, blog_url, blog_post_id
              FROM items WHERE rowid = ?""",
         (item_id,),
