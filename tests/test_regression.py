@@ -14,6 +14,8 @@ import sys
 import time
 from datetime import datetime, timedelta
 
+import pytest
+
 import app
 import channel_monitor
 import db
@@ -209,6 +211,62 @@ def test_keyframe_section_by_timestamp():
     assert [k["section"] for k in kept] == [0, 1, 2]
 
 
+def test_keyframe_semantic_section_is_not_overwritten_by_timestamp():
+    headings = [
+        {"idx": 3, "level": 3, "start": 0},
+        {"idx": 4, "level": 3, "start": 60},
+    ]
+    kept = [
+        {"ts": 75, "section": 3},
+        {"ts": 75, "section": None},
+        {"ts": 75, "section": 999},
+    ]
+
+    keyframe_report._assign_sections_by_time(kept, headings)
+
+    assert [k["section"] for k in kept] == [3, 4, 4]
+
+
+def test_visual_capture_targets_use_timestamped_transcript_across_sections():
+    headings = [
+        {"idx": 3, "level": 3, "start": 0},
+        {"idx": 4, "level": 3, "start": 60},
+        {"idx": 5, "level": 3, "start": 120},
+    ]
+    body = (
+        "[00:10] 여기 화면을 보시면 첫 번째 제품이 나옵니다.\n"
+        "[00:40] 발표자가 배경을 설명합니다.\n"
+        "[01:05] 이 그래프에서 매출 변화가 보입니다.\n"
+        "[02:05] 마지막 결론만 말합니다."
+    )
+
+    assert keyframe_report._visual_capture_targets(body, headings) == [10, 65]
+
+
+def test_keyframe_context_uses_nearby_transcript_only():
+    segments = [(10, "첫 화면"), (20, "관련 그래프"), (90, "먼 내용")]
+    context = keyframe_report._context_for_timestamp(18, segments, window=10)
+    assert "첫 화면" in context and "관련 그래프" in context
+    assert "먼 내용" not in context
+
+
+def test_scored_keyframes_are_limited_per_section_without_changing_legacy_results():
+    scored = [
+        {"ts": 1, "section": 3, "_vision_score": 2},
+        {"ts": 2, "section": 3, "_vision_score": 5},
+        {"ts": 3, "section": 3, "_vision_score": 4},
+    ]
+    assert [x["ts"] for x in keyframe_report._limit_frames_per_section(scored, 2)] == [2, 3]
+
+    legacy = [{"ts": i, "section": 3} for i in range(4)]
+    assert keyframe_report._limit_frames_per_section(legacy, 2) == legacy
+
+
+def test_even_candidate_sampling_never_duplicates_when_budget_is_larger():
+    assert keyframe_report._evenly_sample([1, 2], 5) == [1, 2]
+    assert keyframe_report._evenly_sample(list(range(10)), 3) == [0, 3, 6]
+
+
 def test_keyframe_ts_label_and_hms():
     assert keyframe_report._parse_ts_label("제목 [3:20]") == 200
     assert keyframe_report._parse_ts_label("[1:02:03]") == 3723
@@ -217,6 +275,32 @@ def test_keyframe_ts_label_and_hms():
     assert keyframe_report._hms(3723) == "1:02:03"
     # 라벨↔시각 왕복 일관성
     assert keyframe_report._parse_ts_label("[" + keyframe_report._hms(200) + "]") == 200
+
+
+def test_keyframe_commit_restores_previous_frames_when_summary_update_fails(tmp_path, monkeypatch):
+    """새 캡처 승격 뒤 요약 갱신이 실패해도 마지막 정상 프레임 묶음을 복원한다."""
+    summary = tmp_path / "video.md"
+    summary.write_text("# 기존 요약", encoding="utf-8")
+    frames = tmp_path / "video.frames"
+    frames.mkdir()
+    (frames / "kf_00001.jpg").write_bytes(b"old")
+    candidate = tmp_path / "candidate.jpg"
+    candidate.write_bytes(b"new")
+    kept = [{"tmp": str(candidate), "file": "kf_00002.jpg", "ts": 2,
+             "section": 0, "caption": "새 프레임"}]
+
+    monkeypatch.setattr(
+        keyframe_report, "_augment_summary_md",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("write failed")),
+    )
+    with pytest.raises(OSError, match="write failed"):
+        keyframe_report._commit_keyframes(
+            str(summary), str(frames), [], kept, "/sframe/video.frames"
+        )
+
+    assert (frames / "kf_00001.jpg").read_bytes() == b"old"
+    assert not (frames / "kf_00002.jpg").exists()
+    assert not list(tmp_path.glob(".video.frames.*"))
 
 
 def test_sequoia_opening_is_removed_before_main_interview():
@@ -309,6 +393,23 @@ def test_queue_claim_and_stale_recovery(monkeypatch):
     assert db.queue_recover_stale(stale_seconds=3600) == 1
     row = conn.execute("SELECT status, next_retry_at FROM watch_queue WHERE id = ?", (claimed["id"],)).fetchone()
     assert row["status"] == "deferred" and row["next_retry_at"]
+
+
+def test_queue_interrupted_recovery_is_immediate_and_keeps_transcript():
+    """독점 모니터 재시작은 고아 claim을 즉시 되살리고 완성 전사 경로를 보존한다."""
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM watch_queue")
+    db.enqueue_video("restart-test", "https://youtu.be/restart", "restart", "UC1")
+    claimed = db.queue_claim_one()
+    db.queue_set_txt_path(claimed["id"], "/tmp/completed-transcript.md")
+
+    assert db.queue_recover_interrupted() == 1
+    row = db.queue_row(claimed["id"])
+    assert row["status"] == "pending"
+    assert row["txt_path"] == "/tmp/completed-transcript.md"
+    assert row["error_kind"] == "worker_interrupted"
+    assert row["claimed_at"] is None
 
 
 def test_queue_idle_when_nothing_has_been_processed():
@@ -684,15 +785,14 @@ def test_membership_capture_failure_is_not_retried(monkeypatch):
     assert bool(channel_monitor._META_PERMANENT_RE.search(emsg)) is True
 
 
-def test_retry_delay_is_constant_30min():
-    """재시도 간격은 30분 고정(2026-08-17 사용자 지정 — 지수 백오프에서 변경).
+def test_retry_delay_is_constant_20min():
+    """재시도 간격은 영상 처리 주기와 같은 20분 고정이다.
 
-    예산 5회 × 30분이라 2시간 안에 소진된다. 저녁 차단 구간을 통째로 넘기지는
-    못하지만, 회복이 빠른 일시 장애를 빨리 따라잡는 쪽을 택했다.
+    예산 5회로 짧은 일시 장애를 빠르게 따라잡되 무한 재시도는 막는다.
     """
     d = channel_monitor._retry_delay
-    assert [d(i) for i in (1, 2, 3, 4, 5)] == [1800] * 5
-    assert d(0) == d(None) == 1800   # attempt 미기록(0/None)도 동일
+    assert [d(i) for i in (1, 2, 3, 4, 5)] == [1200] * 5
+    assert d(0) == d(None) == 1200   # attempt 미기록(0/None)도 동일
 
 
 def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch):
@@ -753,6 +853,35 @@ def test_process_video_resumes_from_saved_transcript(monkeypatch):
     assert result["txt_path"] == "/tmp/existing.md"
     assert not any(url.endswith("/start") for url in calls)
     assert any(url.endswith("/summarize") for url in calls)
+
+
+def test_process_video_recovers_indexed_transcript_after_restart(monkeypatch):
+    """큐 txt_path 기록 직전 재시작돼도 items의 전사를 찾아 Whisper를 건너뛴다."""
+    calls, saved_paths = [], []
+
+    class ResponseStub:
+        def __init__(self, url): self.url = url
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def raise_for_status(self): return None
+        def iter_lines(self, decode_unicode=False): return iter(["event: done", "data: "])
+        def json(self): return {"ok": True, "n_frames": 1}
+
+    monkeypatch.setattr(channel_monitor.os.path, "isfile",
+                        lambda path: path == "/tmp/indexed.md")
+    monkeypatch.setattr(channel_monitor.db, "get_item_by_yt_id",
+                        lambda yt_id: {"md_path": "/tmp/indexed.md"})
+    monkeypatch.setattr(channel_monitor.db, "queue_set_txt_path",
+                        lambda qid, path: saved_paths.append((qid, path)))
+    monkeypatch.setattr(channel_monitor.requests, "post",
+                        lambda url, **kwargs: calls.append(url) or ResponseStub(url))
+
+    result = channel_monitor.process_video(
+        {"id": 7, "yt_id": "restart", "url": "https://youtu.be/restart"}, "prompt"
+    )
+    assert result["txt_path"] == "/tmp/indexed.md"
+    assert saved_paths == [(7, "/tmp/indexed.md")]
+    assert not any(url.endswith("/start") for url in calls)
 
 
 def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
@@ -853,6 +982,7 @@ def test_keyframe_gpt_can_be_first_vision_model(monkeypatch):
     )
     seen = {}
     def run_gpt(prompt, **kwargs):
+        seen["prompt"] = prompt
         seen["images"] = kwargs["images"]
         return result
     monkeypatch.setattr(keyframe_report.llm_gateway, "run_codex_prompt", run_gpt)
@@ -862,10 +992,13 @@ def test_keyframe_gpt_can_be_first_vision_model(monkeypatch):
     )
     verdict = keyframe_report.classify_and_assign(
         [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}],
+        transcript_segments=[(1.0, "화면의 매출 그래프를 설명합니다")],
         model_order=["gpt", "opus", "grok"],
     )
     assert verdict["a.jpg"]["keep"] is True
     assert seen["images"] == ["/tmp/a.jpg"]
+    assert "화면의 매출 그래프" in seen["prompt"]
+    assert "화자 얼굴뿐이면 반드시 keep=false" in seen["prompt"]
 
 
 def _make_job(job_id, meta=None):

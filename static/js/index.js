@@ -187,7 +187,7 @@ async function loadChannels() {
     qEl.textContent = parts.length ? '큐: ' + parts.join(' · ') : '큐 비어있음';
     const chans = d.channels || [];
     if (!chans.length) { list.innerHTML = '<li class="channels-empty">등록된 채널이 없습니다.</li>'; return; }
-    list.innerHTML = chans.map(c => {
+    list.innerHTML = `<li class="channel-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></li>` + chans.map(c => {
       const on = !!c.enabled;
       const sub = (c.handle ? '@' + c.handle : c.channel_id) +
                   (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
@@ -1131,7 +1131,7 @@ async function refreshQueueModal() {
         ? `<button class="q-requeue" title="재시도 초기화 후 큐 복귀" onclick="requeueItem(${v.id})">↻ 복귀</button>`
         : '')).join('');
     body.innerHTML =
-      `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">유휴면 바로, 이후 30분에 1건</span></div>`
+      `<div class="q-sec">본편 대기 · ${main.length}건 <span class="q-hint">유휴면 바로, 이후 20분에 1건</span></div>`
       + (mainRows || '<div class="q-empty">대기 중인 영상이 없습니다.</div>')
       + (kf.length ? `<div class="q-sec">캡처 재시도 대기 · ${kf.length}건 <span class="q-hint">본편과 별도 슬롯</span></div>${kfRows}` : '')
       + (recent ? `<div class="q-sec">최근 처리</div>${recent}` : '');
@@ -1179,7 +1179,7 @@ async function cancelQueueItem(id) {
 
 /* ── Start transcription ── */
 /* URL 전사는 서버 큐(watch_queue)에 줄을 선다 — 자동 모니터와 같은 파이프라인.
-   유휴(최근 주기 동안 처리 없음)면 즉시 시작하고, 이후 30분에 한 건.
+   유휴(최근 주기 동안 처리 없음)면 즉시 시작하고, 이후 20분에 한 건.
    입력창 URL + 사이드바 대기열의 대기 항목을 전부 적재.
    (파일 업로드는 유튜브와 무관하므로 종전대로 즉시 처리) */
 async function enqueueUrls() {
@@ -1215,7 +1215,7 @@ async function enqueueUrls() {
       lines.push(`⚠️ 서버 연결 실패: ${e.message}`);
     }
     logEl.textContent = lines.join('\n') +
-      '\n\n최근 30분 동안 처리가 없었으면 바로 시작하고, 이후에는 30분에 한 건입니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
+      '\n\n최근 20분 동안 처리가 없었으면 바로 시작하고, 이후에는 20분에 한 건입니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
   }
   renderQueue();
   openQueueModal();          // 등록 직후 현재 대기 순서를 바로 보여준다
@@ -2367,42 +2367,6 @@ document.querySelector('#sum-immersive-body .imm-text').addEventListener('scroll
   if (_immersive) _updateSumProgress(this);
 }, { passive: true });
 
-/* h3 소제목에서 목차 라벨(제목/시각) 추출 — ▸ 아이콘·.kf-time 제거 후 텍스트 */
-function _tocLabel(h3) {
-  const c = h3.cloneNode(true);
-  const ico = c.querySelector('.kf-ico'); if (ico) ico.remove();
-  const timeEl = c.querySelector('.kf-time');
-  const time = timeEl ? timeEl.textContent.trim() : '';
-  if (timeEl) timeEl.remove();
-  return { title: c.textContent.trim(), time };
-}
-
-/* 한눈 요약 다음(핵심 내용 머리말 뒤)에 소제목 목차 삽입 + 클릭 시 해당 위치로 스크롤.
-   일반/몰입 두 본문에서 각각 호출(container 기준으로 동작). */
-function _injectToc(container) {
-  if (!container) return;
-  const h3s = [...container.querySelectorAll('h3')];
-  if (h3s.length < 2) return;                       // 소제목 2개 미만이면 목차 불필요
-  const coreH2 = [...container.querySelectorAll('h2')]
-    .find(h => h.textContent.replace(/\s+/g, '').includes('핵심내용'));
-  const nav = document.createElement('details');    // 기본 접힘(open 미설정)
-  nav.className = 'sum-toc';
-  const items = h3s.map((h, i) => {
-    const { title, time } = _tocLabel(h);
-    return `<li><a href="#" data-toc="${i}"><span class="sum-toc-t">${esc(title)}</span>`
-         + (time ? `<span class="sum-toc-time">${esc(time)}</span>` : '') + `</a></li>`;
-  }).join('');
-  nav.innerHTML = `<summary class="sum-toc-hd"><span class="sum-toc-chev" aria-hidden="true">▸</span>목차`
-    + `<span class="sum-toc-count">${h3s.length}</span></summary>`
-    + `<ol class="sum-toc-list">${items}</ol>`;
-  if (coreH2) coreH2.after(nav); else h3s[0].before(nav);
-  nav.querySelectorAll('a[data-toc]').forEach(a => a.addEventListener('click', ev => {
-    ev.preventDefault();
-    const t = container.querySelectorAll('h3')[+a.dataset.toc];
-    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
-}
-
 async function openSummaryModal(itemId, title) {
   const overlay  = document.getElementById('sum-overlay');
   const bodyEl   = document.getElementById('sum-panel-body');
@@ -2429,7 +2393,7 @@ async function openSummaryModal(itemId, title) {
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
-    _injectToc(bodyEl);                                    // 목차 삽입(일반 보기)
+    YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
     bodyEl.scrollTop = 0;
     _updateSumProgress(bodyEl);
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
@@ -2465,6 +2429,7 @@ function _setImmersive(on) {
   const tmp = document.createElement('div');
   tmp.innerHTML = YS.renderMarkdown(_summaryMd);
   YS.applyTitleTranslation(tmp, _titleKo);                      // 몰입형에서도 제목은 번역본
+  YS.stripSummaryPopupChrome(tmp);
   const figs = [...tmp.querySelectorAll('.kf-strip figure')];   // 모든 캡처 수집(좌측으로)
   tmp.querySelectorAll('.kf-strip').forEach(s => s.remove());   // 본문에선 스트립 제거
   // 이미지가 모두 좌측으로 이동했으니 빈 '기타 자료 캡처' 부록 제목 제거
@@ -2477,7 +2442,6 @@ function _setImmersive(on) {
     ? `<div class="kf-strip">${figs.map(f => f.outerHTML).join('')}</div>`   // kf-strip 유지 → 라이트박스 동작
     : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
   txt.innerHTML = tmp.innerHTML;
-  _injectToc(txt);                     // 목차 삽입(몰입형 우측 본문)
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
   _updateSumProgress(txt);
 }

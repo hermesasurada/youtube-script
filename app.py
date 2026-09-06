@@ -108,7 +108,7 @@ WHISPER_EXE = os.environ.get("WHISPER_EXE", os.path.join(WHISPER_DIR, f"whisper-
 # turbo 계열은 어려운 오디오(다큐·다화자)에서 같은 문장을 수십 회 반복하는 환각으로
 # 구간을 통째로 날렸다 — 손실 세그먼트 q5_0 48 / turbo 213 / large-v3 16.
 # 양자화(q5_0)는 Metal에서 속도 이득이 없어(실측 동률) 정확도만 손해였다.
-# large-v3는 2.5배 느리지만 실시간 8.7배라 큐 주기(30분/건)에 여유가 크다.
+# large-v3는 2.5배 느리지만 실시간 8.7배라 큐 주기(20분/건)에 여유가 크다.
 MODEL_PATH  = os.environ.get("MODEL_PATH",  os.path.join(WHISPER_DIR, "ggml-large-v3.bin"))
 
 FFPROBE_EXE     = _resolve_binary("ffprobe")
@@ -2028,7 +2028,7 @@ def save_prompt():
 
 # ── 채널 자동 모니터링(로컬 전용 — 원격은 before_request에서 차단) ──────
 # ── 처리 큐 (단일 파이프라인 관리) ────────────────────────────────────
-# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(유휴면 즉시, 이후 30분에 1건).
+# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(유휴면 즉시, 이후 20분에 1건).
 
 _YT_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?[^#]*v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
@@ -2095,7 +2095,7 @@ def queue_preview():
                   "start_label": _format_duration(start_sec) if start_sec else ""})
 
 
-_QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "1800"))
+_QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "1200"))
 _MONITOR_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channel_monitor.py")
 _MONITOR_LOG_DIR = os.path.expanduser("~/Library/Logs/hermes")
 
@@ -2176,7 +2176,7 @@ def _attach_queue_eta(overview: dict) -> dict:
     # 본편 슬롯 시뮬레이션: 주기마다 '그 시점까지 줄에 선 항목'(pending +
     # 복귀 시각이 지난 deferred) 중 position이 가장 앞선 것이 처리된다.
     # deferred는 due가 돼야 복귀하므로, 단순 순번 곱으로는 순서가 어긋난다
-    # (재시도 간격 30분과 주기 30분이 같은 박자라 자주 겹친다).
+    # (재시도 간격과 처리 주기가 같은 박자라 자주 겹친다).
     main = [v for v in waiting if v.get("status") in ("pending", "deferred")]
     remain = list(main)
     t = base

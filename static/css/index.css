@@ -11,74 +11,74 @@
 
 :root {
   /* DARK */
-  --bg:        #131210;
-  --surface:   #1a1916;
-  --surface2:  #221f1a;
-  --border:    #2a2620;
-  --border-strong: #3a3530;
-  --text:      #ece7dc;
-  --muted:     #888178;
-  --subtle:    #5a5650;
-  --accent:    #ece7dc;        /* primary action: inverse-bg */
-  --accent-fg: #131210;
-  --accent2:   #c9c4ba;
-  --highlight: oklch(0.72 0.13 28);   /* warm terracotta — used sparingly */
-  --highlight-soft: oklch(0.72 0.13 28 / .14);
+  --bg:        #111214;
+  --surface:   #181a1d;
+  --surface2:  #22252a;
+  --border:    #2c3036;
+  --border-strong: #41464f;
+  --text:      #f4f4f5;
+  --muted:     #a1a1aa;
+  --subtle:    #71717a;
+  --accent:    #f4f4f5;        /* primary action: inverse-bg */
+  --accent-fg: #18181b;
+  --accent2:   #d4d4d8;
+  --highlight: #d8655d;        /* states + primary actions only */
+  --highlight-soft: rgba(216, 101, 93, .14);
   --success:   oklch(0.74 0.13 155);
   --error:     oklch(0.66 0.18 22);
   --warn:      oklch(0.78 0.14 75);
 
   --sidebar:   336px;
-  --radius:    2px;
-  --radius-lg: 3px;
-  --radius-sm: 2px;
+  --radius:    8px;
+  --radius-lg: 12px;
+  --radius-sm: 6px;
   --sum-ctrl-h: 30px;   /* 요약 모달 헤더 컨트롤 공통 높이 */
 
-  --log-bg:    #0e0d0b;
-  --log-text:  #888178;
-  --tag-bg:    #221f1a;
-  --scrollbar-thumb: #2e2a24;
-  --ghost-hover: #221f1a;
-  --pick-hover:  #2a2620;
-  --row-sel:     #221f1a;
-  --row-sel-hov: #2a2620;
+  --log-bg:    #0d0e10;
+  --log-text:  #a1a1aa;
+  --tag-bg:    #22252a;
+  --scrollbar-thumb: #3b4048;
+  --ghost-hover: #22252a;
+  --pick-hover:  #2c3036;
+  --row-sel:     #22252a;
+  --row-sel-hov: #2c3036;
   --err-banner:  oklch(0.28 0.07 22);
   --err-text:    oklch(0.86 0.05 22);
-  --glow:        0 0 0 2px var(--text);
+  --glow:        0 0 0 3px var(--highlight-soft);
 
   --font-sans: 'Pretendard Variable', 'Pretendard', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, ui-monospace, monospace;
 }
 
 [data-theme="light"] {
-  --bg:        #f6f3ec;
+  --bg:        #f6f7f9;
   --surface:   #ffffff;
-  --surface2:  #efebe1;
-  --border:    #e3ddd0;
-  --border-strong: #c8c0b0;
-  --text:      #1a1815;
-  --muted:     #807a6f;
-  --subtle:    #b3ad9f;
-  --accent:    #1a1815;
-  --accent-fg: #f6f3ec;
-  --accent2:   #2c2925;
-  --highlight: oklch(0.5 0.13 28);
-  --highlight-soft: oklch(0.5 0.13 28 / .1);
+  --surface2:  #f1f3f5;
+  --border:    #e4e4e7;
+  --border-strong: #c7c9cf;
+  --text:      #18181b;
+  --muted:     #71717a;
+  --subtle:    #a1a1aa;
+  --accent:    #18181b;
+  --accent-fg: #ffffff;
+  --accent2:   #3f3f46;
+  --highlight: #b83a3a;
+  --highlight-soft: rgba(184, 58, 58, .09);
   --success:   oklch(0.46 0.13 155);
   --error:     oklch(0.5 0.2 22);
   --warn:      oklch(0.65 0.14 75);
 
-  --log-bg:    #efebe1;
-  --log-text:  #5a5650;
-  --tag-bg:    #efebe1;
-  --scrollbar-thumb: #cdc6b6;
-  --ghost-hover: #ebe6d8;
-  --pick-hover:  #e3ddd0;
-  --row-sel:     #efebe1;
-  --row-sel-hov: #e8e2d3;
+  --log-bg:    #f1f3f5;
+  --log-text:  #52525b;
+  --tag-bg:    #f1f3f5;
+  --scrollbar-thumb: #c9ccd2;
+  --ghost-hover: #f1f3f5;
+  --pick-hover:  #e9ebef;
+  --row-sel:     #f1f3f5;
+  --row-sel-hov: #e9ebef;
   --err-banner:  oklch(0.94 0.03 22);
   --err-text:    oklch(0.42 0.18 22);
-  --glow:        0 0 0 2px var(--text);
+  --glow:        0 0 0 3px var(--highlight-soft);
 }
 
 html, body { height: 100%; overflow: hidden; }
@@ -128,14 +128,9 @@ header h1 {
   gap: .5rem;
 }
 header h1::before {
-  content: '';
-  display: inline-block;
-  width: 11px; height: 11px;
-  border-radius: 2px;
-  background: linear-gradient(135deg, var(--highlight), color-mix(in oklab, var(--highlight) 55%, var(--text)));
-  box-shadow: 0 0 0 3px var(--highlight-soft);
-  margin-right: .15rem;
+  content: none;
 }
+.app-logo { width: 21px; height: 15px; display: block; flex-shrink: 0; }
 header h1 em {
   color: var(--muted);
   font-style: normal;
@@ -166,18 +161,6 @@ header h1 em {
   white-space: nowrap;
 }
 .nav-link:hover { color: var(--text); background: var(--surface2); border-color: var(--border); }
-.tag {
-  font-size: 10.5px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: .18rem .6rem;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  letter-spacing: .01em;
-  font-weight: 500;
-}
-
 /* ── Workspace ── */
 .workspace { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 
@@ -2007,42 +1990,6 @@ a.hist-card-uploader:hover { color: var(--highlight); }
   font-family: var(--font-mono) !important;
 }
 
-/* ── 소제목 목차(한눈 요약 다음) — 접기/펼치기, 기본 접힘 ── */
-.sum-toc {
-  margin: 0 0 1.4rem;
-  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
-}
-.sum-toc-hd {
-  list-style: none; cursor: pointer; user-select: none;
-  display: flex; align-items: center; gap: .45rem;
-  padding: .42rem .6rem;
-  font-size: .66rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
-}
-.sum-toc-hd::-webkit-details-marker { display: none; }
-.sum-toc-hd:hover { color: var(--text); }
-.sum-toc-chev { font-size: .6rem; line-height: 1; transition: transform .15s; }
-.sum-toc[open] .sum-toc-chev { transform: rotate(90deg); }
-.sum-toc-count { font-family: var(--font-mono); font-weight: 600; letter-spacing: 0; opacity: .6; }
-.sum-toc-list {
-  list-style: none; margin: 0; padding: 0 .5rem .45rem 1.7rem; counter-reset: toc;
-  display: none; gap: 0; border-top: 1px solid var(--border);   /* 닫힘 기본 숨김(UA 의존 X) */
-}
-.sum-toc[open] .sum-toc-list { display: grid; }
-.sum-toc-list li:first-child { margin-top: .35rem; }
-.sum-toc-list a {
-  display: flex; align-items: baseline; gap: .5rem;
-  text-decoration: none; color: var(--muted); font-size: .82rem; line-height: 1.45;
-  padding: .16rem .3rem; border-radius: var(--radius-sm);
-  word-break: keep-all; transition: background .12s, color .12s;
-}
-.sum-toc-list a::before {
-  counter-increment: toc; content: counter(toc) ".";
-  flex-shrink: 0; min-width: 1.4em; text-align: right;
-  font-family: var(--font-mono); font-size: .68rem; opacity: .7;
-}
-.sum-toc-list a:hover { background: var(--surface); color: var(--highlight); }
-.sum-toc-t { flex: 1; min-width: 0; }
-.sum-toc-time { flex-shrink: 0; font-family: var(--font-mono); font-size: .7rem; opacity: .75; }
 .sum-panel.immersive { max-width: 1500px; width: 96vw; height: 92vh; max-height: 92vh; }
 .sum-immersive-body { flex: 1 1 auto; min-height: 0; display: flex; }
 .sum-immersive-body[hidden] { display: none !important; }
@@ -2379,3 +2326,141 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .q-ctl .q-cap-row { color: var(--muted); font-size: 10px; font-weight: 700; width: auto; padding: 0 .4rem; }
 .q-ctl .q-cap-row.on { color: var(--highlight, #2563eb); border-color: currentColor; }
 .q-ctl .q-requeue { width: auto; padding: 0 .55rem; font-size: 10.5px; font-weight: 700; }
+
+/* ── Neutral Editorial refresh ───────────────────────────────────────
+   기능과 정보 구조는 그대로 두고, 표면·간격·위계만 단순화한다. */
+header {
+  height: 56px;
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+header h1 { font-size: 15px; }
+.theme-btn { border-color: transparent; background: var(--surface2); }
+.tab-bar { background: var(--surface); }
+.tab { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+
+.history-toolbar {
+  padding: .7rem 1.5rem;
+  background: color-mix(in oklab, var(--bg) 90%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.history-filter-row { gap: .75rem; flex-wrap: nowrap; }
+.history-filter-group {
+  min-width: 0; display: flex; align-items: center; gap: .4rem;
+}
+.history-filter-primary { flex: 1 1 620px; }
+.history-filter-primary .hf-title-wrap { min-width: 140px; }
+.history-filter-state,
+.history-filter-manage {
+  flex: 0 0 auto; padding-left: .75rem; border-left: 1px solid var(--border);
+}
+.history-filter-manage .history-count { min-width: 38px; }
+.history-filter-row .btn-sm,
+.history-filter-row .hf-uploader,
+.history-filter-row .hf-sort-toggle,
+.history-filter-row .hf-title,
+.history-filter-row .hf-unread-btn {
+  border-color: transparent;
+  background: var(--surface);
+}
+.history-filter-row .hf-title { border-color: var(--border); }
+.history-filter-row button:hover,
+.history-filter-row select:hover { border-color: var(--border-strong); }
+
+.hist-grid { gap: 1rem; padding-top: 1rem; }
+.hist-card {
+  border-radius: 10px;
+  box-shadow: none;
+  transition: border-color .16s, transform .16s, box-shadow .16s;
+}
+.hist-card-clickable:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px -20px rgba(0, 0, 0, .45);
+}
+.hist-card-unread { border-left: 1px solid var(--border); }
+.hist-card-body { gap: .55rem; padding: .9rem 1rem 1rem; }
+.hist-card-title { font-size: 14px; min-height: 2.8em; }
+.hist-icon-btn {
+  width: 30px; height: 30px; border-color: transparent;
+  border-radius: var(--radius-sm); background: var(--surface2);
+}
+.hist-icon-btn-summary {
+  color: var(--highlight); border-color: transparent; background: var(--highlight-soft);
+}
+.hist-bm-btn { border-radius: var(--radius); }
+.hist-thumb-dur { border-radius: 5px; }
+
+.sum-overlay { background: rgba(10, 12, 15, .58); backdrop-filter: blur(5px); }
+.sum-panel { max-width: 960px; border-radius: var(--radius-lg); }
+.sum-panel-hdr { gap: .55rem; padding: .75rem 1rem; }
+.sum-panel-badge {
+  border: 0; border-radius: 999px; padding: .22rem .55rem;
+  background: var(--highlight-soft); font-family: var(--font-sans); font-weight: 700;
+}
+.sum-tool-group { display: inline-flex; align-items: center; gap: .35rem; min-width: 0; }
+.sum-reading-tools { padding-right: .7rem; border-right: 1px solid var(--border); }
+.sum-action-tools { margin-left: auto; }
+.sum-distill-ctrl { margin-left: 0; }
+.sum-panel-close { border-color: transparent; background: var(--surface2); }
+.sum-fs-ctrl,
+.sum-font-ctrl,
+.sum-blogger-btn,
+.sum-immersive-btn,
+.sum-distill-ctrl { border-color: transparent; background: var(--surface2); }
+.sum-primary-action {
+  background: var(--highlight); color: #fff; border-color: var(--highlight);
+}
+.sum-primary-action:hover {
+  background: color-mix(in oklab, var(--highlight) 86%, var(--text));
+  color: #fff; border-color: transparent;
+}
+.sum-panel-body { padding-left: 2.5rem; padding-right: 2.5rem; }
+#sum-panel-body > :not(.sum-head-sticky),
+#sum-panel-body > .sum-head-sticky > * {
+  width: 100%; max-width: none;
+}
+.sum-md blockquote { border-left-width: 2px; background: var(--surface2); }
+
+#channels-panel { max-width: 560px; }
+.model-order-card { background: var(--surface2); border: 0; padding: .8rem; }
+.model-order-select { background-color: var(--surface); }
+.channels-queue { border: 0; border-radius: var(--radius); }
+.channels-list { gap: 0; border-top: 1px solid var(--border); }
+.channel-list-head,
+.channel-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 48px 48px 42px;
+  align-items: center; gap: .45rem;
+}
+.channel-list-head {
+  padding: .45rem .65rem; color: var(--muted); font-size: 10px;
+  font-weight: 700; letter-spacing: .04em; text-align: center;
+}
+.channel-list-head span:first-child { text-align: left; }
+.channel-row {
+  padding: .65rem; border: 0; border-top: 1px solid var(--border); border-radius: 0;
+}
+.channel-row:first-of-type { border-top: 0; }
+.channel-distill { justify-self: center; }
+.channel-toggle { justify-self: end; }
+
+:where(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--highlight); outline-offset: 2px;
+}
+
+@media (max-width: 1240px) {
+  .history-filter-row { flex-wrap: wrap; }
+  .history-filter-primary { flex-basis: 100%; }
+  .history-filter-state { padding-left: 0; border-left: 0; }
+  .history-filter-manage { margin-left: auto; }
+}
+@media (max-width: 980px) {
+  .sum-panel-hdr { flex-wrap: wrap; }
+  .sum-action-tools { order: 3; width: 100%; margin-left: 0; }
+  .sum-panel-close { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

@@ -910,8 +910,10 @@ def queue_claim_kf_retry() -> dict | None:
 
 
 def get_item_by_yt_id(yt_id: str) -> dict | None:
-    r = _conn().execute("SELECT md_path, title FROM items WHERE yt_id = ? LIMIT 1",
-                        (yt_id,)).fetchone()
+    r = _conn().execute(
+        "SELECT md_path, summary_path, title FROM items WHERE yt_id = ? LIMIT 1",
+        (yt_id,),
+    ).fetchone()
     return dict(r) if r else None
 
 
@@ -1186,6 +1188,26 @@ def queue_recover_stale(stale_seconds: int = 10800) -> int:
                 WHERE status = 'processing'
                   AND COALESCE(claimed_at, updated_at, '') < ?""",
             (now, now, cutoff),
+        )
+        return cur.rowcount
+
+
+def queue_recover_interrupted() -> int:
+    """독점 모니터 락을 새로 얻은 프로세스가 고아 processing을 즉시 복구한다.
+
+    watch_queue를 claim하는 주체는 단일 인스턴스 channel_monitor뿐이다. 따라서
+    모니터 락을 획득한 직후 남아 있는 processing 행은 이전 프로세스/시스템 종료로
+    끊긴 작업이다. pending으로 되돌리되 txt_path는 보존해 완료된 전사를 재사용한다.
+    """
+    now = _now()
+    with _lock:
+        cur = _conn().execute(
+            """UPDATE watch_queue
+                  SET status = 'pending', reason = '중단된 작업 즉시 복구',
+                      error_kind = 'worker_interrupted', next_retry_at = NULL,
+                      claimed_at = NULL, updated_at = ?
+                WHERE status = 'processing'""",
+            (now,),
         )
         return cur.rowcount
 

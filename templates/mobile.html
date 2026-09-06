@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
   <title>유튜브 전사내역</title>
   <!-- 작은 로컬 marked는 선로드하고, 본문용 웹폰트·KaTeX는 요약 뒤에 로딩한다. -->
   <style>
@@ -16,32 +16,32 @@
       font-display: swap;
     }
     :root {
-      --bg:        #f7f7f8;
+      --bg:        #f6f7f9;
       --surface:   #ffffff;
-      --surface2:  #ececef;
-      --text:      #1a1a1c;
-      --muted:     #6b6b73;
-      --border:    #e2e2e6;
-      --border-strong: #c8c8cf;
-      --highlight: #b07a25;
-      --highlight-soft: rgba(176,122,37,.10);
-      --radius:    2px;
-      --radius-sm: 2px;
-      --row-sel:   rgba(176,122,37,.12);
+      --surface2:  #f1f3f5;
+      --text:      #18181b;
+      --muted:     #71717a;
+      --border:    #e4e4e7;
+      --border-strong: #c7c9cf;
+      --highlight: #b83a3a;
+      --highlight-soft: rgba(184,58,58,.09);
+      --radius:    8px;
+      --radius-sm: 6px;
+      --row-sel:   rgba(184,58,58,.09);
       --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg:        #0f0f10;
-        --surface:   #1a1a1c;
-        --surface2:  #232326;
-        --text:      #ececef;
-        --muted:     #9a9aa2;
-        --border:    #2c2c30;
-        --border-strong: #3d3d42;
-        --highlight: #e0a64a;
-        --highlight-soft: rgba(224,166,74,.14);
-        --row-sel:   rgba(224,166,74,.16);
+        --bg:        #111214;
+        --surface:   #181a1d;
+        --surface2:  #22252a;
+        --text:      #f4f4f5;
+        --muted:     #a1a1aa;
+        --border:    #2c3036;
+        --border-strong: #41464f;
+        --highlight: #d8655d;
+        --highlight-soft: rgba(216,101,93,.14);
+        --row-sel:   rgba(216,101,93,.14);
       }
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -56,16 +56,16 @@
       display: flex; align-items: center; gap: .6rem;
       padding: env(safe-area-inset-top) .9rem .55rem;
       padding-top: max(env(safe-area-inset-top), .55rem);
-      background: color-mix(in oklab, var(--bg) 88%, transparent);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: color-mix(in oklab, var(--surface) 90%, transparent);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--border);
     }
     .topbar h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.01em; flex: 1; }
     .topbar .count { font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); }
     .icon-btn {
-      width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
-      border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+      width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid transparent; border-radius: var(--radius); background: var(--surface2);
       color: var(--text); cursor: pointer;
     }
     .icon-btn:active { background: var(--surface2); }
@@ -200,7 +200,7 @@
     .hist-icon-btn:disabled, .hist-icon-btn[disabled] { opacity: .3; pointer-events: none; }
 
     /* 읽음 여부 */
-    .hist-card-unread { border-left: 3px solid var(--highlight); }
+    .hist-card-unread { border-left: 1px solid var(--border); }
     .hist-unread-dot {
       width: 7px; height: 7px;
       background: var(--highlight);
@@ -517,6 +517,32 @@
     .modal-body.transcript {
       white-space: pre-wrap; word-break: break-word;
       font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+    }
+    /* Neutral Editorial: 반복 테두리를 줄이고 상태/주요 행동에만 강조색을 쓴다. */
+    .hist-card { border-radius: 10px; }
+    .hist-icon-btn { border-color: transparent; background: var(--surface2); }
+    .hist-icon-btn-summary { border-color: transparent; }
+    .modal-hdr { padding: .65rem .85rem; }
+    .ch-queue, .model-order-card { border: 0; background: var(--surface2); }
+    .model-order-select { background-color: var(--surface); }
+    .ch-list-head,
+    .ch-row {
+      display: grid; grid-template-columns: minmax(0, 1fr) 50px 50px 46px;
+      align-items: center; gap: .35rem;
+    }
+    .ch-list-head {
+      padding: .35rem .7rem; color: var(--muted); font-size: 10px;
+      font-weight: 700; letter-spacing: .04em; text-align: center;
+    }
+    .ch-list-head span:first-child { text-align: left; }
+    .ch-row { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: .7rem; }
+    .ch-distill { justify-self: center; margin-right: 0; }
+    .ch-toggle { justify-self: end; }
+    :where(button, input, select, textarea, a):focus-visible {
+      outline: 2px solid var(--highlight); outline-offset: 2px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }
   </style>
 </head>
@@ -1038,7 +1064,7 @@ async function loadQueueM() {
        <button type="button" class="mq-cap-chip on" id="mq-add-distill-btn" role="switch" aria-checked="true"
                onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">지식 증류 포함</button>
        <div class="mq-add-pv" id="mq-add-pv"></div>`
-      + `<p class="ch-hint">유휴면 바로 시작, 이후 30분에 본편 1건 + 캡처 1건.</p>`
+      + `<p class="ch-hint">유휴면 바로 시작, 이후 20분에 본편 1건 + 캡처 1건.</p>`
       + `<div class="mq-sec">본편 대기 · ${main.length}건</div>`
       + (main.map(v => row(v, ++n, v.status === 'pending')).join('')
          || '<div class="ch-empty">대기 중인 영상이 없습니다.</div>')
@@ -1197,7 +1223,7 @@ async function loadChannels() {
     if (q.failed)     parts.push(`실패 ${q.failed}`);
     const qline = parts.length ? '큐: ' + parts.join(' · ') : '큐 비어있음';
     const chans = d.channels || [];
-    const rows = chans.length ? chans.map(c => {
+    const rows = chans.length ? `<div class="ch-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></div>` + chans.map(c => {
       const on = !!c.enabled;
       const sub = (c.handle ? '@' + c.handle : c.channel_id) +
                   (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
@@ -1355,6 +1381,7 @@ async function openSummary(itemId, title) {
       $('modal-body').className = 'modal-body markdown';
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
+      YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
       $('tg-btn').hidden = !_summaryMd;   // 요약을 실제로 불러온 뒤에만 노출
       $('pub-btn').hidden = !_summaryMd; _setPubBtnM(d.blog_url);
       $('rfm-btn').hidden = !_summaryMd;

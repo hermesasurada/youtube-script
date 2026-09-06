@@ -605,6 +605,16 @@
     return true;
   }
 
+  /** 요약 원문은 보존하고 팝업에서만 중복 안내 요소를 제거한다. */
+  function stripSummaryPopupChrome(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('.sum-toc').forEach(el => el.remove());
+    [...rootEl.querySelectorAll('h2')].forEach(h => {
+      const label = h.textContent.replace(/\s+/g, '').replace(/^\d+[.)]?/, '');
+      if (label === '핵심내용') h.remove();
+    });
+  }
+
   global.YS = {
     renderMarkdown,
     mdToBloggerHtml,
@@ -621,6 +631,7 @@
     apiPublishBlog,
     ensureReaderAssets,
     applyTitleTranslation,
+    stripSummaryPopupChrome,
   };
 
   // ── 키프레임 스트립(가로 스크롤) + 라이트박스(원본 보기) ────────────

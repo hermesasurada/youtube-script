@@ -49,16 +49,14 @@ POLL_SEC   = int(os.environ.get("MONITOR_POLL_SEC", "6"))         # /result 폴�
 MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "18000"))  # 건당 전사 상한(5h) — 4시간대 장편(Acquired 등) 수용
 SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
 KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
-STALE_PROCESSING_SEC = int(os.environ.get("MONITOR_STALE_PROCESSING_SEC", "10800"))
-# 403 차단은 저녁 시간대(15~23시)에 몰리는데, 3회 예산은 백오프(30분→1h→2h)가
-# 전부 한 차단 구간 안에 떨어져 소진되는 일이 있었다. 5회면 마지막 시도가
-# 첫 실패로부터 ~13시간 뒤라 다른 시간대에 걸린다.
+# 403 차단은 저녁 시간대(15~23시)에 몰리는 경우가 있어 3회보다 넉넉한
+# 5회 예산을 둔다. 짧은 일시 장애는 20분 간격으로 빠르게 따라잡는다.
 MAX_PIPELINE_ATTEMPTS = int(os.environ.get("MONITOR_MAX_PIPELINE_ATTEMPTS", "5"))
-# 파이프라인 실패 재시도 간격 — 30분 고정(사용자 지정).
-# 예산 5회 × 30분 = 첫 실패로부터 2시간 안에 전부 소진되므로, 저녁 차단
+# 파이프라인 실패 재시도 간격 — 처리 주기와 같은 20분 고정.
+# 예산 5회 × 20분이라 짧은 일시 장애는 빠르게 따라잡고, 저녁 차단
 # 구간(15~23시)을 통째로 건너뛰지는 못한다. 대신 회복이 빠른 일시 장애를
 # 빨리 따라잡고, 구간을 넘겨야 하는 건은 실패 후 수동 재처리한다.
-RETRY_BASE_SEC = int(os.environ.get("MONITOR_RETRY_BASE_SEC", "1800"))
+RETRY_BASE_SEC = int(os.environ.get("MONITOR_RETRY_BASE_SEC", "1200"))
 
 
 def _retry_delay(attempt: int) -> int:
@@ -487,6 +485,16 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     """
     url = v["url"]
     txt_path = v.get("txt_path")
+    # 전사는 디스크와 items에 저장됐지만 monitor가 txt_path를 큐에 기록하기 전에
+    # 재시작됐을 수 있다. 같은 영상의 완성 전사본을 찾아 불필요한 재다운로드와
+    # Whisper 재실행을 피한다.
+    if (not txt_path or not os.path.isfile(txt_path)) and v.get("yt_id"):
+        saved = db.get_item_by_yt_id(v["yt_id"])
+        saved_path = (saved or {}).get("md_path")
+        if saved_path and os.path.isfile(saved_path):
+            txt_path = saved_path
+            db.queue_set_txt_path(v["id"], txt_path)
+            log(f"[resume] DB에서 완성 전사 복구: {os.path.basename(txt_path)}")
     if not txt_path or not os.path.isfile(txt_path):
         payload = {"source": "url", "url": url}
         if v.get("start_sec"):
@@ -812,9 +820,6 @@ def main() -> int:
         return 0
 
     db.init()
-    recovered = db.queue_recover_stale(STALE_PROCESSING_SEC)
-    if recovered:
-        log(f"[recover] 중단된 processing {recovered}건 → deferred")
 
     if args.dry_run:
         n = poll_channels(dry=True)
@@ -828,6 +833,12 @@ def main() -> int:
         return 0
 
     try:
+        # 이 락을 잡은 프로세스만 watch_queue를 claim한다. 따라서 락 획득 시점에
+        # 남아 있는 processing은 이전 프로세스/재부팅으로 끊긴 고아 작업이다.
+        # stale 대기 없이 즉시 pending으로 되돌려 이번 주기에 이어서 처리한다.
+        recovered = db.queue_recover_interrupted()
+        if recovered:
+            log(f"[recover] 중단된 processing {recovered}건 → pending (즉시 재개)")
         if not args.drain_only:
             q = poll_channels()
             log(f"[poll] 신규 적재 {q}건, 큐: {db.queue_counts()}")

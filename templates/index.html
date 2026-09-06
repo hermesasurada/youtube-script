@@ -14,8 +14,7 @@
 <body class="{% if remote %}remote-mode{% endif %}">
 
 <header>
-  <h1>YouTube <em>Transcription</em></h1>
-  <span class="tag">whisper.cpp</span>
+  <h1><svg class="app-logo" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="5" fill="#ff0033"/><path d="M11 6l8 4-8 4z" fill="#fff"/></svg>YouTube <em>Transcription</em></h1>
   <span class="kf-status-badge" id="kf-status" hidden></span>
   <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="라이트/다크 전환">◐</button>
 </header>
@@ -114,32 +113,38 @@
         <div class="history-list-section">
           <div class="history-toolbar">
             <div class="history-filter-row">
-              <button class="btn-sm btn-ghost" onclick="loadHistory(true)" title="새로고침">새로고침</button>
-              <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
-                <option value="">전체 업로더</option>
-              </select>
-              <button id="hf-sortkey-btn" type="button" class="hf-sort-toggle hf-sortkey-toggle" onclick="toggleHistorySortKey()" title="전사 처리일 기준 (클릭하면 영상 게시일로)">전사처리일</button>
-              <button id="hf-sort-btn" type="button" class="hf-sort-toggle" onclick="toggleHistorySort()" title="정렬 순서 전환(최신순 ↔ 과거순)">최신순 ↓</button>
-              <div class="hf-title-wrap">
-                <input type="text" id="hf-title" class="hf-title" placeholder="제목 검색..." oninput="applyHistoryFilter()">
-                <button class="hf-clear-btn" id="hf-clear-btn" onclick="clearTitleSearch()" title="지우기">✕</button>
+              <div class="history-filter-group history-filter-primary">
+                <button class="btn-sm btn-ghost" onclick="loadHistory(true)" title="새로고침">새로고침</button>
+                <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" title="업로더 필터">
+                  <option value="">전체 업로더</option>
+                </select>
+                <button id="hf-sortkey-btn" type="button" class="hf-sort-toggle hf-sortkey-toggle" onclick="toggleHistorySortKey()" title="전사 처리일 기준 (클릭하면 영상 게시일로)">전사처리일</button>
+                <button id="hf-sort-btn" type="button" class="hf-sort-toggle" onclick="toggleHistorySort()" title="정렬 순서 전환(최신순 ↔ 과거순)">최신순 ↓</button>
+                <div class="hf-title-wrap">
+                  <input type="text" id="hf-title" class="hf-title" placeholder="제목 검색..." oninput="applyHistoryFilter()">
+                  <button class="hf-clear-btn" id="hf-clear-btn" onclick="clearTitleSearch()" title="지우기">✕</button>
+                </div>
               </div>
-              <button class="hf-unread-btn" id="hf-bookmark-btn" onclick="toggleBookmarkFilter()" title="북마크된 영상만 보기">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-                북마크만
-              </button>
-              <button class="hf-unread-btn" id="hf-unread-btn" onclick="toggleUnreadFilter()" title="미읽음만 보기">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                미읽음만
-              </button>
-              <button class="btn-sm btn-ghost" onclick="resetHistoryFilter()" title="검색 초기화">초기화</button>
-              <button class="btn-sm btn-ghost" onclick="openQueueModal()"
-                      title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
-              <button class="btn-sm btn-ghost" onclick="openChannelsModal()"
-                      title="신규 영상 자동 전사·요약 채널 관리">📡 채널 모니터</button>
-              <button class="btn-sm btn-ghost" onclick="openPromptModal()"
-                      title="요약 프롬프트 (원격에서는 읽기 전용)">✎ 프롬프트</button>
-              <span class="history-count" id="history-count">—</span>
+              <div class="history-filter-group history-filter-state">
+                <button class="hf-unread-btn" id="hf-bookmark-btn" onclick="toggleBookmarkFilter()" title="북마크된 영상만 보기">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                  북마크만
+                </button>
+                <button class="hf-unread-btn" id="hf-unread-btn" onclick="toggleUnreadFilter()" title="미읽음만 보기">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  미읽음만
+                </button>
+                <button class="btn-sm btn-ghost" onclick="resetHistoryFilter()" title="검색 초기화">초기화</button>
+              </div>
+              <div class="history-filter-group history-filter-manage">
+                <button class="btn-sm btn-ghost" onclick="openQueueModal()"
+                        title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
+                <button class="btn-sm btn-ghost" onclick="openChannelsModal()"
+                        title="신규 영상 자동 전사·요약 채널 관리">📡 채널 모니터</button>
+                <button class="btn-sm btn-ghost" onclick="openPromptModal()"
+                        title="요약 프롬프트 (원격에서는 읽기 전용)">✎ 프롬프트</button>
+                <span class="history-count" id="history-count">—</span>
+              </div>
             </div>
           </div>
           <div id="history-empty" class="history-empty" style="display:none">이력이 없습니다.</div>
@@ -158,32 +163,36 @@
     <div class="sum-progress" id="sum-progress"></div>
     <div class="sum-panel-hdr">
       <span class="sum-panel-badge">요약</span>
-      <span class="sum-fs-ctrl" title="본문 글자크기 조절">
-        <button class="sum-fs-btn" onclick="adjustReaderFs(-1)" aria-label="글자 작게">−</button>
-        <button class="sum-fs-btn" onclick="adjustReaderFs(1)" aria-label="글자 크게">+</button>
-      </span>
-      <label class="sum-font-ctrl" title="본문 글꼴">
-        <select id="sum-font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
-          <option value="sans">Noto Sans KR</option>
-          <option value="pretendard">Pretendard</option>
-          <option value="chosun">조선일보명조</option>
-          <option value="serif">Noto Serif KR</option>
-          <option value="gowun">고운바탕</option>
-          <option value="nanum">나눔명조</option>
-          <option value="song">송명</option>
-          <option value="system">시스템</option>
-          <option value="mono">고정폭</option>
-        </select>
-      </label>
-      <button class="sum-blogger-btn" id="sum-publish-btn" onclick="publishSummaryToBlog(this)"
-              title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">📤 <span class="pub-label">블로그 발행</span></button>
-      <button class="sum-blogger-btn" id="sum-telegram-btn" onclick="copySummaryForTelegram(this)"
-              title="같은 본문을 텔레그램에서 읽기 좋은 형태(굵은 소제목·줄바꿈)로 클립보드에 복사">✈️ <span class="tg-label">텔레그램용 복사</span></button>
-      <button class="sum-blogger-btn" id="sum-refresh-btn" onclick="refreshItemMeta(this)"
-              title="제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(가져오지 못하면 기존 유지)">🔄 <span class="rfm-label">메타 갱신</span></button>
-      <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
-      <button class="sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
-              aria-label="증류 대상 전환">증류 —</button>
+      <div class="sum-tool-group sum-reading-tools" aria-label="읽기 설정">
+        <span class="sum-fs-ctrl" title="본문 글자크기 조절">
+          <button class="sum-fs-btn" onclick="adjustReaderFs(-1)" aria-label="글자 작게">−</button>
+          <button class="sum-fs-btn" onclick="adjustReaderFs(1)" aria-label="글자 크게">+</button>
+        </span>
+        <label class="sum-font-ctrl" title="본문 글꼴">
+          <select id="sum-font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
+            <option value="sans">Noto Sans KR</option>
+            <option value="pretendard">Pretendard</option>
+            <option value="chosun">조선일보명조</option>
+            <option value="serif">Noto Serif KR</option>
+            <option value="gowun">고운바탕</option>
+            <option value="nanum">나눔명조</option>
+            <option value="song">송명</option>
+            <option value="system">시스템</option>
+            <option value="mono">고정폭</option>
+          </select>
+        </label>
+        <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
+      </div>
+      <div class="sum-tool-group sum-action-tools" aria-label="요약 처리 및 공유">
+        <button class="sum-blogger-btn sum-primary-action" id="sum-publish-btn" onclick="publishSummaryToBlog(this)"
+                title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">📤 <span class="pub-label">블로그 발행</span></button>
+        <button class="sum-blogger-btn" id="sum-telegram-btn" onclick="copySummaryForTelegram(this)"
+                title="같은 본문을 텔레그램에서 읽기 좋은 형태(굵은 소제목·줄바꿈)로 클립보드에 복사">✈️ <span class="tg-label">텔레그램용 복사</span></button>
+        <button class="sum-blogger-btn" id="sum-refresh-btn" onclick="refreshItemMeta(this)"
+                title="제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(가져오지 못하면 기존 유지)">🔄 <span class="rfm-label">메타 갱신</span></button>
+        <button class="sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
+                aria-label="증류 대상 전환">증류 —</button>
+      </div>
       <button class="sum-panel-close" onclick="closeSummaryModal()" title="닫기">×</button>
     </div>
     <div class="sum-panel-body sum-md" id="sum-panel-body"></div>
