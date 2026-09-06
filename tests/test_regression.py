@@ -172,6 +172,7 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     summary_payload = client.post("/summary/content", json={"item_id": item["item_id"]}).get_json()
     assert "요약 본문" in summary_payload["content"]
     assert summary_payload["is_read"] is False
+    assert summary_payload["webpage_url"] == "https://youtu.be/LIGHTAPI01"
 
     marked = client.patch(
         "/history/mark_read", json={"item_id": item["item_id"], "is_read": True}

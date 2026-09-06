@@ -2641,7 +2641,8 @@ def summary_content():
         return _json({"content": content, "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),
                       "is_read": bool((item or {}).get("is_read")),
-                      "blog_url": (item or {}).get("blog_url") or ""})   # 뷰어 버튼 초기 상태(📤/🔗)
+                      "blog_url": (item or {}).get("blog_url") or "",
+                      "webpage_url": (item or {}).get("webpage_url") or ""})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 

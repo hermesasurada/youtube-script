@@ -268,6 +268,16 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .modal-title { display: none; }
+    .modal-youtube-link {
+      margin-left: auto; flex-shrink: 0; height: 32px; padding: 0 .6rem;
+      display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+      border: 1px solid transparent; border-radius: var(--radius-sm);
+      background: var(--surface2); color: #c00; text-decoration: none;
+      font-size: 11.5px; font-weight: 600; white-space: nowrap;
+    }
+    .modal-youtube-link[hidden] { display: none; }
+    .modal-youtube-link:active { background: #c00; color: #fff; }
+    @media (prefers-color-scheme: dark) { .modal-youtube-link { color: #ff5a5a; } }
     /* 읽기 진행바(헤더 아래, 스크롤에 따라 채워짐) */
     .read-progress {
       flex-shrink: 0; height: 3px; width: 0%;
@@ -530,7 +540,7 @@
     /* 관리 화면: 큐·채널 모니터를 본문 리더와 분리한 간결한 유틸리티 UI */
     .modal.utility .modal-hdr { min-height: 58px; background: var(--surface); }
     .modal.utility .modal-title { display: block; letter-spacing: -.01em; }
-    .modal.utility :is(.font-ctrl, .fs-ctrl, .summary-actions) { display: none !important; }
+    .modal.utility :is(.font-ctrl, .fs-ctrl, .modal-youtube-link, .summary-actions) { display: none !important; }
     .modal.utility .read-progress { display: none; }
     .modal.utility .modal-body { background: var(--bg); padding: .85rem .9rem 1.5rem; }
     .modal-body.queue, .modal-body.channels { display: flex; flex-direction: column; gap: .75rem; }
@@ -600,6 +610,7 @@
       background: var(--surface2); color: var(--muted); font: inherit; font-size: 11.5px;
       line-height: 1; white-space: nowrap; cursor: pointer;
     }
+    .summary-action-btn svg { display: block; flex-shrink: 0; }
     .summary-actions .distill-ctrl { margin-left: 0; }
     .summary-action-btn.primary { margin-left: auto; background: var(--highlight); color: #fff; }
     .summary-action-btn.active,
@@ -658,6 +669,11 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
       </button>
       <h2 class="modal-title" id="modal-title"></h2>
+      <a class="modal-youtube-link" id="modal-youtube-link" href="#" target="_blank"
+         rel="noopener noreferrer" aria-label="YouTube에서 보기" hidden>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>
+        <span>YouTube</span>
+      </a>
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
         <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
           <option value="sans">Noto Sans KR</option>
@@ -680,13 +696,20 @@
     <div class="modal-body" id="modal-body"></div>
     <footer class="summary-actions" id="summary-actions" hidden>
       <button class="summary-action-btn" id="summary-read-btn" onclick="toggleSummaryReadM(this)">
-        <span class="read-icon">○</span><span class="read-label">읽음 처리</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="read-label">읽음 처리</span>
       </button>
       <button class="summary-action-btn" id="rfm-btn" onclick="refreshItemMeta(this)"
-              title="제목·썸네일 갱신"><span class="action-label">🔄 메타 갱신</span></button>
+              title="제목·썸네일 갱신">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg>
+        <span class="action-label">메타 갱신</span>
+      </button>
       <button class="distill-ctrl" id="distill-ctrl" onclick="cycleItemDistill()" aria-label="증류 대상 전환">증류 —</button>
       <button class="summary-action-btn primary" id="pub-btn" onclick="publishToBlog(this)"
-              title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)"><span class="action-label">📤 블로그 발행</span></button>
+              title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+        <span class="action-label">블로그 발행</span>
+      </button>
     </footer>
   </div>
 
@@ -997,6 +1020,8 @@ function openModal(title, kind = 'content') {
   $('modal-body').className = 'modal-body';
   $('modal-body').scrollTop = 0;
   $('summary-actions').hidden = true;
+  $('modal-youtube-link').hidden = true;
+  $('modal-youtube-link').href = '#';
   $('modal-title').textContent = title || '';
   $('modal').classList.toggle('utility', kind === 'utility');
   $('read-progress').style.width = '0%';   // 열 때 진행바 초기화
@@ -1472,7 +1497,6 @@ function _setSummaryReadUIM(isRead) {
   _summaryReadM = !!isRead;
   const btn = $('summary-read-btn');
   btn.classList.toggle('active', _summaryReadM);
-  btn.querySelector('.read-icon').textContent = _summaryReadM ? '✓' : '○';
   btn.querySelector('.read-label').textContent = _summaryReadM ? '읽음' : '읽음 처리';
   btn.title = _summaryReadM ? '읽음 상태입니다. 탭하면 안읽음으로 변경' : '읽음으로 표시';
 }
@@ -1520,6 +1544,8 @@ async function openSummary(itemId, title) {
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
+      $('modal-youtube-link').href = d.webpage_url || '#';
+      $('modal-youtube-link').hidden = !d.webpage_url;
       _setSummaryReadUIM(d.is_read);
       _setPubBtnM(d.blog_url);
       _setDistillUI(d.distill);
@@ -1560,19 +1586,19 @@ async function refreshItemMeta(btn) {
       });
     }
     if (changed.length) {
-      setLbl('✓');
+      setLbl('갱신됨');
       if (typeof loadHistory === 'function') loadHistory(true);
     } else if (res && res.notes && res.notes.length) {
-      setLbl('✗'); console.warn('[refresh-meta]', res.notes.join(' / '));
+      setLbl('갱신 실패'); console.warn('[refresh-meta]', res.notes.join(' / '));
     } else {
-      setLbl('=');   // 변경 없음
+      setLbl('변경 없음');
     }
   } catch (e) {
     console.warn('[refresh-meta] 실패', e);
-    setLbl('✗');
+    setLbl('갱신 실패');
   } finally {
     if (btn) btn.disabled = false;
-    setTimeout(() => setLbl('🔄 메타 갱신'), 2000);
+    setTimeout(() => setLbl('메타 갱신'), 2000);
   }
 }
 
@@ -1635,7 +1661,7 @@ let _blogUrl = '';
 function _setPubBtnM(url) {
   _blogUrl = url || '';
   const b = $('pub-btn'); if (!b) return;
-  b.querySelector('.action-label').textContent = _blogUrl ? '🔗 블로그에서 보기' : '📤 블로그 발행';
+  b.querySelector('.action-label').textContent = _blogUrl ? '블로그에서 보기' : '블로그 발행';
   b.className = _blogUrl ? 'summary-action-btn primary done' : 'summary-action-btn primary';
   b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.disabled = false;
@@ -1650,8 +1676,8 @@ async function publishToBlog(btn) {
   try {
     const d = await YS.apiPublishBlog(_summaryItemId, title, html);
     if (d && (d.status === 'ok' || d.status === 'exists')) { _setPubBtnM(d.url); if (typeof loadHistory === 'function') loadHistory(true); return; }
-    lbl.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패'; btn.className = 'summary-action-btn err'; console.warn('[blog]', d);
-  } catch (e) { lbl.textContent = '발행 실패'; btn.className = 'summary-action-btn err'; }
+    lbl.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패'; btn.className = 'summary-action-btn primary err'; console.warn('[blog]', d);
+  } catch (e) { lbl.textContent = '발행 실패'; btn.className = 'summary-action-btn primary err'; }
   setTimeout(() => _setPubBtnM(''), 2200);
 }
 

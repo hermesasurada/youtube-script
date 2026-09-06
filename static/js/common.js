@@ -516,6 +516,14 @@
   function stripSummaryPopupChrome(rootEl) {
     if (!rootEl) return;
     rootEl.querySelectorAll('.sum-toc').forEach(el => el.remove());
+    // YouTube 링크는 팝업 최상단 액션으로 제공하므로 본문 메타에서 중복 제거한다.
+    rootEl.querySelectorAll('.ys-chip-link').forEach(el => el.remove());
+    rootEl.querySelectorAll('.ys-meta-row').forEach(row => {
+      if (!row.children.length) row.remove();
+    });
+    rootEl.querySelectorAll('.ys-meta').forEach(meta => {
+      if (!meta.children.length) meta.remove();
+    });
     [...rootEl.querySelectorAll('h2')].forEach(h => {
       const label = h.textContent.replace(/\s+/g, '').replace(/^\d+[.)]?/, '');
       if (label === '핵심내용') h.remove();

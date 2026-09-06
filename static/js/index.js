@@ -2132,6 +2132,14 @@ let _titleKo = '';        // 현재 열린 요약의 번역 제목(외국어 제
 let _summaryItemId = 0;   // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
 let _summaryRead = false;
 
+function _setSummaryYouTubeLink(url) {
+  const link = document.getElementById('sum-youtube-link');
+  if (!link) return;
+  const href = String(url || '').trim();
+  link.hidden = !href;
+  link.href = href || '#';
+}
+
 let _distill = null;      // 현재 영상의 증류 상태 {override, channel, effective}
 
 /* 증류 토글 표시 — d = {override, channel, effective} | null(미조회).
@@ -2256,7 +2264,6 @@ function _setPubBtn(url) {
   const b = document.getElementById('sum-publish-btn');
   if (!b) return;
   const l = b.querySelector('.pub-label');
-  if (b.firstChild && b.firstChild.nodeType === 3) b.firstChild.textContent = _blogUrl ? '🔗 ' : '📤 ';
   if (l) l.textContent = _blogUrl ? '블로그에서 보기' : '블로그 발행';
   b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.classList.toggle('published', !!_blogUrl);
@@ -2293,7 +2300,6 @@ function _setSummaryReadUI(isRead) {
   const btn = document.getElementById('sum-read-btn');
   if (!btn) return;
   btn.classList.toggle('active', _summaryRead);
-  btn.querySelector('.read-icon').textContent = _summaryRead ? '✓' : '○';
   btn.querySelector('.read-label').textContent = _summaryRead ? '읽음' : '읽음 처리';
   btn.title = _summaryRead ? '읽음 상태입니다. 클릭하면 안읽음으로 변경' : '읽음으로 표시';
 }
@@ -2383,6 +2389,7 @@ async function openSummaryModal(itemId, title) {
 
   _summaryItemId = itemId;                              // 증류 설정 변경 대상
   _setSummaryReadUI(false);
+  _setSummaryYouTubeLink('');
   _setDistillUI(null);                                   // 값 로드 전에는 기본 표시
   bodyEl.innerHTML    = '<p class="sum-loading">불러오는 중…</p>';
   document.getElementById('sum-panel-footer').hidden = true;
@@ -2404,6 +2411,7 @@ async function openSummaryModal(itemId, title) {
     _setPubBtn(data.blog_url);                               // 발행 여부에 따라 📤 / 🔗
     _setSummaryReadUI(data.is_read);
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
+    _setSummaryYouTubeLink(data.webpage_url);
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
