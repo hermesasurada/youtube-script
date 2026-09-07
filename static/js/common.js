@@ -380,6 +380,8 @@
     // 16px 그대로라 소제목(h3, 1em)·h2·푸터는 종전 크기를 유지한다 — 래퍼를
     // 줄이면 소제목까지 같이 작아진다.
     p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;font-size:15px;',
+    term: 'margin:-.85em 0 1.45em;padding-left:.72em;border-left:2px solid #d8dadd;'
+        + 'font-size:12.5px;line-height:1.55;font-weight:400;color:#7a7f87;',
     li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
@@ -466,6 +468,7 @@
     root.querySelectorAll('h2').forEach(h => h.setAttribute('style', _BL.h2));
     root.querySelectorAll('h3').forEach(h => h.setAttribute('style', _BL.h3));
     root.querySelectorAll('p').forEach(p => p.setAttribute('style', _BL.p));
+    root.querySelectorAll('p.term-note').forEach(p => p.setAttribute('style', _BL.term));
     root.querySelectorAll('ul,ol').forEach(u => u.setAttribute('style', _BL.ul));
     root.querySelectorAll('li').forEach(li => li.setAttribute('style', _BL.li));
     root.querySelectorAll('a').forEach(a => {
@@ -576,7 +579,7 @@
 .sum-head-sticky h1{margin:0 !important;}
 .sum-head-sticky .sum-title-orig{margin:.28rem 0 0 !important;}
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
-.ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.22rem 0 .95rem;padding-bottom:.68rem;border-bottom:1px solid var(--border,#e5e5e5);}
+.ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.42rem 0 .95rem;padding-bottom:.68rem;border-bottom:1px solid var(--border,#e5e5e5);}
 .ys-meta-compact{gap:.26rem;}
 .ys-meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:.26rem;width:100%;}
 .ys-chip{display:inline-flex;align-items:center;gap:.28em;font-size:.75rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius:2px;padding:.19rem .52rem;line-height:1.2;}
