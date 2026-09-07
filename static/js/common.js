@@ -610,7 +610,10 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
    목차(_tocLabel)와 시각 이동이 이 값을 읽는다. */
 .kf-time{display:none;margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 틴트, 시각 pill은 우측 정렬 */
-.sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius: 2px;margin:1.7rem 0 .75rem;}`;
+.sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius: 2px;margin:1.7rem 0 .75rem;}
+/* LLM이 본문 단락 바로 뒤에 넣는 문맥형 용어 해설. 세 리더 화면에서 동일하게 보인다. */
+.sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
+.sum-md .term-note strong,.md-body .term-note strong,.markdown .term-note strong{color:inherit;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
     document.head.appendChild(st);
