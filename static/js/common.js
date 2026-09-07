@@ -149,7 +149,7 @@
 
   /**
    * 요약 전용 의미 변환(가드되어 일반 마크다운엔 무해):
-   *  1) `## 메타정보` + 표  → 칩 헤더(.ys-meta): 업로더·날짜·길이·YouTube 링크
+   *  1) `## 메타정보` + 표  → 칩 헤더(.ys-meta): 업로더·날짜·길이/압축률·YouTube 링크
    *  2) `## 한눈 요약` + ul → 강조 callout 카드(.ys-tldr)
    */
   function _decorateSummary(html, model, compress) {
@@ -174,12 +174,22 @@
       }
       const row1 = [], row2 = [];
       if (kv['업로더']) row1.push(`<span class="ys-chip ys-chip-up">${kv['업로더'].innerHTML}</span>`);
-      if (kv['날짜'])   row1.push(`<span class="ys-chip">${kv['날짜'].innerHTML}</span>`);
-      if (durHtml)      row1.push(`<span class="ys-chip ys-chip-dur">${durHtml}</span>`);
+      if (kv['날짜']) {
+        const dateText = kv['날짜'].textContent.trim().replace(
+          /\b(?:19|20)(\d{2})[-./]?(\d{2})[-./]?(\d{2})\b/g,
+          '$1.$2.$3',
+        );
+        row1.push(`<span class="ys-chip ys-chip-date">${escapeHtml(dateText)}</span>`);
+      }
+      const stats = [];
+      if (durHtml) stats.push(durHtml);
+      if (compress) stats.push(`${compact ? '' : '원문 대비 '}${escapeHtml(compress)}%`);
+      if (stats.length) {
+        row1.push(`<span class="ys-chip ys-chip-dur ys-chip-stats" title="영상 길이 · 요약본 글자수 / 전사 원문 글자수">${stats.join(' · ')}</span>`);
+      }
       const urlA = kv['URL'] && kv['URL'].querySelector('a');
       if (urlA) row2.push(`<a class="ys-chip ys-chip-link" href="${urlA.href}" target="_blank" rel="noopener noreferrer">${compact ? 'YouTube' : 'YouTube에서 보기 ↗'}</a>`);
       if (model) row2.push(`<span class="ys-chip ys-chip-model" title="이 요약을 생성한 LLM 모델">🧠 ${escapeHtml(model)}</span>`);
-      if (compress) row2.push(`<span class="ys-chip ys-chip-compress" title="요약본 글자수 / 전사 원문 글자수">🗜 ${compact ? '' : '원문 대비 '}${escapeHtml(compress)}%</span>`);
       const chips = row1.concat(row2);
       if (chips.length) {
         const bar = document.createElement('div');
@@ -573,12 +583,12 @@
 .ys-meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;width:100%;}
 .ys-chip{display:inline-flex;align-items:center;gap:.35em;font-size:.78rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius: 2px;padding:.26rem .72rem;line-height:1.25;}
 .ys-chip-up{color:var(--text,#222);font-weight:600;}
+.ys-chip-date{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.02em;}
 .ys-chip-dur{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.02em;}
 .ys-chip a{color:inherit;text-decoration:none;}
 a.ys-chip-link{color:var(--highlight,#2563eb);border-color:color-mix(in oklab,var(--highlight,#2563eb) 38%,transparent);background:var(--highlight-soft,rgba(99,102,241,.08));text-decoration:none;font-weight:600;transition:filter .15s;}
 a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-chip-model{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.01em;}
-.ys-chip-compress{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.01em;}
 /* ── 한눈 요약 callout ── */
 .ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:1rem 1.25rem 1.05rem 1.35rem;background:linear-gradient(135deg,var(--highlight-soft,rgba(99,102,241,.08)),transparent 78%),var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;}
 .ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}

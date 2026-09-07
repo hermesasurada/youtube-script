@@ -264,6 +264,8 @@
       border-bottom: 1px solid var(--border);
       background: var(--surface);
     }
+    /* 요약 헤더의 뒤로가기·YouTube·글꼴·글자크기 버튼 높이를 한 기준으로 맞춘다. */
+    .modal-hdr > .icon-btn { width: 32px; height: 32px; flex-shrink: 0; }
     .modal-hdr h2 {
       margin: 0; font-size: 15px; font-weight: 600; flex: 1; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -297,7 +299,7 @@
     .fs-ctrl { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
     .fs-ctrl[hidden] { display: none; }
     .fs-btn {
-      width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
       border: 1px solid var(--border); border-radius: var(--radius-sm);
       background: var(--surface); color: var(--text); font-size: 17px; font-weight: 600;
       line-height: 1; cursor: pointer; padding: 0;
@@ -318,7 +320,7 @@
     .distill-ctrl .dist-eff { color: var(--muted); font-size: 11px; font-weight: 400; }
     .font-ctrl {
       display: inline-flex; align-items: center; flex-shrink: 0;
-      height: 30px; padding: 0 .25rem 0 .4rem;
+      height: 32px; padding: 0 .25rem 0 .4rem;
       border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
     }
     .font-ctrl[hidden] { display: none; }
