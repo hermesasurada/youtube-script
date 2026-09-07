@@ -166,7 +166,7 @@
         const c = tr.querySelectorAll('td,th');
         if (c.length >= 2) kv[c[0].textContent.trim()] = c[1];
       });
-      // 컴팩트 모드(모바일): 칩 텍스트를 줄이고 정보/링크 두 줄로 고정 배치
+      // 컴팩트 모드(모바일): 칩 텍스트를 줄이고 한 줄 우선으로 배치
       const compact = !!global.YS_META_COMPACT;
       let durHtml = kv['길이'] ? kv['길이'].innerHTML : '';
       if (compact && durHtml && /분/.test(durHtml)) {
@@ -194,9 +194,7 @@
       if (chips.length) {
         const bar = document.createElement('div');
         bar.className = 'ys-meta' + (compact ? ' ys-meta-compact' : '');
-        bar.innerHTML = compact
-          ? `<div class="ys-meta-row">${row1.join('')}</div><div class="ys-meta-row">${row2.join('')}</div>`
-          : chips.join('');
+        bar.innerHTML = chips.join('');
         tbl.replaceWith(bar);
         metaH.remove();
       }
@@ -578,17 +576,15 @@
 .sum-head-sticky h1{margin:0 !important;}
 .sum-head-sticky .sum-title-orig{margin:.28rem 0 0 !important;}
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
-.ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin:.4rem 0 1.4rem;padding-bottom:1.1rem;border-bottom:1px solid var(--border,#e5e5e5);}
-.ys-meta-compact{flex-direction:column;align-items:flex-start;gap:.45rem;}
-.ys-meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;width:100%;}
-.ys-chip{display:inline-flex;align-items:center;gap:.35em;font-size:.78rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius: 2px;padding:.26rem .72rem;line-height:1.25;}
+.ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.22rem 0 .95rem;padding-bottom:.68rem;border-bottom:1px solid var(--border,#e5e5e5);}
+.ys-meta-compact{gap:.26rem;}
+.ys-meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:.26rem;width:100%;}
+.ys-chip{display:inline-flex;align-items:center;gap:.28em;font-size:.75rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius:2px;padding:.19rem .52rem;line-height:1.2;}
 .ys-chip-up{color:var(--text,#222);font-weight:600;}
-.ys-chip-date{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.02em;}
-.ys-chip-dur{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.02em;}
+.ys-chip-date,.ys-chip-dur,.ys-chip-model{font-family:inherit;font-size:.75rem;letter-spacing:normal;}
 .ys-chip a{color:inherit;text-decoration:none;}
 a.ys-chip-link{color:var(--highlight,#2563eb);border-color:color-mix(in oklab,var(--highlight,#2563eb) 38%,transparent);background:var(--highlight-soft,rgba(99,102,241,.08));text-decoration:none;font-weight:600;transition:filter .15s;}
 a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
-.ys-chip-model{font-family:ui-monospace,monospace;font-size:.72rem;letter-spacing:.01em;}
 /* ── 한눈 요약 callout ── */
 .ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:1rem 1.25rem 1.05rem 1.35rem;background:linear-gradient(135deg,var(--highlight-soft,rgba(99,102,241,.08)),transparent 78%),var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;}
 .ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}
