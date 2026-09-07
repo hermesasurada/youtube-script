@@ -248,6 +248,7 @@
     .modal-backdrop.open { display: block; }
     .modal {
       position: fixed; left: 0; right: 0; bottom: 0; top: 0;
+      height: 100dvh; max-height: 100dvh; min-height: 0;
       background: var(--bg);
       display: flex; flex-direction: column;
       z-index: 101;
@@ -285,10 +286,11 @@
       border-radius: 0 2px 2px 0; transition: width .1s linear; pointer-events: none;
     }
     .modal-body {
-      flex: 1; overflow-y: auto;
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
       padding: 1rem 1rem 2rem;
       font-size: 14px; line-height: 1.62;
       -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
     }
     /* 요약 본문 글자크기: 변수로 조절(-+). 소제목 h1/h2/h3는 고정 px라 영향 없음. */
     .modal-body.markdown { font-size: var(--reader-fs, 14px); }
@@ -373,14 +375,15 @@
     }
     /* ── 처리 큐(모달 내) ── */
     .mq-add { display: flex; gap: .4rem; margin-bottom: .4rem; }
-    .mq-add input { flex: 1; height: 36px; padding: 0 .7rem; font: inherit; font-size: 13px;
+    .mq-add input { flex: 1 1 auto; min-width: 0; height: 36px; padding: 0 .7rem; font: inherit; font-size: 13px;
                     border: 1px solid var(--border); border-radius: var(--radius-sm);
                     background: var(--surface); color: var(--text); outline: none; }
-    .mq-add button { height: 36px; padding: 0 .9rem; font-size: 12.5px; font-weight: 700;
+    .mq-add button { flex: 0 0 auto; min-width: 3.25rem; height: 36px; padding: 0 .7rem;
+                     font-size: 12.5px; font-weight: 700; white-space: nowrap;
                      border: 1px solid var(--border); border-radius: var(--radius-sm);
                      background: var(--text); color: var(--bg); }
     .mq-add button:disabled { opacity: .35; }
-    .mq-add .mq-paste { background: var(--surface2); color: var(--text); padding: 0 .6rem; }
+    .mq-add .mq-paste { width: 38px; min-width: 38px; background: var(--surface2); color: var(--text); padding: 0; }
     .mq-cap-chip { height: 30px; padding: 0 .7rem; font-size: 11.5px; font-weight: 700;
                    border: 1px solid var(--border); border-radius: var(--radius-sm);
                    background: var(--surface2); color: var(--muted); margin: -.1rem 0 .4rem; }
@@ -408,8 +411,7 @@
     .mq-done       { color: #16a34a; border-color: currentColor; }
     .mq-failed     { color: #dc2626; border-color: currentColor; }
     .mq-main { flex: 1; min-width: 0; }
-    .mq-title { font-size: 12px; line-height: 1.35; overflow: hidden;
-                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .mq-title { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; word-break: break-word; }
     .mq-sub { font-size: 10.5px; color: var(--muted); margin-top: .1rem; }
     .mq-ctl { display: inline-flex; gap: .25rem; flex-shrink: 0; }
     .mq-ctl button { width: 28px; height: 28px; border: 1px solid var(--border);
@@ -543,7 +545,10 @@
     .modal.utility :is(.font-ctrl, .fs-ctrl, .modal-youtube-link, .summary-actions) { display: none !important; }
     .modal.utility .read-progress { display: none; }
     .modal.utility .modal-body { background: var(--bg); padding: .85rem .9rem 1.5rem; }
-    .modal-body.queue, .modal-body.channels { display: flex; flex-direction: column; gap: .75rem; }
+    .modal-body.queue, .modal-body.channels {
+      display: flex; flex-direction: column; gap: .75rem;
+      min-height: 0; overflow-y: auto;
+    }
     .m-utility-note {
       margin: 0; padding: .65rem .75rem; border-radius: var(--radius);
       background: var(--surface2); color: var(--muted); font-size: 12px; line-height: 1.5;
@@ -551,9 +556,11 @@
     .m-utility-card,
     .mq-group,
     .ch-list-shell {
+      flex: 0 0 auto;
       overflow: hidden; background: var(--surface);
       border: 1px solid var(--border); border-radius: 10px;
     }
+    .m-utility-note { flex: 0 0 auto; }
     .m-utility-section-head,
     .mq-group .mq-sec {
       display: flex; align-items: baseline; justify-content: space-between; gap: .5rem;
@@ -572,15 +579,22 @@
 
     .mq-add-card { padding: .75rem; }
     .mq-add-card .m-utility-section-head { margin: -.75rem -.75rem .7rem; }
-    .mq-add { margin-bottom: .5rem; }
+    .mq-add { margin-bottom: .5rem; min-width: 0; }
     .mq-add input, .mq-add button { height: 38px; border-radius: var(--radius); }
     .mq-add input { background: var(--bg); }
     .mq-add input:focus { border-color: var(--highlight); }
-    .mq-options { display: flex; gap: .4rem; flex-wrap: wrap; }
-    .mq-cap-chip { margin: 0; border-color: transparent; border-radius: 999px; }
+    .mq-options { display: flex; gap: .4rem; flex-wrap: nowrap; min-width: 0; }
+    .mq-cap-chip {
+      flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap;
+      border-color: transparent; border-radius: 999px;
+    }
     .mq-add-pv { min-height: 0; margin: .5rem 0 0; }
     .mq-add-pv:empty { display: none; }
-    .mq-group .mq-row { margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+    .mq-group .mq-row {
+      display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start;
+      margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+    }
+    .mq-group .mq-ctl { grid-column: 1 / -1; justify-self: end; flex-wrap: nowrap; }
     .mq-group .mq-row:last-child { border-bottom: 0; }
     .mq-group .ch-empty { padding: .9rem .7rem; }
     .mq-st { border: 0; border-radius: 999px; background: var(--surface2); }
