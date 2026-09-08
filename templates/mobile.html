@@ -439,20 +439,40 @@
     .model-order-select { appearance: none; -webkit-appearance: none;
       min-width: 0; max-width: 100%; width: 100%; height: 31px; padding: 0 1.1rem 0 .3rem;
       color: var(--text); background-color: var(--surface2); border: 1px solid var(--border);
-      border-radius: 5px; font: 11px var(--font-mono);
+      border-radius: 5px; font: 12px var(--font-sans);
       background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888178' d='M1 1l4 4 4-4'/></svg>");
       background-repeat: no-repeat; background-position: right .35rem center; }
     .model-order-select:disabled { opacity: .55; }
-    .model-order-selects#summary-model-order { grid-template-columns: minmax(0, 1fr); gap: .35rem; }
-    .model-round-slot { display: grid; grid-template-columns: 12px minmax(0, 1fr) 92px 32px; }
-    .model-round-columns { display: grid; grid-template-columns: 12px minmax(0, 1fr) 92px 32px;
-      gap: .2rem; color: var(--muted); font-size: 10px; line-height: 1; }
-    .model-order-selects#capture-model-order { grid-template-columns: minmax(0, 1fr); }
-    .model-order-selects#capture-model-order .model-order-slot { display: grid; grid-template-columns: 12px minmax(0, 1fr); }
+    .model-config-section { display: grid; gap: .55rem; min-width: 0; }
+    .capture-config-section { padding-top: .75rem; border-top: 1px solid var(--border); }
+    .model-config-heading { display: grid; gap: .25rem; }
+    .model-config-heading > div { display: flex; align-items: center; gap: .4rem; }
+    .model-config-heading strong { color: var(--text); font-size: 12.5px; }
+    .model-config-heading small { color: var(--muted); font-size: 10.5px; line-height: 1.35; }
+    .model-mode-badge { padding: 2px 7px; border-radius: 999px; color: var(--highlight);
+      background: var(--highlight-soft); font-size: 9.5px; font-weight: 700; }
+    .model-mode-badge.neutral { color: var(--muted); background: var(--surface2); }
+    .model-order-selects#summary-model-order { grid-template-columns: minmax(0, 1fr); gap: .45rem; }
+    .summary-model-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: .45rem; min-width: 0; padding: .6rem; background: var(--surface2);
+      border: 1px solid transparent; border-radius: 9px; }
+    .summary-model-card.is-next { border-color: color-mix(in srgb, var(--highlight) 38%, transparent);
+      background: color-mix(in srgb, var(--highlight) 4%, var(--surface2)); }
+    .model-card-top { grid-column: 1 / -1; display: flex; align-items: center;
+      justify-content: space-between; min-height: 18px; }
+    .model-step { color: var(--muted); font-size: 10px; font-weight: 700; }
+    .model-field { display: grid; gap: .25rem; min-width: 0; }
+    .model-field > span { color: var(--muted); font-size: 10px; font-weight: 600; }
+    .model-order-selects#capture-model-order { grid-template-columns: minmax(0, 1fr); gap: .4rem; }
     .model-reasoning-select { font-family: var(--font-sans); }
-    .model-round-next { color: var(--highlight); background: var(--highlight-soft); border-radius: 999px;
-      font-size: 10px; font-weight: 700; line-height: 20px; text-align: center; }
-    .model-order-hint { margin: -.1rem 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+    .model-round-next { display: inline-flex; align-items: center; gap: 4px; color: var(--highlight);
+      font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .model-round-next i { width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+      box-shadow: 0 0 0 3px var(--highlight-soft); }
+    .capture-model-card { display: grid; grid-template-columns: 38px minmax(0, 1fr);
+      align-items: center; gap: .4rem; min-width: 0; }
+    .capture-rank { color: var(--muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .model-order-hint { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
     .ch-empty, .ch-loading { color: var(--muted); font-size: 13.5px; padding: .5rem .2rem; }
     .ch-row { display: flex; align-items: center; gap: .75rem; padding: .7rem .8rem;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -1237,7 +1257,7 @@ let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MO
 let monitorSummaryReasoning = { opus: 'default', gpt: 'high', grok: 'default' };
 let monitorSummaryNextModel = 'opus';
 let monitorReasoningOptions = [
-  {value: 'default', label: '기본값'}, {value: 'low', label: '낮음'},
+  {value: 'default', label: '모델 기본값'}, {value: 'low', label: '낮음'},
   {value: 'medium', label: '보통'}, {value: 'high', label: '높음'},
   {value: 'xhigh', label: '매우 높음'}, {value: 'max', label: '최대'},
 ];
@@ -1286,10 +1306,16 @@ function applyMonitorOrderChange(order, index, selected) {
 
 function monitorModelControlsHtml() {
   return `<div class="model-order-card">
-    <div class="model-order-head"><span>모델 설정</span><span class="model-order-status" id="model-order-status"></span></div>
-    <div class="model-order-row"><span class="model-order-label">요약</span><div class="model-order-selects" id="summary-model-order"></div></div>
-    <div class="model-order-row"><span class="model-order-label">캡처</span><div class="model-order-selects" id="capture-model-order"></div></div>
-    <p class="model-order-hint">요약은 작업마다 다음 모델로 순환하며, 실패하면 다음 순번으로 이어집니다. 캡처는 왼쪽부터 폴백합니다.</p>
+    <div class="model-order-head"><span>모델 운영 방식</span><span class="model-order-status" id="model-order-status"></span></div>
+    <section class="model-config-section">
+      <div class="model-config-heading"><div><strong>요약</strong><span class="model-mode-badge">라운드로빈</span></div><small>영상마다 1 → 2 → 3 순번으로 시작 모델을 바꿉니다.</small></div>
+      <div class="model-order-selects summary-model-cards" id="summary-model-order"></div>
+      <p class="model-order-hint">실패하면 다음 순번으로 이어집니다. 높은 추론 수준은 처리 시간이 늘어날 수 있습니다.</p>
+    </section>
+    <section class="model-config-section capture-config-section">
+      <div class="model-config-heading"><div><strong>캡처</strong><span class="model-mode-badge neutral">순차 폴백</span></div><small>실패할 때만 다음 모델을 사용합니다.</small></div>
+      <div class="model-order-selects capture-model-cards" id="capture-model-order"></div>
+    </section>
   </div>`;
 }
 
@@ -1297,19 +1323,21 @@ function renderMonitorModelOrders() {
   const summaryEl = $('summary-model-order');
   if (summaryEl) {
     const order = monitorModelOrders.summary || MONITOR_MODELS;
-    summaryEl.innerHTML = '<div class="model-round-columns" aria-hidden="true"><span></span><span>모델</span><span>추론</span><span></span></div>' + order.map((selected, index) => {
+    summaryEl.innerHTML = order.map((selected, index) => {
       const models = MONITOR_MODELS.map(model =>
         `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
       const levels = monitorReasoningOptions.map(option =>
         `<option value="${option.value}" ${option.value === monitorSummaryReasoning[selected] ? 'selected' : ''}>${option.label}</option>`
       ).join('');
-      const next = selected === monitorSummaryNextModel ? '<span class="model-round-next">다음</span>' : '<span></span>';
-      return `<label class="model-order-slot model-round-slot"><span class="model-order-rank">${index + 1}</span>`
-        + `<select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
-        + `onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select>`
-        + `<select class="model-order-select model-reasoning-select" aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" `
-        + `onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select>${next}</label>`;
+      const isNext = selected === monitorSummaryNextModel;
+      return `<div class="summary-model-card ${isNext ? 'is-next' : ''}">`
+        + `<div class="model-card-top"><span class="model-step">${index + 1}번</span>`
+        + `${isNext ? '<span class="model-round-next"><i></i>다음 실행</span>' : ''}</div>`
+        + `<label class="model-field"><span>모델</span><select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
+        + `title="이 순번에 사용할 모델" onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select></label>`
+        + `<label class="model-field"><span>추론 수준</span><select class="model-order-select model-reasoning-select" `
+        + `aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select></label></div>`;
     }).join('');
   }
   const captureEl = $('capture-model-order');
@@ -1319,7 +1347,7 @@ function renderMonitorModelOrders() {
       const options = monitorOrderChoices(order, index).map(model =>
         `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
-      return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
+      return `<label class="capture-model-card"><span class="capture-rank">${index + 1}순위</span>`
         + `<select class="model-order-select" aria-label="캡처 ${index + 1}순위" `
         + `onchange="changeMonitorModelOrder('capture', ${index}, this.value)">${options}</select></label>`;
     }).join('');

@@ -86,7 +86,7 @@ let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MO
 let monitorSummaryReasoning = { opus: 'default', gpt: 'high', grok: 'default' };
 let monitorSummaryNextModel = 'opus';
 let monitorReasoningOptions = [
-  {value: 'default', label: '기본값'}, {value: 'low', label: '낮음'},
+  {value: 'default', label: '모델 기본값'}, {value: 'low', label: '낮음'},
   {value: 'medium', label: '보통'}, {value: 'high', label: '높음'},
   {value: 'xhigh', label: '매우 높음'}, {value: 'max', label: '최대'},
 ];
@@ -139,19 +139,21 @@ function renderMonitorModelOrders() {
   const summaryEl = document.getElementById('summary-model-order');
   if (summaryEl) {
     const order = monitorModelOrders.summary || MONITOR_MODELS;
-    summaryEl.innerHTML = '<div class="model-round-columns" aria-hidden="true"><span></span><span>모델</span><span>추론</span><span></span></div>' + order.map((selected, index) => {
+    summaryEl.innerHTML = order.map((selected, index) => {
       const models = MONITOR_MODELS.map(model =>
         `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
       const levels = monitorReasoningOptions.map(option =>
         `<option value="${option.value}" ${option.value === monitorSummaryReasoning[selected] ? 'selected' : ''}>${option.label}</option>`
       ).join('');
-      const next = selected === monitorSummaryNextModel ? '<span class="model-round-next">다음</span>' : '<span></span>';
-      return `<label class="model-order-slot model-round-slot"><span class="model-order-rank">${index + 1}</span>`
-        + `<select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
-        + `onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select>`
-        + `<select class="model-order-select model-reasoning-select" aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" `
-        + `onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select>${next}</label>`;
+      const isNext = selected === monitorSummaryNextModel;
+      return `<div class="summary-model-card ${isNext ? 'is-next' : ''}">`
+        + `<div class="model-card-top"><span class="model-step">${index + 1}번</span>`
+        + `${isNext ? '<span class="model-round-next"><i></i>다음 실행</span>' : ''}</div>`
+        + `<label class="model-field"><span>모델</span><select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
+        + `title="이 순번에 사용할 모델" onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select></label>`
+        + `<label class="model-field"><span>추론 수준</span><select class="model-order-select model-reasoning-select" `
+        + `aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select></label></div>`;
     }).join('');
   }
   const captureEl = document.getElementById('capture-model-order');
@@ -161,7 +163,7 @@ function renderMonitorModelOrders() {
       const options = monitorOrderChoices(order, index).map(model =>
         `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
-      return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
+      return `<label class="capture-model-card"><span class="capture-rank">${index + 1}순위</span>`
         + `<select class="model-order-select" aria-label="캡처 ${index + 1}순위" `
         + `onchange="changeMonitorModelOrder('capture', ${index}, this.value)">${options}</select></label>`;
     }).join('');

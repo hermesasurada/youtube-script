@@ -314,12 +314,24 @@
       <div class="utility-section-head"><span>LLM 처리</span><small>요약 순환 · 캡처 폴백</small></div>
       <div class="model-order-card">
         <div class="model-order-head">
-          <span>모델 설정</span>
+          <span>모델 운영 방식</span>
           <span class="model-order-status" id="model-order-status"></span>
         </div>
-        <div class="model-order-row"><span class="model-order-label">요약</span><div class="model-order-selects" id="summary-model-order"></div></div>
-        <div class="model-order-row"><span class="model-order-label">캡처</span><div class="model-order-selects" id="capture-model-order"></div></div>
-        <p class="model-order-hint">요약은 작업마다 다음 모델로 순환하며, 실패하면 다음 순번으로 이어집니다. 캡처는 왼쪽부터 폴백합니다.</p>
+        <section class="model-config-section">
+          <div class="model-config-heading">
+            <div><strong>요약</strong><span class="model-mode-badge">라운드로빈</span></div>
+            <small>영상마다 1 → 2 → 3 순번으로 시작 모델을 바꿉니다.</small>
+          </div>
+          <div class="model-order-selects summary-model-cards" id="summary-model-order"></div>
+          <p class="model-order-hint">이번 모델이 실패하면 다음 순번으로 이어집니다. 추론 수준이 높을수록 처리 시간도 늘어날 수 있습니다.</p>
+        </section>
+        <section class="model-config-section capture-config-section">
+          <div class="model-config-heading">
+            <div><strong>캡처</strong><span class="model-mode-badge neutral">순차 폴백</span></div>
+            <small>왼쪽 모델부터 시도하고 실패할 때만 다음 모델을 사용합니다.</small>
+          </div>
+          <div class="model-order-selects capture-model-cards" id="capture-model-order"></div>
+        </section>
       </div>
       <div class="channels-queue" id="channels-queue"></div>
       <div class="utility-section-head channels-list-title"><span>등록 채널</span><small id="channels-count">—</small></div>

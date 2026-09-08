@@ -1607,7 +1607,7 @@ def _monitor_model_labels() -> dict[str, str]:
 
 def _monitor_reasoning_options() -> list[dict[str, str]]:
     return [
-        {"value": "default", "label": "기본값"},
+        {"value": "default", "label": "모델 기본값"},
         {"value": "low", "label": "낮음"},
         {"value": "medium", "label": "보통"},
         {"value": "high", "label": "높음"},
