@@ -841,8 +841,9 @@ select option { background: var(--surface); color: var(--text); }
   background: color-mix(in srgb, var(--highlight) 4%, var(--surface)); }
 .model-card-top { display: flex; align-items: center; justify-content: space-between; min-height: 18px; }
 .model-step { color: var(--muted); font-size: 10px; font-weight: 700; }
-.model-field { display: grid; gap: .25rem; min-width: 0; }
-.model-field > span { color: var(--muted); font-size: 9.5px; font-weight: 600; }
+.model-field { display: grid; gap: .35rem; min-width: 0; }
+.model-field > span { padding-left: 2px; color: var(--muted); font-size: 9.5px;
+  font-weight: 700; letter-spacing: .025em; }
 .model-reasoning-select { font-family: var(--font-sans); }
 .model-round-next {
   display: inline-flex; align-items: center; gap: 4px; color: var(--highlight);
@@ -2632,7 +2633,12 @@ header h1 { font-size: 15px; }
 #channels-panel { width: min(94vw, 720px); height: min(86vh, 780px); }
 .channels-modal-body.utility-panel-body { gap: .8rem; padding: 1rem 1.2rem 1.2rem; }
 .model-order-card { padding: .85rem; border-radius: 10px; }
-.model-order-select { height: 32px; border-color: transparent; border-radius: var(--radius); }
+.model-order-select {
+  height: 34px; border-color: var(--border-strong); border-radius: var(--radius);
+  background-color: color-mix(in oklab, var(--surface2) 72%, var(--surface));
+}
+.model-order-select:hover { border-color: color-mix(in oklab, var(--border-strong) 72%, var(--text)); }
+.model-order-select:focus { outline: none; border-color: var(--highlight); box-shadow: var(--glow); }
 .channels-queue {
   padding: .55rem .7rem; background: var(--surface);
   color: var(--muted); font-size: 11px;

@@ -28,6 +28,7 @@
       --radius:    8px;
       --radius-sm: 6px;
       --row-sel:   rgba(184,58,58,.09);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
       --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
     @media (prefers-color-scheme: dark) {
@@ -461,8 +462,9 @@
     .model-card-top { grid-column: 1 / -1; display: flex; align-items: center;
       justify-content: space-between; min-height: 18px; }
     .model-step { color: var(--muted); font-size: 10px; font-weight: 700; }
-    .model-field { display: grid; gap: .25rem; min-width: 0; }
-    .model-field > span { color: var(--muted); font-size: 10px; font-weight: 600; }
+    .model-field { display: grid; gap: .35rem; min-width: 0; }
+    .model-field > span { padding-left: 2px; color: var(--muted); font-size: 10px;
+      font-weight: 700; letter-spacing: .025em; }
     .model-order-selects#capture-model-order { grid-template-columns: minmax(0, 1fr); gap: .4rem; }
     .model-reasoning-select { font-family: var(--font-sans); }
     .model-round-next { display: inline-flex; align-items: center; gap: 4px; color: var(--highlight);
@@ -632,7 +634,13 @@
     .mq-ctl button { border-color: transparent; border-radius: var(--radius-sm); }
 
     .modal-body.channels .model-order-card { padding: .8rem; border-radius: 10px; background: var(--surface); }
-    .modal-body.channels .model-order-select { border-color: transparent; background-color: var(--surface2); }
+    .modal-body.channels .model-order-select {
+      height: 34px; border-color: var(--border-strong);
+      background-color: color-mix(in oklab, var(--surface2) 72%, var(--surface));
+    }
+    .modal-body.channels .model-order-select:focus {
+      outline: none; border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft);
+    }
     .modal-body.channels .ch-queue { border: 0; background: var(--surface); }
     .ch-list-shell .ch-list-head { background: var(--surface2); }
     .ch-list-shell .ch-row { background: transparent; }
