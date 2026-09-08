@@ -2822,6 +2822,32 @@ def history_refresh_meta():
     })
 
 
+_BLOG_ORIGINAL_STYLE = (
+    "margin:0 0 1.4em;font-size:13px;font-weight:400;"
+    "line-height:1.65;color:#7b8393;"
+)
+
+
+def _ensure_blog_original_title(body_html: str, original_title: str | None,
+                                translated_title: str | None) -> str:
+    """번역 제목으로 발행할 때 본문 첫 줄에 외국어 원제를 보존한다."""
+    original = (original_title or "").strip()
+    translated = (translated_title or "").strip()
+    if not original or not translated or original == translated:
+        return body_html
+    if 'data-ys-original-title="1"' in body_html:
+        return body_html
+
+    block = (
+        f'<p data-ys-original-title="1" style="{_BLOG_ORIGINAL_STYLE}">'
+        f'원제 : {_htmlmod.escape(original)}</p>'
+    )
+    wrapper = re.match(r"\s*<div\b[^>]*>", body_html, flags=re.IGNORECASE)
+    if wrapper:
+        return body_html[:wrapper.end()] + "\n" + block + body_html[wrapper.end():]
+    return block + "\n" + body_html
+
+
 @app.route("/history/publish-blog", methods=["POST"])
 def history_publish_blog():
     """요약을 내 블로그스팟에 바로 발행한다 — 공통 라이브러리 hermes_blogger(wm과 토큰 공유).
@@ -2840,9 +2866,10 @@ def history_publish_blog():
     if item.get("blog_url"):
         return _json({"status": "exists", "url": item["blog_url"]})
     html = (data.get("html") or "").strip()
-    title = (data.get("title") or item.get("title_ko") or item.get("title") or "").strip()
+    title = (item.get("title_ko") or data.get("title") or item.get("title") or "").strip()
     if not html or not title:
         return _json({"status": "error", "code": "bad_request", "message": "title/html 필요"}, 400)
+    html = _ensure_blog_original_title(html, item.get("title"), item.get("title_ko"))
     if not bl.configured():
         return _json({"status": "error", "code": "not_configured",
                       "message": "블로그 연동 미설정 — 서버에서 hermes-blogger auth 실행 필요"})

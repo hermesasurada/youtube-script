@@ -1616,6 +1616,7 @@ function setReaderFont(key) {
 }
 
 let _summaryMd = '';   // 현재 열린 요약 원문 — 블로그 발행에 사용
+let _titleKoM = '';    // 현재 열린 요약의 번역 제목(외국어 제목일 때만 값이 있다)
 let _summaryReadM = false;
 
 function _setSummaryReadUIM(isRead) {
@@ -1652,6 +1653,7 @@ async function openSummary(itemId, title) {
   _applyReaderFs();
   _applyReaderFont();
   _summaryMd = '';
+  _titleKoM = '';
   _summaryItemId = itemId;
   _setSummaryReadUIM(false);
   $('summary-actions').hidden = true;
@@ -1665,6 +1667,7 @@ async function openSummary(itemId, title) {
       $('modal-body').textContent = '오류: ' + d.error;
     } else {
       _summaryMd = d.content || '';
+      _titleKoM = d.title_ko || '';
       $('modal-body').className = 'modal-body markdown';
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
@@ -1695,6 +1698,7 @@ async function refreshItemMeta(btn) {
     if (res && res.error) throw new Error(res.error);
     const changed = (res && res.changed) || [];
     if (changed.includes('title') || changed.includes('title_ko')) {
+      _titleKoM = res.title_ko || '';
       const body = $('modal-body');
       const h1 = body.querySelector('h1');
       if (h1) h1.textContent = res.title || h1.textContent;
@@ -1796,10 +1800,10 @@ async function publishToBlog(btn) {
   if (!_summaryMd || !_summaryItemId) return;
   if (!confirm('블로그스팟에 바로 발행할까요? (즉시 공개됩니다)')) return;
   const lbl = btn.querySelector('.action-label');
-  const { html, title } = YS.mdToBloggerHtml(_summaryMd);
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM });
   btn.disabled = true; lbl.textContent = '…';
   try {
-    const d = await YS.apiPublishBlog(_summaryItemId, title, html);
+    const d = await YS.apiPublishBlog(_summaryItemId, _titleKoM || title, html);
     if (d && (d.status === 'ok' || d.status === 'exists')) { _setPubBtnM(d.url); if (typeof loadHistory === 'function') loadHistory(true); return; }
     lbl.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패'; btn.className = 'summary-action-btn primary err'; console.warn('[blog]', d);
   } catch (e) { lbl.textContent = '발행 실패'; btn.className = 'summary-action-btn primary err'; }
@@ -1812,6 +1816,7 @@ async function openTranscript(itemId, title) {
   $('font-ctrl').hidden = true;
   $('summary-actions').hidden = true;
   _summaryMd = '';
+  _titleKoM = '';
   try {
     const r = await fetch('/history/text', {
       method: 'POST', headers: {'Content-Type':'application/json'},

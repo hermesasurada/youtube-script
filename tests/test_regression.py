@@ -646,12 +646,17 @@ def test_kf_retry_claim_honors_next_retry_at(tmp_path, monkeypatch):
 def test_publish_blog_route_publishes_once_and_records(monkeypatch):
     """블로그 발행 라우트: 발행 → items 기록, 두 번째는 exists, 없는 항목은 404."""
     import sys, types
+    published = {}
+    def publish(title, html, labels=None, **kwargs):
+        published.update({"title": title, "html": html, "labels": labels})
+        return {"id": "p1", "url": "https://x.blogspot.com/p1.html"}
     fake = types.SimpleNamespace(
         configured=lambda: True,
-        publish=lambda title, html, labels=None, **k: {"id": "p1", "url": "https://x.blogspot.com/p1.html"},
+        publish=publish,
         BloggerError=RuntimeError)
     monkeypatch.setitem(sys.modules, "hermes_blogger", fake)
-    item = {"item_id": 7, "title": "T", "title_ko": "제목", "uploader": "a16z", "blog_url": None}
+    item = {"item_id": 7, "title": "OpenAI & Research", "title_ko": "OpenAI와 연구",
+            "uploader": "a16z", "blog_url": None}
     monkeypatch.setattr(db, "get_history_item", lambda i: dict(item) if int(i) == 7 else None)
     saved = {}
     monkeypatch.setattr(db, "set_blog_publish", lambda i, u, p: saved.update({"i": i, "u": u, "p": p}) or True)
@@ -659,9 +664,30 @@ def test_publish_blog_route_publishes_once_and_records(monkeypatch):
     r = c.post("/history/publish-blog", json={"item_id": 7, "html": "<p>x</p>"}).get_json()
     assert r["status"] == "ok" and r["url"].endswith("/p1.html")
     assert saved == {"i": 7, "u": "https://x.blogspot.com/p1.html", "p": "p1"}
+    assert published["title"] == "OpenAI와 연구"
+    assert 'data-ys-original-title="1"' in published["html"]
+    assert "원제 : OpenAI &amp; Research" in published["html"]
+    assert published["html"].index("원제 :") < published["html"].index(">x<")
     item["blog_url"] = r["url"]                                   # 기록된 뒤에는 다시 올리지 않는다
     assert c.post("/history/publish-blog", json={"item_id": 7, "html": "<p>x</p>"}).get_json()["status"] == "exists"
     assert c.post("/history/publish-blog", json={"item_id": 9, "html": "<p>x</p>"}).status_code == 404
+
+
+def test_blog_original_title_is_idempotent_and_translation_only():
+    """원제 행은 번역 발행에만 한 번 추가한다."""
+    body = '<div style="font-size:16px"><p>본문</p></div>'
+    rendered = app._ensure_blog_original_title(body, "OpenAI & Research", "OpenAI와 연구")
+    assert rendered.index("원제 :") < rendered.index("본문")
+    assert app._ensure_blog_original_title(rendered, "OpenAI & Research", "OpenAI와 연구") == rendered
+    assert app._ensure_blog_original_title(body, "한국어 제목", "한국어 제목") == body
+
+    root = os.path.dirname(os.path.dirname(__file__))
+    common = open(os.path.join(root, "static", "js", "common.js"), encoding="utf-8").read()
+    desktop = open(os.path.join(root, "static", "js", "index.js"), encoding="utf-8").read()
+    mobile = open(os.path.join(root, "templates", "mobile.html"), encoding="utf-8").read()
+    assert "dataset.ysOriginalTitle = '1'" in common
+    assert "translatedTitle: _titleKo" in desktop
+    assert "translatedTitle: _titleKoM" in mobile
 
 
 def test_permanent_metadata_errors_are_not_retried():

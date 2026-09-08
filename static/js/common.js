@@ -457,6 +457,7 @@
         + 'background:#f7f7f6;',
     termRow: 'margin:0;padding:.42em 0;font-size:12.5px;line-height:1.55;'
         + 'font-weight:400;color:#7a7f87;',
+    originalTitle: 'margin:0 0 1.4em;font-size:13px;font-weight:400;line-height:1.65;color:#7b8393;',
     li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
@@ -537,7 +538,7 @@
     return { root, title, url, brief };
   }
 
-  function mdToBloggerHtml(md) {
+  function mdToBloggerHtml(md, opts = {}) {
     const { root, title, url, brief } = _summaryBodyDom(md);
 
     // 블로거는 외부 CSS/클래스가 안 먹으므로 모든 서식을 인라인 style로 준다.
@@ -572,6 +573,16 @@
     while (body.lastChild && body.lastChild.nodeType === 3 && !body.lastChild.textContent.trim()) body.lastChild.remove();
     const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거 (박스 삽입 전에 잡는다)
     if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .425em;'));
+
+    // 번역 제목은 Blogger 제목 필드에 쓰고, 원제는 본문 첫 줄에 작게 보존한다.
+    const translatedTitle = String(opts.translatedTitle || '').trim();
+    if (title && translatedTitle && title !== translatedTitle) {
+      const original = document.createElement('p');
+      original.dataset.ysOriginalTitle = '1';
+      original.setAttribute('style', _BL.originalTitle);
+      original.textContent = `원제 : ${title}`;
+      body.insertBefore(original, body.firstChild);
+    }
 
     // 한눈 요약은 블로거 복사에서 제외한다(2026-08-26) — 본문 소제목부터 시작.
 

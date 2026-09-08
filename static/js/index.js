@@ -2343,7 +2343,7 @@ async function publishSummaryToBlog(btn) {
   const label = btn && btn.querySelector('.pub-label');
   const setLbl = (t, color) => { if (label) label.textContent = t; if (btn) btn.style.color = color || ''; };
   if (!confirm('블로그스팟에 바로 발행할까요? (초안이 아니라 즉시 공개됩니다)')) return;
-  const { html, title } = YS.mdToBloggerHtml(_summaryMd);
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKo });
   btn.disabled = true; setLbl('발행 중…');
   try {
     const d = await YS.apiPublishBlog(_summaryItemId, _titleKo || title, html);
