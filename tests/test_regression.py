@@ -27,8 +27,9 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     project = os.path.dirname(os.path.dirname(__file__))
     for name in ("prompt.txt", "prompt_default.txt"):
         prompt = open(os.path.join(project, name), encoding="utf-8").read()
-        assert "ETF·FSD·FDA" in prompt
-        assert "네오클라우드 (Neocloud)`가 아니라 `Neocloud" in prompt
+        assert "Codex·ASIC·HBM·open-weight(오픈웨이트)·FSD·ETF·FDA·AGI·Neocloud(네오클라우드)·bay(베이)" in prompt
+        assert "스테가노그래피 (steganography)`가 아니라 `steganography" in prompt
+        assert "<strong>Neocloud</strong>" not in prompt
         assert '<div class="term-notes">' in prompt
         assert prompt.count('<p class="term-note">') >= 2
 
