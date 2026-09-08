@@ -103,6 +103,8 @@ def resolve_codex_bin() -> str:
 MODEL_KEYS = ("opus", "gpt", "grok")
 NONE_KEY = "none"
 SLOT_COUNT = len(MODEL_KEYS)
+REASONING_LEVELS = ("default", "low", "medium", "high", "xhigh", "max")
+DEFAULT_SUMMARY_REASONING = {"opus": "default", "gpt": "high", "grok": "default"}
 
 
 def _parse_model_tokens(value) -> list[str]:
@@ -167,12 +169,50 @@ def is_valid_monitor_order(value) -> bool:
     return True
 
 
+def normalize_round_robin_order(value) -> list[str]:
+    """Return all summary models exactly once, preserving the requested cycle order."""
+    parsed = _parse_model_tokens(value)
+    order: list[str] = []
+    for key in parsed + list(MODEL_KEYS):
+        if key in MODEL_KEYS and key not in order:
+            order.append(key)
+    return order
+
+
+def is_valid_round_robin_order(value) -> bool:
+    """Summary round-robin always consists of all three models, once each."""
+    if not isinstance(value, list) or len(value) != SLOT_COUNT:
+        return False
+    return set(str(key).lower() for key in value) == set(MODEL_KEYS)
+
+
+def normalize_reasoning_levels(value) -> dict[str, str]:
+    """Normalize per-model reasoning levels while retaining current defaults."""
+    raw = value if isinstance(value, dict) else {}
+    out = dict(DEFAULT_SUMMARY_REASONING)
+    for key in MODEL_KEYS:
+        level = str(raw.get(key, out[key])).strip().lower()
+        if level in REASONING_LEVELS:
+            out[key] = level
+    return out
+
+
+def is_valid_reasoning_levels(value) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    return all(
+        key in MODEL_KEYS and str(level).strip().lower() in REASONING_LEVELS
+        for key, level in value.items()
+    )
+
+
 def run_codex_prompt(
     prompt: str,
     *,
     model: str,
     timeout: float,
     images: Sequence[str] = (),
+    reasoning_effort: str = "default",
 ) -> ProcessResult:
     """Run one non-interactive GPT turn through the authenticated Codex CLI.
 
@@ -193,6 +233,9 @@ def run_codex_prompt(
         ]
         if model:
             command += ["-m", model]
+        effort = str(reasoning_effort or "default").lower()
+        if effort != "default":
+            command += ["-c", f"model_reasoning_effort={effort}"]
         for path in images:
             command += ["-i", path]
         command.append("-")

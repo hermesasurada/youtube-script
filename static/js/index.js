@@ -83,6 +83,13 @@ const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
 const MONITOR_NONE = 'none';
 const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+let monitorSummaryReasoning = { opus: 'default', gpt: 'high', grok: 'default' };
+let monitorSummaryNextModel = 'opus';
+let monitorReasoningOptions = [
+  {value: 'default', label: '기본값'}, {value: 'low', label: '낮음'},
+  {value: 'medium', label: '보통'}, {value: 'high', label: '높음'},
+  {value: 'xhigh', label: '매우 높음'}, {value: 'max', label: '최대'},
+];
 let _channelsCache = null;
 let _channelsRequest = null;
 
@@ -129,24 +136,43 @@ function applyMonitorOrderChange(order, index, selected) {
 }
 
 function renderMonitorModelOrders() {
-  for (const kind of ['summary', 'capture']) {
-    const el = document.getElementById(kind + '-model-order');
-    if (!el) continue;
-    const order = padMonitorOrder(monitorModelOrders[kind] || MONITOR_MODELS);
-    el.innerHTML = order.map((selected, index) => {
+  const summaryEl = document.getElementById('summary-model-order');
+  if (summaryEl) {
+    const order = monitorModelOrders.summary || MONITOR_MODELS;
+    summaryEl.innerHTML = '<div class="model-round-columns" aria-hidden="true"><span></span><span>모델</span><span>추론</span><span></span></div>' + order.map((selected, index) => {
+      const models = MONITOR_MODELS.map(model =>
+        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
+      ).join('');
+      const levels = monitorReasoningOptions.map(option =>
+        `<option value="${option.value}" ${option.value === monitorSummaryReasoning[selected] ? 'selected' : ''}>${option.label}</option>`
+      ).join('');
+      const next = selected === monitorSummaryNextModel ? '<span class="model-round-next">다음</span>' : '<span></span>';
+      return `<label class="model-order-slot model-round-slot"><span class="model-order-rank">${index + 1}</span>`
+        + `<select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
+        + `onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select>`
+        + `<select class="model-order-select model-reasoning-select" aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" `
+        + `onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select>${next}</label>`;
+    }).join('');
+  }
+  const captureEl = document.getElementById('capture-model-order');
+  if (captureEl) {
+    const order = padMonitorOrder(monitorModelOrders.capture || MONITOR_MODELS);
+    captureEl.innerHTML = order.map((selected, index) => {
       const options = monitorOrderChoices(order, index).map(model =>
         `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
       return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
-        + `<select class="model-order-select" aria-label="${kind === 'summary' ? '요약' : '캡처'} ${index + 1}순위" `
-        + `onchange="changeMonitorModelOrder('${kind}', ${index}, this.value)">${options}</select></label>`;
+        + `<select class="model-order-select" aria-label="캡처 ${index + 1}순위" `
+        + `onchange="changeMonitorModelOrder('capture', ${index}, this.value)">${options}</select></label>`;
     }).join('');
   }
 }
 
 async function changeMonitorModelOrder(kind, index, selected) {
   const original = [...monitorModelOrders[kind]];
-  const previous = applyMonitorOrderChange(original, index, selected);
+  const previous = kind === 'summary'
+    ? applyMonitorOrderChange(original, index, selected).filter(model => model !== MONITOR_NONE)
+    : applyMonitorOrderChange(original, index, selected);
   monitorModelOrders[kind] = previous;
   renderMonitorModelOrders();
   const selects = document.querySelectorAll('.model-order-select');
@@ -160,10 +186,14 @@ async function changeMonitorModelOrder(kind, index, selected) {
     })).json();
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders;
+    monitorSummaryReasoning = d.summary_reasoning || monitorSummaryReasoning;
+    monitorSummaryNextModel = d.summary_next_model || monitorSummaryNextModel;
     applyMonitorModelLabels(d.model_labels);
     if (_channelsCache) {
       _channelsCache.model_orders = d.model_orders;
       _channelsCache.model_labels = d.model_labels;
+      _channelsCache.summary_reasoning = monitorSummaryReasoning;
+      _channelsCache.summary_next_model = monitorSummaryNextModel;
     }
     status.textContent = '저장됨';
   } catch (e) {
@@ -176,10 +206,44 @@ async function changeMonitorModelOrder(kind, index, selected) {
   }
 }
 
+async function changeMonitorReasoning(model, level) {
+  const original = monitorSummaryReasoning[model];
+  monitorSummaryReasoning[model] = level;
+  renderMonitorModelOrders();
+  const selects = document.querySelectorAll('.model-order-select');
+  const status = document.getElementById('model-order-status');
+  selects.forEach(el => { el.disabled = true; });
+  status.textContent = '저장 중…';
+  try {
+    const d = await (await fetch('/channels/model-orders', {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({summary_reasoning: {[model]: level}}),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    monitorSummaryReasoning = d.summary_reasoning;
+    monitorSummaryNextModel = d.summary_next_model;
+    if (_channelsCache) {
+      _channelsCache.summary_reasoning = d.summary_reasoning;
+      _channelsCache.summary_next_model = d.summary_next_model;
+    }
+    status.textContent = '저장됨';
+  } catch (e) {
+    monitorSummaryReasoning[model] = original;
+    status.textContent = '저장 실패';
+    alert('추론 수준 저장 실패: ' + e.message);
+  } finally {
+    renderMonitorModelOrders();
+    window.setTimeout(() => { if (status.textContent === '저장됨') status.textContent = ''; }, 1400);
+  }
+}
+
 function renderChannels(d) {
   const list = document.getElementById('channels-list');
   const qEl  = document.getElementById('channels-queue');
   monitorModelOrders = d.model_orders || monitorModelOrders;
+  monitorSummaryReasoning = d.summary_reasoning || monitorSummaryReasoning;
+  monitorSummaryNextModel = d.summary_next_model || monitorSummaryNextModel;
+  monitorReasoningOptions = d.reasoning_options || monitorReasoningOptions;
   applyMonitorModelLabels(d.model_labels);
   renderMonitorModelOrders();
   const q = d.queue || {};

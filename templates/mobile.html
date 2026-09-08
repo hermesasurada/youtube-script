@@ -443,6 +443,15 @@
       background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888178' d='M1 1l4 4 4-4'/></svg>");
       background-repeat: no-repeat; background-position: right .35rem center; }
     .model-order-select:disabled { opacity: .55; }
+    .model-order-selects#summary-model-order { grid-template-columns: minmax(0, 1fr); gap: .35rem; }
+    .model-round-slot { display: grid; grid-template-columns: 12px minmax(0, 1fr) 92px 32px; }
+    .model-round-columns { display: grid; grid-template-columns: 12px minmax(0, 1fr) 92px 32px;
+      gap: .2rem; color: var(--muted); font-size: 10px; line-height: 1; }
+    .model-order-selects#capture-model-order { grid-template-columns: minmax(0, 1fr); }
+    .model-order-selects#capture-model-order .model-order-slot { display: grid; grid-template-columns: 12px minmax(0, 1fr); }
+    .model-reasoning-select { font-family: var(--font-sans); }
+    .model-round-next { color: var(--highlight); background: var(--highlight-soft); border-radius: 999px;
+      font-size: 10px; font-weight: 700; line-height: 20px; text-align: center; }
     .model-order-hint { margin: -.1rem 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
     .ch-empty, .ch-loading { color: var(--muted); font-size: 13.5px; padding: .5rem .2rem; }
     .ch-row { display: flex; align-items: center; gap: .75rem; padding: .7rem .8rem;
@@ -1225,6 +1234,13 @@ const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
 const MONITOR_NONE = 'none';
 const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
+let monitorSummaryReasoning = { opus: 'default', gpt: 'high', grok: 'default' };
+let monitorSummaryNextModel = 'opus';
+let monitorReasoningOptions = [
+  {value: 'default', label: '기본값'}, {value: 'low', label: '낮음'},
+  {value: 'medium', label: '보통'}, {value: 'high', label: '높음'},
+  {value: 'xhigh', label: '매우 높음'}, {value: 'max', label: '최대'},
+];
 let _mobileChannelsCache = null;
 let _mobileChannelsRequest = null;
 
@@ -1270,32 +1286,51 @@ function applyMonitorOrderChange(order, index, selected) {
 
 function monitorModelControlsHtml() {
   return `<div class="model-order-card">
-    <div class="model-order-head"><span>LLM 처리 순서</span><span class="model-order-status" id="model-order-status"></span></div>
+    <div class="model-order-head"><span>모델 설정</span><span class="model-order-status" id="model-order-status"></span></div>
     <div class="model-order-row"><span class="model-order-label">요약</span><div class="model-order-selects" id="summary-model-order"></div></div>
     <div class="model-order-row"><span class="model-order-label">캡처</span><div class="model-order-selects" id="capture-model-order"></div></div>
-    <p class="model-order-hint">실패 시 오른쪽으로 넘어가고, 없음에서 멈춥니다.</p>
+    <p class="model-order-hint">요약은 작업마다 다음 모델로 순환하며, 실패하면 다음 순번으로 이어집니다. 캡처는 왼쪽부터 폴백합니다.</p>
   </div>`;
 }
 
 function renderMonitorModelOrders() {
-  for (const kind of ['summary', 'capture']) {
-    const el = $(kind + '-model-order');
-    if (!el) continue;
-    const order = padMonitorOrder(monitorModelOrders[kind] || MONITOR_MODELS);
-    el.innerHTML = order.map((selected, index) => {
+  const summaryEl = $('summary-model-order');
+  if (summaryEl) {
+    const order = monitorModelOrders.summary || MONITOR_MODELS;
+    summaryEl.innerHTML = '<div class="model-round-columns" aria-hidden="true"><span></span><span>모델</span><span>추론</span><span></span></div>' + order.map((selected, index) => {
+      const models = MONITOR_MODELS.map(model =>
+        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
+      ).join('');
+      const levels = monitorReasoningOptions.map(option =>
+        `<option value="${option.value}" ${option.value === monitorSummaryReasoning[selected] ? 'selected' : ''}>${option.label}</option>`
+      ).join('');
+      const next = selected === monitorSummaryNextModel ? '<span class="model-round-next">다음</span>' : '<span></span>';
+      return `<label class="model-order-slot model-round-slot"><span class="model-order-rank">${index + 1}</span>`
+        + `<select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
+        + `onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select>`
+        + `<select class="model-order-select model-reasoning-select" aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" `
+        + `onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select>${next}</label>`;
+    }).join('');
+  }
+  const captureEl = $('capture-model-order');
+  if (captureEl) {
+    const order = padMonitorOrder(monitorModelOrders.capture || MONITOR_MODELS);
+    captureEl.innerHTML = order.map((selected, index) => {
       const options = monitorOrderChoices(order, index).map(model =>
         `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
       ).join('');
       return `<label class="model-order-slot"><span class="model-order-rank">${index + 1}</span>`
-        + `<select class="model-order-select" aria-label="${kind === 'summary' ? '요약' : '캡처'} ${index + 1}순위" `
-        + `onchange="changeMonitorModelOrder('${kind}', ${index}, this.value)">${options}</select></label>`;
+        + `<select class="model-order-select" aria-label="캡처 ${index + 1}순위" `
+        + `onchange="changeMonitorModelOrder('capture', ${index}, this.value)">${options}</select></label>`;
     }).join('');
   }
 }
 
 async function changeMonitorModelOrder(kind, index, selected) {
   const original = [...monitorModelOrders[kind]];
-  const next = applyMonitorOrderChange(original, index, selected);
+  const next = kind === 'summary'
+    ? applyMonitorOrderChange(original, index, selected).filter(model => model !== MONITOR_NONE)
+    : applyMonitorOrderChange(original, index, selected);
   monitorModelOrders[kind] = next;
   renderMonitorModelOrders();
   const selects = document.querySelectorAll('.model-order-select');
@@ -1309,10 +1344,14 @@ async function changeMonitorModelOrder(kind, index, selected) {
     })).json();
     if (d.error) throw new Error(d.error);
     monitorModelOrders = d.model_orders;
+    monitorSummaryReasoning = d.summary_reasoning || monitorSummaryReasoning;
+    monitorSummaryNextModel = d.summary_next_model || monitorSummaryNextModel;
     applyMonitorModelLabels(d.model_labels);
     if (_mobileChannelsCache) {
       _mobileChannelsCache.model_orders = d.model_orders;
       _mobileChannelsCache.model_labels = d.model_labels;
+      _mobileChannelsCache.summary_reasoning = monitorSummaryReasoning;
+      _mobileChannelsCache.summary_next_model = monitorSummaryNextModel;
     }
     status.textContent = '저장됨';
   } catch (e) {
@@ -1325,9 +1364,43 @@ async function changeMonitorModelOrder(kind, index, selected) {
   }
 }
 
+async function changeMonitorReasoning(model, level) {
+  const original = monitorSummaryReasoning[model];
+  monitorSummaryReasoning[model] = level;
+  renderMonitorModelOrders();
+  const selects = document.querySelectorAll('.model-order-select');
+  const status = $('model-order-status');
+  selects.forEach(el => { el.disabled = true; });
+  status.textContent = '저장 중…';
+  try {
+    const d = await (await fetch('/channels/model-orders', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({summary_reasoning: {[model]: level}}),
+    })).json();
+    if (d.error) throw new Error(d.error);
+    monitorSummaryReasoning = d.summary_reasoning;
+    monitorSummaryNextModel = d.summary_next_model;
+    if (_mobileChannelsCache) {
+      _mobileChannelsCache.summary_reasoning = d.summary_reasoning;
+      _mobileChannelsCache.summary_next_model = d.summary_next_model;
+    }
+    status.textContent = '저장됨';
+  } catch (e) {
+    monitorSummaryReasoning[model] = original;
+    status.textContent = '저장 실패';
+    alert('추론 수준 저장 실패: ' + e.message);
+  } finally {
+    renderMonitorModelOrders();
+    window.setTimeout(() => { if (status.textContent === '저장됨') status.textContent = ''; }, 1400);
+  }
+}
+
 function renderChannelsM(d) {
   const body = $('modal-body');
   monitorModelOrders = d.model_orders || monitorModelOrders;
+  monitorSummaryReasoning = d.summary_reasoning || monitorSummaryReasoning;
+  monitorSummaryNextModel = d.summary_next_model || monitorSummaryNextModel;
+  monitorReasoningOptions = d.reasoning_options || monitorReasoningOptions;
   applyMonitorModelLabels(d.model_labels);
   const q = d.queue || {}, parts = [];
   if (q.pending)    parts.push(`대기 ${q.pending}`);

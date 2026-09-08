@@ -1605,6 +1605,17 @@ def _monitor_model_labels() -> dict[str, str]:
     }
 
 
+def _monitor_reasoning_options() -> list[dict[str, str]]:
+    return [
+        {"value": "default", "label": "기본값"},
+        {"value": "low", "label": "낮음"},
+        {"value": "medium", "label": "보통"},
+        {"value": "high", "label": "높음"},
+        {"value": "xhigh", "label": "매우 높음"},
+        {"value": "max", "label": "최대"},
+    ]
+
+
 def _model_line(label: str, note: str = "") -> str:
     """요약에 심는 '요약 모델' 마커(HTML 주석). common.js가 추출해 메타 칩(YouTube 보기 옆)으로
     렌더한다. 렌더 안 되는 환경에선 주석이라 화면에 안 보임(graceful)."""
@@ -1620,13 +1631,14 @@ def _compress_line(summary_body: str, transcript_chars: int) -> str:
     return f"<!--SUMMARY_COMPRESS:{pct}-->\n\n"
 
 
-def _summarize_with_gpt(prompt: str) -> tuple[str, str]:
+def _summarize_with_gpt(prompt: str, *, reasoning_effort: str = "default") -> tuple[str, str]:
     """Codex CLI의 GPT 모델로 단일턴 요약. (요약 텍스트, 오류사유)."""
     try:
         r = llm_gateway.run_codex_prompt(
             _SUMMARY_SYS + "\n\n" + prompt,
             model=GPT_MODEL,
             timeout=GPT_TIMEOUT,
+            reasoning_effort=reasoning_effort,
         )
     except Exception as e:
         return "", f"gpt 실행 오류: {e}"
@@ -1640,7 +1652,7 @@ def _summarize_with_gpt(prompt: str) -> tuple[str, str]:
     return out, ""
 
 
-def _summarize_with_grok(prompt: str) -> tuple[str, str]:
+def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default") -> tuple[str, str]:
     """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
 
     긴 전사 프롬프트는 argv 대신 --prompt-file(임시파일)로 전달(ARG_MAX 회피).
@@ -1654,6 +1666,8 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
         cmd = [GROK_BIN, "--prompt-file", tf.name]
         if GROK_MODEL:
             cmd += ["-m", GROK_MODEL]
+        if reasoning_effort != "default":
+            cmd += ["--reasoning-effort", reasoning_effort]
         r = llm_gateway.run_command(cmd, timeout=GROK_TIMEOUT)
     except Exception as e:
         return "", f"grok 실행 오류: {e}"
@@ -1673,9 +1687,10 @@ def _summarize_with_grok(prompt: str) -> tuple[str, str]:
 
 
 def _summarize_ordered(prompt: str, save_path: str | None, model_order,
-                       *, transcript_chars: int = 0):
+                       *, transcript_chars: int = 0, reasoning_levels=None):
     """지정 순서대로 Opus/GPT/Grok을 시도하는 자동모니터용 SSE 생성기."""
     order = llm_gateway.normalize_model_order(model_order)
+    reasoning = llm_gateway.normalize_reasoning_levels(reasoning_levels)
     failures: list[str] = []
     client_has_output = False
 
@@ -1710,6 +1725,8 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
                 "--append-system-prompt", _SUMMARY_SYS,
                 "--verbose",
             ]
+            if reasoning["opus"] != "default":
+                command += ["--effort", reasoning["opus"]]
             chunks: list[str] = []
             final: str | None = None
             error_msg: str | None = None
@@ -1795,10 +1812,10 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             continue
 
         if key == "gpt":
-            body, err = _summarize_with_gpt(prompt)
+            body, err = _summarize_with_gpt(prompt, reasoning_effort=reasoning["gpt"])
             label = _model_label(GPT_MODEL or "gpt")
         else:
-            body, err = _summarize_with_grok(prompt)
+            body, err = _summarize_with_grok(prompt, reasoning_effort=reasoning["grok"])
             # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.
             label = _model_label(GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok")
         if not body:
@@ -1978,6 +1995,9 @@ def summarize():
     requested_order = data.get("models") or data.get("model_order")
     model_order = (llm_gateway.normalize_model_order(requested_order)
                    if requested_order is not None else None)
+    reasoning_levels = data.get("reasoning_levels")
+    if reasoning_levels is not None and not llm_gateway.is_valid_reasoning_levels(reasoning_levels):
+        return _json({"error": "유효하지 않은 요약 추론 수준입니다."}, 400)
     log.info(
         "summarize start: %s%s",
         os.path.basename(abs_path),
@@ -1990,6 +2010,7 @@ def summarize():
                 yield from _summarize_ordered(
                     prompt, save_path, model_order,
                     transcript_chars=len(transcript_blob),
+                    reasoning_levels=reasoning_levels,
                 )
             else:
                 yield from _summarize_with_claude(
@@ -2296,33 +2317,51 @@ def queue_item_cancel(qid: int):
 def channels_list():
     """모니터링 채널 목록 + 큐 요약(모달용)."""
     try:
+        summary_config = db.get_monitor_summary_config()
         return _json({"channels": db.list_channels(), "queue": db.queue_counts(),
                       "model_orders": db.get_monitor_model_orders(),
-                      "model_labels": _monitor_model_labels()})
+                      "model_labels": _monitor_model_labels(),
+                      "summary_reasoning": summary_config["reasoning"],
+                      "summary_next_model": summary_config["next_model"],
+                      "reasoning_options": _monitor_reasoning_options()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 
 
 @app.route("/channels/model-orders", methods=["PATCH"])
 def channel_model_orders():
-    """자동모니터 요약/캡처의 Opus·GPT·Grok 폴백 순서를 저장한다."""
+    """자동모니터의 요약 라운드로빈·추론 수준과 캡처 폴백 순서를 저장한다."""
     data = request.get_json(force=True) or {}
     updates = {}
     for key in ("summary", "capture"):
         if key not in data:
             continue
         value = data[key]
-        if not llm_gateway.is_valid_monitor_order(value):
+        valid = (llm_gateway.is_valid_round_robin_order(value)
+                 if key == "summary" else llm_gateway.is_valid_monitor_order(value))
+        if not valid:
             return _json({
-                "error": f"{key} 순서는 1순위에 모델을 두고, 없음은 맨 뒤에만 둘 수 있습니다.",
+                "error": ("요약 순서는 세 모델을 각각 한 번씩 포함해야 합니다."
+                          if key == "summary" else
+                          "캡처 순서는 1순위에 모델을 두고, 없음은 맨 뒤에만 둘 수 있습니다."),
             }, 400)
-        updates[key] = llm_gateway.normalize_model_order(value)
-    if not updates:
-        return _json({"error": "변경할 순서가 없습니다(summary/capture)."}, 400)
+        updates[key] = (llm_gateway.normalize_round_robin_order(value)
+                        if key == "summary" else llm_gateway.normalize_model_order(value))
+    reasoning_update = data.get("summary_reasoning")
+    if reasoning_update is not None and not llm_gateway.is_valid_reasoning_levels(reasoning_update):
+        return _json({"error": "유효하지 않은 요약 추론 수준입니다."}, 400)
+    if not updates and reasoning_update is None:
+        return _json({"error": "변경할 모델 순서나 추론 수준이 없습니다."}, 400)
     try:
-        saved = db.set_monitor_model_orders(**updates)
+        saved = db.set_monitor_model_orders(**updates) if updates else db.get_monitor_model_orders()
+        if reasoning_update is not None:
+            db.set_monitor_summary_reasoning(reasoning_update)
+        summary_config = db.get_monitor_summary_config()
         return _json({"ok": True, "model_orders": saved,
-                      "model_labels": _monitor_model_labels()})
+                      "model_labels": _monitor_model_labels(),
+                      "summary_reasoning": summary_config["reasoning"],
+                      "summary_next_model": summary_config["next_model"],
+                      "reasoning_options": _monitor_reasoning_options()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 

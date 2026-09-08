@@ -477,10 +477,11 @@ def _get_prompt() -> str:
 
 
 def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
-                  summary_models=None, capture_models=None) -> dict:
+                  summary_models=None, capture_models=None, summary_reasoning=None) -> dict:
     """전사→요약→캡처를 서버 엔드포인트로 순차 수행. 완료 요약 파일 경로 반환.
 
-    summary_models/capture_models: 자동모니터 설정에서 읽은 작업별 폴백 순서.
+    summary_models: 이번 작업의 순환 시작 모델부터 배치한 요약 폴백 순서.
+    summary_reasoning: 요약 모델별 추론 수준. capture_models는 기존 캡처 폴백 순서.
     skip_claude는 구버전 호출 호환용이며 명시 순서가 있으면 사용하지 않는다.
     """
     url = v["url"]
@@ -532,6 +533,10 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     sum_body = {"txt_path": txt_path, "prompt": prompt}
     if summary_models is not None:
         sum_body["models"] = llm_gateway.normalize_model_order(summary_models)
+        if summary_reasoning is not None:
+            sum_body["reasoning_levels"] = llm_gateway.normalize_reasoning_levels(
+                summary_reasoning
+            )
     elif skip_claude:
         sum_body["skip_claude"] = True
         sum_body["mode"] = "grok"
@@ -611,9 +616,8 @@ def drain() -> None:
     받는 작업이라 주기당 1건으로 제한된다. deferred는 due가 되면 poll 단계에서
     pending으로 복귀한다.
     """
-    orders = db.get_monitor_model_orders()
-    capture_order = orders["capture"]
-    _drain_main_one(orders, capture_order)
+    capture_order = db.get_monitor_model_orders()["capture"]
+    _drain_main_one(capture_order)
     _drain_kf_retry_one(capture_order)
 
 
@@ -687,14 +691,16 @@ def _drain_kf_retry_one(capture_order) -> None:
     return
 
 
-def _drain_main_one(orders, capture_order) -> None:
+def _drain_main_one(capture_order) -> None:
     """본편 큐(pending)에서 1건 — 전사→요약→캡처 전체 파이프라인."""
     v = db.queue_claim_one()
     if not v:
         return
     title = v["title"] or v["yt_id"]
     head = _notify_head(v, title)
-    summary_order = orders["summary"]
+    summary_round = db.reserve_monitor_summary_round()
+    summary_order = summary_round["models"]
+    primary = summary_round["primary"]
     proceed, mode, detail = summarizer_gate(summary_order)
     if not proceed:
         # 요약 경로가 없으면 시도 자체를 안 한 것 — 예산을 태우지 않고 되돌린다.
@@ -704,13 +710,15 @@ def _drain_main_one(orders, capture_order) -> None:
         return
     active_summary_order = summary_order[summary_order.index(mode):]
     if detail:
-        notify(f"⚠️ 요약 1순위 사용 불가 — **{mode.upper()}부터 폴백 처리**\n{detail}")
+        notify(f"⚠️ 이번 요약 순번 {primary.upper()} 사용 불가 — "
+               f"{mode.upper()}부터 순환 폴백\n{detail}")
 
-    log(f"[drain] 처리 시작: {title} (mode={mode})")
+    log(f"[drain] 처리 시작: {title} (round={primary}, mode={mode})")
     try:
         res = process_video(
             v, _get_prompt(),
             summary_models=active_summary_order,
+            summary_reasoning=summary_round["reasoning"],
             capture_models=capture_order,
         )
         kf_note = res.get("kf_note")

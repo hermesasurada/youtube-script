@@ -311,15 +311,15 @@
     </div>
     <div class="channels-modal-body utility-panel-body">
       <p class="prompt-hint utility-note">등록된 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다. 채널 확인과 영상 처리는 20분 주기로 실행됩니다.</p>
-      <div class="utility-section-head"><span>LLM 폴백</span><small>왼쪽부터 실행</small></div>
+      <div class="utility-section-head"><span>LLM 처리</span><small>요약 순환 · 캡처 폴백</small></div>
       <div class="model-order-card">
         <div class="model-order-head">
-          <span>LLM 처리 순서</span>
+          <span>모델 설정</span>
           <span class="model-order-status" id="model-order-status"></span>
         </div>
         <div class="model-order-row"><span class="model-order-label">요약</span><div class="model-order-selects" id="summary-model-order"></div></div>
         <div class="model-order-row"><span class="model-order-label">캡처</span><div class="model-order-selects" id="capture-model-order"></div></div>
-        <p class="model-order-hint">실패 시 오른쪽으로 넘어가고, 없음에서 멈춥니다.</p>
+        <p class="model-order-hint">요약은 작업마다 다음 모델로 순환하며, 실패하면 다음 순번으로 이어집니다. 캡처는 왼쪽부터 폴백합니다.</p>
       </div>
       <div class="channels-queue" id="channels-queue"></div>
       <div class="utility-section-head channels-list-title"><span>등록 채널</span><small id="channels-count">—</small></div>

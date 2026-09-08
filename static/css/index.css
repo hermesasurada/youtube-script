@@ -825,6 +825,15 @@ select option { background: var(--surface); color: var(--text); }
   background-repeat: no-repeat; background-position: right .35rem center;
 }
 .model-order-select:disabled { opacity: .55; cursor: wait; }
+.model-order-selects#summary-model-order { grid-template-columns: minmax(0, 1fr); gap: .3rem; }
+.model-round-slot { display: grid; grid-template-columns: 12px minmax(0, 1fr) 88px 30px; }
+.model-round-columns { display: grid; grid-template-columns: 12px minmax(0, 1fr) 88px 30px;
+  gap: .25rem; color: var(--muted); font-size: 9.5px; line-height: 1; }
+.model-reasoning-select { font-family: var(--font-sans); }
+.model-round-next {
+  color: var(--highlight); background: var(--highlight-soft); border-radius: 999px;
+  font-size: 9.5px; font-weight: 700; line-height: 18px; text-align: center;
+}
 .model-order-hint { margin: -.1rem 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
 .channels-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
 .channels-empty { color: var(--muted); font-size: 13px; padding: .5rem .2rem; }

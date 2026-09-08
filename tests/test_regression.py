@@ -740,6 +740,10 @@ def test_monitor_model_orders_persist_independently():
         client = app.app.test_client()
         payload = client.get("/channels").get_json()
         assert payload["model_orders"] == saved
+        assert payload["summary_reasoning"] == {
+            "opus": "default", "gpt": "high", "grok": "default",
+        }
+        assert payload["summary_next_model"] == "gpt"
         changed = client.patch(
             "/channels/model-orders", json={"summary": ["opus", "grok", "gpt"]}
         ).get_json()
@@ -751,16 +755,42 @@ def test_monitor_model_orders_persist_independently():
         assert bad.status_code == 400
         truncated = client.patch(
             "/channels/model-orders", json={"summary": ["grok", "none", "none"]}
-        ).get_json()
-        assert truncated["model_orders"]["summary"] == ["grok", "none", "none"]
+        )
+        assert truncated.status_code == 400
         middle = client.patch(
             "/channels/model-orders", json={"summary": ["opus", "none", "gpt"]}
         )
         assert middle.status_code == 400
+        reasoning = client.patch(
+            "/channels/model-orders", json={"summary_reasoning": {"opus": "xhigh"}}
+        ).get_json()
+        assert reasoning["summary_reasoning"]["opus"] == "xhigh"
+        assert reasoning["summary_reasoning"]["gpt"] == "high"
+        bad_reasoning = client.patch(
+            "/channels/model-orders", json={"summary_reasoning": {"gpt": "extreme"}}
+        )
+        assert bad_reasoning.status_code == 400
     finally:
         db.set_monitor_model_orders(
             summary=["opus", "gpt", "grok"], capture=["opus", "gpt", "grok"]
         )
+        db.set_monitor_summary_reasoning(
+            {"opus": "default", "gpt": "high", "grok": "default"}
+        )
+
+
+def test_monitor_summary_round_robin_rotates_and_wraps():
+    db.init()
+    try:
+        db.set_monitor_model_orders(summary=["gpt", "grok", "opus"])
+        rounds = [db.reserve_monitor_summary_round() for _ in range(4)]
+        assert [item["primary"] for item in rounds] == ["gpt", "grok", "opus", "gpt"]
+        assert rounds[0]["models"] == ["gpt", "grok", "opus"]
+        assert rounds[1]["models"] == ["grok", "opus", "gpt"]
+        assert rounds[2]["models"] == ["opus", "gpt", "grok"]
+        assert rounds[0]["reasoning"]["gpt"] == "high"
+    finally:
+        db.set_monitor_model_orders(summary=["opus", "gpt", "grok"])
 
 
 def test_membership_capture_failure_is_not_retried(monkeypatch):
@@ -910,10 +940,14 @@ def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
         "prompt",
         summary_models=["gpt", "opus", "grok"],
         capture_models=["grok", "gpt", "opus"],
+        summary_reasoning={"opus": "low", "gpt": "high", "grok": "medium"},
     )
     summary_body = next(body for url, body in calls if url.endswith("/summarize"))
     capture_body = next(body for url, body in calls if url.endswith("/keyframes"))
     assert summary_body["models"] == ["gpt", "opus", "grok"]
+    assert summary_body["reasoning_levels"] == {
+        "opus": "low", "gpt": "high", "grok": "medium",
+    }
     assert capture_body["models"] == ["grok", "gpt", "opus"]
 
 
@@ -926,6 +960,36 @@ def test_stream_command_timeout_and_stderr_drain():
     assert any(event.kind == "stdout" and event.data.strip() == "ready" for event in events)
     assert events[-1].kind == "timeout"
     assert events[-1].stderr
+
+
+def test_codex_summary_passes_selected_reasoning_effort(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+
+    def run_command(args, **kwargs):
+        seen["args"] = args
+        return llm_gateway.ProcessResult(0, "# 결과", "")
+
+    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
+    result = app.llm_gateway.run_codex_prompt(
+        "prompt", model="gpt-6-astra", timeout=10, reasoning_effort="xhigh"
+    )
+    assert result.returncode == 0
+    assert "model_reasoning_effort=xhigh" in seen["args"]
+
+
+def test_grok_summary_passes_selected_reasoning_effort(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+
+    def run_command(args, **kwargs):
+        seen["args"] = args
+        return llm_gateway.ProcessResult(0, "# 결과", "")
+
+    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
+    body, error = app._summarize_with_grok("prompt", reasoning_effort="high")
+    assert body and not error
+    assert seen["args"][-2:] == ["--reasoning-effort", "high"]
 
 
 def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
@@ -959,11 +1023,11 @@ def test_ordered_summary_uses_requested_fallback_order(monkeypatch):
     calls = []
     monkeypatch.setattr(
         app, "_summarize_with_gpt",
-        lambda prompt: calls.append("gpt") or ("", "quota"),
+        lambda prompt, **kwargs: calls.append(("gpt", kwargs["reasoning_effort"])) or ("", "quota"),
     )
     monkeypatch.setattr(
         app, "_summarize_with_grok",
-        lambda prompt: calls.append("grok") or ("# Grok 성공", ""),
+        lambda prompt, **kwargs: calls.append(("grok", kwargs["reasoning_effort"])) or ("# Grok 성공", ""),
     )
     monkeypatch.setattr(
         app.llm_gateway, "stream_command",
@@ -972,8 +1036,9 @@ def test_ordered_summary_uses_requested_fallback_order(monkeypatch):
 
     output = list(app._summarize_ordered(
         "prompt", None, ["gpt", "grok", "opus"], transcript_chars=100,
+        reasoning_levels={"gpt": "xhigh", "grok": "low", "opus": "default"},
     ))
-    assert calls == ["gpt", "grok"]
+    assert calls == [("gpt", "xhigh"), ("grok", "low")]
     bodies = [json.loads(chunk[6:].strip()) for chunk in output if chunk.startswith("data: ") and chunk[6:].strip()]
     assert any("Grok 성공" in body for body in bodies)
     assert output[-1].startswith("event: done")

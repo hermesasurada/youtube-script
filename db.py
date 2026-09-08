@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS monitor_settings (
     id             INTEGER PRIMARY KEY CHECK(id = 1),
     summary_models TEXT NOT NULL DEFAULT '["opus","gpt","grok"]',
     capture_models TEXT NOT NULL DEFAULT '["opus","gpt","grok"]',
+    summary_reasoning TEXT NOT NULL DEFAULT '{"opus":"default","gpt":"high","grok":"default"}',
+    summary_cursor INTEGER NOT NULL DEFAULT 0,
     updated_at     TEXT
 );
 
@@ -317,6 +319,20 @@ def init() -> None:
                 if col not in icols:
                     c.execute(f"ALTER TABLE items ADD COLUMN {col} TEXT")
             c.execute("PRAGMA user_version = 16")
+        if ver < 17:
+            # v17: 요약 모델은 작업마다 순환한다. cursor는 '다음 작업'의 시작 모델이고,
+            # reasoning은 모델별 추론 수준(default=각 CLI의 현재 기본 동작)이다.
+            mcols = {r[1] for r in c.execute("PRAGMA table_info(monitor_settings)").fetchall()}
+            if "summary_reasoning" not in mcols:
+                c.execute(
+                    "ALTER TABLE monitor_settings ADD COLUMN summary_reasoning TEXT NOT NULL "
+                    "DEFAULT '{\"opus\":\"default\",\"gpt\":\"high\",\"grok\":\"default\"}'"
+                )
+            if "summary_cursor" not in mcols:
+                c.execute(
+                    "ALTER TABLE monitor_settings ADD COLUMN summary_cursor INTEGER NOT NULL DEFAULT 0"
+                )
+            c.execute("PRAGMA user_version = 17")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -698,7 +714,7 @@ def set_channel_distill(cid: int, enabled: bool) -> bool:
 
 
 def get_monitor_model_orders() -> dict[str, list[str]]:
-    """자동모니터의 요약/캡처별 LLM 처리 순서."""
+    """자동모니터의 요약 라운드로빈 순서와 캡처 폴백 순서."""
     row = _conn().execute(
         "SELECT summary_models, capture_models FROM monitor_settings WHERE id = 1"
     ).fetchone()
@@ -706,7 +722,7 @@ def get_monitor_model_orders() -> dict[str, list[str]]:
         defaults = list(llm_gateway.MODEL_KEYS)
         return {"summary": defaults.copy(), "capture": defaults.copy()}
     return {
-        "summary": llm_gateway.normalize_model_order(row["summary_models"]),
+        "summary": llm_gateway.normalize_round_robin_order(row["summary_models"]),
         "capture": llm_gateway.normalize_model_order(row["capture_models"]),
     }
 
@@ -714,14 +730,15 @@ def get_monitor_model_orders() -> dict[str, list[str]]:
 def set_monitor_model_orders(*, summary=None, capture=None) -> dict[str, list[str]]:
     """보낸 작업의 모델 순서만 갱신하고 정규화된 전체 설정을 반환한다."""
     current = get_monitor_model_orders()
-    summary_order = llm_gateway.normalize_model_order(
+    summary_order = llm_gateway.normalize_round_robin_order(
         current["summary"] if summary is None else summary
     )
     capture_order = llm_gateway.normalize_model_order(
         current["capture"] if capture is None else capture
     )
     with _lock:
-        _conn().execute(
+        conn = _conn()
+        conn.execute(
             """INSERT INTO monitor_settings (id, summary_models, capture_models, updated_at)
                VALUES (1, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
@@ -730,7 +747,95 @@ def set_monitor_model_orders(*, summary=None, capture=None) -> dict[str, list[st
                  updated_at=excluded.updated_at""",
             (json.dumps(summary_order), json.dumps(capture_order), _now()),
         )
+        if summary is not None:
+            conn.execute("UPDATE monitor_settings SET summary_cursor = 0 WHERE id = 1")
     return {"summary": summary_order, "capture": capture_order}
+
+
+def get_monitor_summary_config() -> dict:
+    """요약 라운드로빈의 순서·다음 모델·모델별 추론 수준을 반환한다."""
+    row = _conn().execute(
+        "SELECT summary_models, summary_reasoning, summary_cursor "
+        "FROM monitor_settings WHERE id = 1"
+    ).fetchone()
+    if not row:
+        order = list(llm_gateway.MODEL_KEYS)
+        reasoning = dict(llm_gateway.DEFAULT_SUMMARY_REASONING)
+        cursor = 0
+    else:
+        order = llm_gateway.normalize_round_robin_order(row["summary_models"])
+        try:
+            raw_reasoning = json.loads(row["summary_reasoning"] or "{}")
+        except (TypeError, ValueError):
+            raw_reasoning = {}
+        reasoning = llm_gateway.normalize_reasoning_levels(raw_reasoning)
+        cursor = int(row["summary_cursor"] or 0) % len(order)
+    return {
+        "order": order,
+        "reasoning": reasoning,
+        "next_model": order[cursor],
+    }
+
+
+def set_monitor_summary_reasoning(value) -> dict:
+    """모델별 요약 추론 수준을 저장하고 전체 요약 설정을 반환한다."""
+    current = get_monitor_summary_config()["reasoning"]
+    merged = dict(current)
+    if isinstance(value, dict):
+        merged.update(value)
+    reasoning = llm_gateway.normalize_reasoning_levels(merged)
+    with _lock:
+        _conn().execute(
+            "UPDATE monitor_settings SET summary_reasoning = ?, updated_at = ? WHERE id = 1",
+            (json.dumps(reasoning), _now()),
+        )
+    return get_monitor_summary_config()
+
+
+def reserve_monitor_summary_round() -> dict:
+    """다음 요약 시작 모델을 원자적으로 예약하고 순환된 폴백 순서를 반환한다."""
+    with _lock:
+        conn = _conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT summary_models, summary_reasoning, summary_cursor "
+                "FROM monitor_settings WHERE id = 1"
+            ).fetchone()
+            if not row:
+                order = list(llm_gateway.MODEL_KEYS)
+                reasoning = dict(llm_gateway.DEFAULT_SUMMARY_REASONING)
+                cursor = 0
+                conn.execute(
+                    "INSERT INTO monitor_settings "
+                    "(id, summary_models, capture_models, summary_reasoning, summary_cursor, updated_at) "
+                    "VALUES (1, ?, ?, ?, 0, ?)",
+                    (json.dumps(order), json.dumps(order), json.dumps(reasoning), _now()),
+                )
+            else:
+                order = llm_gateway.normalize_round_robin_order(row["summary_models"])
+                try:
+                    raw_reasoning = json.loads(row["summary_reasoning"] or "{}")
+                except (TypeError, ValueError):
+                    raw_reasoning = {}
+                reasoning = llm_gateway.normalize_reasoning_levels(raw_reasoning)
+                cursor = int(row["summary_cursor"] or 0) % len(order)
+            rotated = order[cursor:] + order[:cursor]
+            next_cursor = (cursor + 1) % len(order)
+            conn.execute(
+                "UPDATE monitor_settings SET summary_cursor = ?, updated_at = ? WHERE id = 1",
+                (next_cursor, _now()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return {
+        "primary": rotated[0],
+        "models": rotated,
+        "reasoning": reasoning,
+        "next_model": order[next_cursor],
+    }
 
 
 def set_item_distill(path: str, value: bool | None) -> bool:
