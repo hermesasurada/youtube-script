@@ -27,7 +27,7 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     project = os.path.dirname(os.path.dirname(__file__))
     for name in ("prompt.txt", "prompt_default.txt"):
         prompt = open(os.path.join(project, name), encoding="utf-8").read()
-        assert "Codex·ASIC·HBM·open-weight(오픈웨이트)·FSD·ETF·FDA·AGI·Neocloud(네오클라우드)·bay(베이)" in prompt
+        assert "Codex·ASIC·HBM·open-weight(오픈웨이트)·FSD·ETF·FDA·AGI·Neocloud·bay(베이)" in prompt
         assert "스테가노그래피 (steganography)`가 아니라 `steganography" in prompt
         assert "<strong>Neocloud</strong>" not in prompt
         assert '<div class="term-notes">' in prompt
@@ -38,6 +38,14 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     assert "_normalizeTermNotesHtml" in common_js
     assert "const transliterated = label.match" in common_js
     assert ".term-notes .term-note+.term-note" in common_js
+
+
+def test_title_translation_preserves_neocloud_original_spelling():
+    source = "Most Neoclouds Suck At Security (Neoclouds, Security)"
+    translated = "대부분의 뉴클라우드는 보안에 취약하다 (네오클라우드, 보안)"
+    assert app._preserve_title_terms(source, translated) == (
+        "대부분의 Neocloud는 보안에 취약하다 (Neocloud, 보안)"
+    )
 
 
 def test_clean_summary_removes_preamble_before_inline_h1():

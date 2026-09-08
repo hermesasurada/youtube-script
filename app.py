@@ -1433,6 +1433,7 @@ _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역�
 
 규칙:
 - 기업·제품·인물·기술 고유명사는 원문 표기를 그대로 둔다 (NVIDIA, ChatGPT, Sam Altman, S&P 500).
+- Neocloud는 뉴클라우드·네오클라우드로 음차하지 않고 항상 원문 표기 Neocloud를 유지한다.
 - 직역투를 피하고 한국어 제목으로 자연스럽게 읽히게 한다.
 - 원문의 어조(질문형·감탄형 등)와 정보량을 유지한다. 내용을 더하거나 빼지 않는다.
 - 이미 한국어인 제목은 그대로 둔다.
@@ -1441,6 +1442,13 @@ _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역�
 
 입력:
 """
+
+
+def _preserve_title_terms(source: str, translated: str) -> str:
+    """제목 번역 모델이 사용자 지정 원어 표기를 음차해도 결정적으로 복원한다."""
+    if re.search(r"\bneoclouds?\b", source or "", re.I):
+        translated = re.sub(r"(?:뉴|네오)\s*클라우드(?:들)?", "Neocloud", translated or "")
+    return translated
 
 
 def _parse_title_json(out: str, n: int) -> list[str] | None:
@@ -1470,7 +1478,11 @@ def _translate_titles(titles: list[str]) -> list[str] | None:
     if r.returncode != 0:
         log.warning("title translate failed: rc=%s %s", r.returncode, (r.stderr or "")[:160])
         return None
-    return _parse_title_json(r.stdout, len(titles))
+    parsed = _parse_title_json(r.stdout, len(titles))
+    if parsed is None:
+        return None
+    return [_preserve_title_terms(source, translated)
+            for source, translated in zip(titles, parsed)]
 
 
 def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
