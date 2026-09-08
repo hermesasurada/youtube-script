@@ -244,7 +244,15 @@
     // 알려진 용어는 과거 산출물에서도 각주와 본문 별표를 노출하지 않는다.
     root.querySelectorAll('p.term-note').forEach(note => {
       const strong = note.querySelector('strong');
-      const label = (strong ? strong.textContent : note.textContent.replace(/^\s*\*\s*/, '')).trim();
+      let label = (strong ? strong.textContent : note.textContent.replace(/^\s*\*\s*/, '')).trim();
+      // 과거 산출물의 '네오클라우드 (Neocloud)' 같은 음차 병기는 원어만 표시한다.
+      // 앞부분에 한글이 있고 괄호 안이 영문인 경우만 대상으로 삼아 약어 표기는 보존한다.
+      const transliterated = label.match(/^([^()]*)\(([^()]*)\)\s*$/);
+      if (strong && transliterated && /[가-힣]/.test(transliterated[1])
+          && /^[A-Za-z][A-Za-z0-9 .+&/\-–—]*$/.test(transliterated[2].trim())) {
+        label = transliterated[2].trim();
+        strong.textContent = label;
+      }
       if (_COMMON_TERM_NOTE.test(label)) note.remove();
     });
     const walker = document.createTreeWalker(root, 4); // NodeFilter.SHOW_TEXT

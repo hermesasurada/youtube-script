@@ -28,12 +28,14 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     for name in ("prompt.txt", "prompt_default.txt"):
         prompt = open(os.path.join(project, name), encoding="utf-8").read()
         assert "ETF·FSD·FDA" in prompt
+        assert "네오클라우드 (Neocloud)`가 아니라 `Neocloud" in prompt
         assert '<div class="term-notes">' in prompt
         assert prompt.count('<p class="term-note">') >= 2
 
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     assert "_COMMON_TERM_NOTE" in common_js
     assert "_normalizeTermNotesHtml" in common_js
+    assert "const transliterated = label.match" in common_js
     assert ".term-notes .term-note+.term-note" in common_js
 
 
