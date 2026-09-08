@@ -23,6 +23,20 @@ import keyframe_report
 import llm_gateway
 
 
+def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
+    project = os.path.dirname(os.path.dirname(__file__))
+    for name in ("prompt.txt", "prompt_default.txt"):
+        prompt = open(os.path.join(project, name), encoding="utf-8").read()
+        assert "ETF·FSD·FDA" in prompt
+        assert '<div class="term-notes">' in prompt
+        assert prompt.count('<p class="term-note">') >= 2
+
+    common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
+    assert "_COMMON_TERM_NOTE" in common_js
+    assert "_normalizeTermNotesHtml" in common_js
+    assert ".term-notes .term-note+.term-note" in common_js
+
+
 def test_clean_summary_removes_preamble_before_inline_h1():
     dirty = "전사 중반이 잘려 있어 전체 내용을 먼저 확인합니다.# 영상 제목\n\n## 1. 메타정보"
     assert app._clean_summary(dirty) == "# 영상 제목\n\n## 1. 메타정보"

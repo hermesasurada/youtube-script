@@ -224,6 +224,67 @@
     return tpl.innerHTML;
   }
 
+  const _COMMON_TERM_NOTE = /^(?:ETF|FSD|FDA)(?:\b|\s*\()/i;
+
+  /**
+   * 용어 해설을 섹션별 단일 묶음으로 정규화한다.
+   * 새 요약은 term-notes 컨테이너를 직접 만들지만, 기존 요약의 흩어진 term-note도
+   * 화면과 블로그에서 같은 구조로 보이도록 각 h3 섹션 끝으로 모은다.
+   */
+  function _normalizeTermNotes(root) {
+    if (!root || typeof document === 'undefined') return;
+
+    // 기존/신규 컨테이너를 먼저 풀어 한 경로로 다시 묶는다.
+    root.querySelectorAll('.term-notes').forEach(box => {
+      const notes = [...box.querySelectorAll('p.term-note')];
+      notes.forEach(note => box.before(note));
+      box.remove();
+    });
+
+    // 알려진 용어는 과거 산출물에서도 각주와 본문 별표를 노출하지 않는다.
+    root.querySelectorAll('p.term-note').forEach(note => {
+      const strong = note.querySelector('strong');
+      const label = (strong ? strong.textContent : note.textContent.replace(/^\s*\*\s*/, '')).trim();
+      if (_COMMON_TERM_NOTE.test(label)) note.remove();
+    });
+    const walker = document.createTreeWalker(root, 4); // NodeFilter.SHOW_TEXT
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+    textNodes.forEach(node => {
+      if (!node.parentElement || node.parentElement.closest('.term-note')) return;
+      node.data = node.data.replace(/\b(ETF|FSD|FDA)\s*\*/gi, '$1');
+    });
+
+    [...root.querySelectorAll('h3')].forEach(heading => {
+      let boundary = heading.nextElementSibling;
+      while (boundary && boundary.tagName !== 'H2' && boundary.tagName !== 'H3') {
+        boundary = boundary.nextElementSibling;
+      }
+
+      const notes = [];
+      let node = heading.nextElementSibling;
+      while (node && node !== boundary) {
+        const next = node.nextElementSibling;
+        if (node.matches('p.term-note')) notes.push(node);
+        node = next;
+      }
+      if (!notes.length) return;
+
+      const box = document.createElement('div');
+      box.className = 'term-notes';
+      notes.forEach(note => box.appendChild(note));
+      heading.parentNode.insertBefore(box, boundary);
+    });
+  }
+
+  function _normalizeTermNotesHtml(html) {
+    if (typeof document === 'undefined') return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    _normalizeTermNotes(tpl.content);
+    return tpl.innerHTML;
+  }
+
   /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목·요약 꾸미기. */
   function renderMarkdown(src) {
     src = String(src || '').replace(/^---\n[\s\S]*?\n---\n?/, '');
@@ -247,7 +308,9 @@
     src = _ensureGfmTables(_fixCjkEmphasis(src));
     let html;
     if (global.marked && typeof global.marked.parse === 'function') {
-      html = _decorateSummary(_decorateHeadings(global.marked.parse(src)), model, compress);
+      html = _normalizeTermNotesHtml(
+        _decorateSummary(_decorateHeadings(global.marked.parse(src)), model, compress)
+      );
     } else {
       html = '<pre>' + escapeHtml(src) + '</pre>';    // marked 미로딩 시 최소 폴백
     }
@@ -382,6 +445,10 @@
     p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;font-size:15px;',
     term: 'margin:-.85em 0 1.45em;padding-left:.72em;border-left:2px solid #d8dadd;'
         + 'font-size:12.5px;line-height:1.55;font-weight:400;color:#7a7f87;',
+    termGroup: 'margin:-.85em 0 1.45em;padding:.28em .8em;border-left:2px solid #d8dadd;'
+        + 'background:#f7f7f6;',
+    termRow: 'margin:0;padding:.42em 0;font-size:12.5px;line-height:1.55;'
+        + 'font-weight:400;color:#7a7f87;',
     li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
@@ -458,6 +525,7 @@
       if (m) h.textContent = m[1].trim();
     });
     root.querySelectorAll('img,figure,figcaption').forEach(el => el.remove());   // 잔여 이미지 방어
+    _normalizeTermNotes(root);
     return { root, title, url, brief };
   }
 
@@ -468,7 +536,12 @@
     root.querySelectorAll('h2').forEach(h => h.setAttribute('style', _BL.h2));
     root.querySelectorAll('h3').forEach(h => h.setAttribute('style', _BL.h3));
     root.querySelectorAll('p').forEach(p => p.setAttribute('style', _BL.p));
-    root.querySelectorAll('p.term-note').forEach(p => p.setAttribute('style', _BL.term));
+    root.querySelectorAll('.term-notes').forEach(box => box.setAttribute('style', _BL.termGroup));
+    root.querySelectorAll('p.term-note').forEach(p => {
+      const grouped = p.parentElement && p.parentElement.classList.contains('term-notes');
+      const divider = grouped && p.previousElementSibling ? 'border-top:1px solid #e3e3e1;' : '';
+      p.setAttribute('style', grouped ? _BL.termRow + divider : _BL.term);
+    });
     root.querySelectorAll('ul,ol').forEach(u => u.setAttribute('style', _BL.ul));
     root.querySelectorAll('li').forEach(li => li.setAttribute('style', _BL.li));
     root.querySelectorAll('a').forEach(a => {
@@ -620,8 +693,11 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .kf-time{display:none;margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 틴트, 시각 pill은 우측 정렬 */
 .sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius: 2px;margin:1.7rem 0 .75rem;}
-/* LLM이 본문 단락 바로 뒤에 넣는 문맥형 용어 해설. 세 리더 화면에서 동일하게 보인다. */
+/* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */
 .sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
+.sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
+.sum-md .term-notes .term-note,.md-body .term-notes .term-note,.markdown .term-notes .term-note{margin:0!important;padding:.42rem 0!important;border-left:0!important;}
+.sum-md .term-notes .term-note+.term-note,.md-body .term-notes .term-note+.term-note,.markdown .term-notes .term-note+.term-note{border-top:1px solid var(--border,#d8dadd)!important;}
 .sum-md .term-note strong,.md-body .term-note strong,.markdown .term-note strong{color:inherit;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
