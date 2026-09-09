@@ -27,7 +27,9 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     project = os.path.dirname(os.path.dirname(__file__))
     for name in ("prompt.txt", "prompt_default.txt"):
         prompt = open(os.path.join(project, name), encoding="utf-8").read()
-        assert "Codex·ASIC·HBM·open-weight(오픈웨이트)·FSD·ETF·FDA·AGI·Neocloud·bay(베이)" in prompt
+        assert "Codex·ASIC·HBM·open-weight(오픈웨이트)·FSD·ETF·FDA·AGI·Neocloud·bay(베이)·토큰(token)·API·LLM·GPU·CPU·SaaS" in prompt
+        assert "강화학습·휴머노이드·피지컬 AI·샌드박스" in prompt
+        assert "KV 캐시·MoE·RAG·어텐션·chain of thought(CoT)·컨텍스트 창" in prompt
         assert "스테가노그래피 (steganography)`가 아니라 `steganography" in prompt
         assert "<strong>Neocloud</strong>" not in prompt
         assert '<div class="term-notes">' in prompt
@@ -37,6 +39,9 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
 
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     assert "_COMMON_TERM_NOTE" in common_js
+    assert "_COMMON_TERM_MARK" in common_js
+    assert "token|토큰|API|LLM|GPU|CPU|SaaS" in common_js
+    assert "KV\\s*캐시|KV\\s*cache|MoE|RAG|어텐션|attention" in common_js
     assert "_normalizeTermNotesHtml" in common_js
     assert "const transliterated = label.match" in common_js
     assert ".term-notes .term-note+.term-note" not in common_js

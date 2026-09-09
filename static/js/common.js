@@ -224,7 +224,9 @@
     return tpl.innerHTML;
   }
 
-  const _COMMON_TERM_NOTE = /^(?:ETF|FSD|FDA)(?:\b|\s*\()/i;
+  const _COMMON_TERM_PATTERN = String.raw`(?:Codex|ASIC|HBM|open[- ]weight|오픈웨이트|FSD|ETF|FDA|AGI|Neocloud|bay|token|토큰|API|LLM|GPU|CPU|SaaS|클라우드|데이터센터|반도체|오픈소스|스타트업|벤치마크|프롬프트|에이전트|강화학습|휴머노이드|피지컬\s*AI|샌드박스|KV\s*캐시|KV\s*cache|MoE|RAG|어텐션|attention|chain\s+of\s+thought|CoT|사고\s*연쇄|컨텍스트\s*창|context\s*window)`;
+  const _COMMON_TERM_NOTE = new RegExp(`^${_COMMON_TERM_PATTERN}(?=$|\\s*\\()`, 'i');
+  const _COMMON_TERM_MARK = new RegExp(`(${_COMMON_TERM_PATTERN})\\s*\\*`, 'gi');
 
   /**
    * 용어 해설을 섹션별 단일 묶음으로 정규화한다.
@@ -260,7 +262,7 @@
     while (walker.nextNode()) textNodes.push(walker.currentNode);
     textNodes.forEach(node => {
       if (!node.parentElement || node.parentElement.closest('.term-note')) return;
-      node.data = node.data.replace(/\b(ETF|FSD|FDA)\s*\*/gi, '$1');
+      node.data = node.data.replace(_COMMON_TERM_MARK, '$1');
     });
 
     [...root.querySelectorAll('h3')].forEach(heading => {
