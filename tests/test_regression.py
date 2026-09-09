@@ -32,12 +32,17 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
         assert "<strong>Neocloud</strong>" not in prompt
         assert '<div class="term-notes">' in prompt
         assert prompt.count('<p class="term-note">') >= 2
+        assert "짧은 명사형 문구" in prompt
+        assert "여러 행 사이에 가로선을 넣지 않는다" in prompt
 
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     assert "_COMMON_TERM_NOTE" in common_js
     assert "_normalizeTermNotesHtml" in common_js
     assert "const transliterated = label.match" in common_js
-    assert ".term-notes .term-note+.term-note" in common_js
+    assert ".term-notes .term-note+.term-note" not in common_js
+    assert "const divider = grouped" not in common_js
+    assert "termRow: 'margin:0;padding:0;" in common_js
+    assert ".term-notes .term-note{margin:0!important;padding:0!important" in common_js
 
 
 def test_title_translation_preserves_neocloud_original_spelling():

@@ -455,7 +455,7 @@
         + 'font-size:12.5px;line-height:1.55;font-weight:400;color:#7a7f87;',
     termGroup: 'margin:-.85em 0 1.45em;padding:.28em .8em;border-left:2px solid #d8dadd;'
         + 'background:#f7f7f6;',
-    termRow: 'margin:0;padding:.42em 0;font-size:12.5px;line-height:1.55;'
+    termRow: 'margin:0;padding:0;font-size:12.5px;line-height:1.55;'
         + 'font-weight:400;color:#7a7f87;',
     originalTitle: 'margin:0 0 1.4em;font-size:13px;font-weight:400;line-height:1.65;color:#7b8393;',
     li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;font-size:15px;',
@@ -548,8 +548,7 @@
     root.querySelectorAll('.term-notes').forEach(box => box.setAttribute('style', _BL.termGroup));
     root.querySelectorAll('p.term-note').forEach(p => {
       const grouped = p.parentElement && p.parentElement.classList.contains('term-notes');
-      const divider = grouped && p.previousElementSibling ? 'border-top:1px solid #e3e3e1;' : '';
-      p.setAttribute('style', grouped ? _BL.termRow + divider : _BL.term);
+      p.setAttribute('style', grouped ? _BL.termRow : _BL.term);
     });
     root.querySelectorAll('ul,ol').forEach(u => u.setAttribute('style', _BL.ul));
     root.querySelectorAll('li').forEach(li => li.setAttribute('style', _BL.li));
@@ -715,8 +714,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 /* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */
 .sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
 .sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
-.sum-md .term-notes .term-note,.md-body .term-notes .term-note,.markdown .term-notes .term-note{margin:0!important;padding:.42rem 0!important;border-left:0!important;}
-.sum-md .term-notes .term-note+.term-note,.md-body .term-notes .term-note+.term-note,.markdown .term-notes .term-note+.term-note{border-top:1px solid var(--border,#d8dadd)!important;}
+.sum-md .term-notes .term-note,.md-body .term-notes .term-note,.markdown .term-notes .term-note{margin:0!important;padding:0!important;border-left:0!important;}
 .sum-md .term-note strong,.md-body .term-note strong,.markdown .term-note strong{color:inherit;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
