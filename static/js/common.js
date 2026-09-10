@@ -257,6 +257,15 @@
       }
       if (_COMMON_TERM_NOTE.test(label)) note.remove();
     });
+    // 이미지 캡션은 각주 대상이 아니다(2026-09-10 지시). 비전 모델이 본문 문체를 따라
+    // 용어 뒤에 별표를 붙여 온 과거 산출물이 있어 화면에서도 떼어 낸다.
+    root.querySelectorAll('.kf-strip figcaption').forEach(cap => {
+      [...cap.childNodes].forEach(node => {
+        if (node.nodeType !== 3) return;               // 텍스트 노드만(타임스탬프 <b> 보존)
+        node.data = node.data.replace(/\\?\*+/g, '').replace(/\s{2,}/g, ' ');
+      });
+    });
+
     const walker = document.createTreeWalker(root, 4); // NodeFilter.SHOW_TEXT
     const textNodes = [];
     while (walker.nextNode()) textNodes.push(walker.currentNode);

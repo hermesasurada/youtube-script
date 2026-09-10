@@ -50,6 +50,23 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     assert ".term-notes .term-note{margin:0!important;padding:0!important" in common_js
 
 
+def test_image_captions_are_excluded_from_term_notes():
+    """캡션은 각주 대상이 아니다 — 프롬프트·주입·렌더 세 곳 모두 별표를 남기지 않는다."""
+    import keyframe_report
+
+    project = os.path.dirname(os.path.dirname(__file__))
+    kf = open(os.path.join(project, "keyframe_report.py"), encoding="utf-8").read()
+    assert "caption에는 용어 각주 표시(별표 `*`)를 붙이지 않는다" in kf
+
+    assert keyframe_report._caption_text("정렬과 수율\\*이 필요하다") == "정렬과 수율이 필요하다"
+    assert keyframe_report._caption_text("AX FDE* 두 핵심 개념") == "AX FDE 두 핵심 개념"
+    assert keyframe_report._caption_text("별표 없는 캡션") == "별표 없는 캡션"
+    assert keyframe_report._caption_text(None) == ""
+
+    common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
+    assert "root.querySelectorAll('.kf-strip figcaption')" in common_js
+
+
 def test_title_translation_preserves_neocloud_original_spelling():
     source = "Most Neoclouds Suck At Security (Neoclouds, Security)"
     translated = "대부분의 뉴클라우드는 보안에 취약하다 (네오클라우드, 보안)"

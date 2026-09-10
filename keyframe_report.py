@@ -503,6 +503,7 @@ def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict],
 - relevance(인접 전사·소제목 관련성), information(시각 정보량), readability(선명도·완성도)를 각각 0~5점으로 평가하고 점수를 비교해 keep 여부를 정할 것
 - keep=true면 시간 위치만 따르지 말고 이미지 내용과 인접 전사를 함께 보아 가장 관련있는 소제목 번호(section)를 고를 것
 - caption은 화면에 실제로 보이거나 인접 전사로 확인되는 숫자·고유명사와 핵심 의미를 담아 한국어 한 문장(45자 이내)으로 작성. 근거 없는 해석은 추가하지 말 것
+- caption에는 용어 각주 표시(별표 `*`)를 붙이지 않는다. 각주는 본문 전용이고 캡션은 각주 대상이 아니다
 
 JSON 배열로만 답하라(다른 설명 금지):
 [{{"name":"<파일명>","keep":<bool>,"section":<번호 or null>,"type":"slide|chart|diagram|screenshot|product|demo|broll|talking_head|decorative","relevance":<0~5>,"information":<0~5>,"readability":<0~5>,"caption":"<한 문장>"}}]
@@ -658,6 +659,17 @@ def prune_summary_opening_frames(summary_md_path: str) -> dict:
     return {"removed": len(set(removed)), "window": window}
 
 
+# 캡션은 각주 대상이 아니다(2026-09-10 지시). 비전 모델이 본문 문체를 따라 용어 뒤에
+# 별표를 붙여 오는 경우가 있어(최근 요약 120건 중 26건) 주입 시점에 떼어 낸다.
+_CAPTION_MARK_RE = re.compile(r"\\?\*+")
+
+
+def _caption_text(caption: str | None) -> str:
+    """이미지 캡션에서 용어 각주 표시(별표)를 제거한다."""
+    cleaned = _CAPTION_MARK_RE.sub("", caption or "")
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
 def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], url_base: str):
     """요약 md에 가로 스크롤 kf-strip(<div>) 주입. 재실행 시 기존 주입 제거(멱등).
 
@@ -682,7 +694,7 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
     def strip_html(items):
         figs = "".join(
             f'<figure><img src="{url_base}/{it["file"]}" loading="lazy" alt="">'
-            f'<figcaption><b>{_hms(it["ts"])}</b> {_html.escape(it.get("caption") or "")}</figcaption></figure>'
+            f'<figcaption><b>{_hms(it["ts"])}</b> {_html.escape(_caption_text(it.get("caption")))}</figcaption></figure>'
             for it in items)
         return f'<div class="kf-strip">{figs}</div>'
 
