@@ -37,6 +37,11 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
         assert "짧은 명사형 문구" in prompt
         assert "여러 행 사이에 가로선을 넣지 않는다" in prompt
 
+        # 결합만으로 뜻이 드러나는 한국어 합성어는 각주 대상이 아니다(2026-09-10 지시)
+        assert "결합만으로 뜻이 드러나는 합성어에도 붙이지 않는다" in prompt
+        assert "제품-시장 적합성, 언어 모델, 코딩 에이전트" in prompt
+        assert "레티클 한계, 투기적 디코딩" in prompt   # 반례: 분야를 알아야 하는 말은 유지
+
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     assert "_COMMON_TERM_NOTE" in common_js
     assert "_COMMON_TERM_MARK" in common_js
@@ -48,6 +53,8 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     assert "const divider = grouped" not in common_js
     assert "termRow: 'margin:0;padding:0;" in common_js
     assert ".term-notes .term-note{margin:0!important;padding:0!important" in common_js
+    assert "제품[\\s\\-–—]*시장\\s*적합성" in common_js
+    assert "언어\\s*모델|코딩\\s*에이전트" in common_js
 
 
 def test_image_captions_are_excluded_from_term_notes():

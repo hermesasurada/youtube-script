@@ -224,7 +224,7 @@
     return tpl.innerHTML;
   }
 
-  const _COMMON_TERM_PATTERN = String.raw`(?:Codex|ASIC|HBM|open[- ]weight|오픈웨이트|FSD|ETF|FDA|AGI|Neocloud|bay|token|토큰|API|LLM|GPU|CPU|SaaS|클라우드|데이터센터|반도체|오픈소스|스타트업|벤치마크|프롬프트|에이전트|강화학습|휴머노이드|피지컬\s*AI|샌드박스|KV\s*캐시|KV\s*cache|MoE|RAG|어텐션|attention|chain\s+of\s+thought|CoT|사고\s*연쇄|컨텍스트\s*창|context\s*window)`;
+  const _COMMON_TERM_PATTERN = String.raw`(?:Codex|ASIC|HBM|open[- ]weight|오픈웨이트|FSD|ETF|FDA|AGI|Neocloud|bay|token|토큰|API|LLM|GPU|CPU|SaaS|클라우드|데이터센터|반도체|오픈소스|스타트업|벤치마크|프롬프트|에이전트|강화학습|휴머노이드|피지컬\s*AI|샌드박스|KV\s*캐시|KV\s*cache|MoE|RAG|어텐션|attention|chain\s+of\s+thought|CoT|사고\s*연쇄|컨텍스트\s*창|context\s*window|제품[\s\-–—]*시장\s*적합성|product[\s\-–—]*market\s*fit|언어\s*모델|코딩\s*에이전트|지분\s*희석|통신\s*대역폭|휴머노이드\s*로봇)`;
   const _COMMON_TERM_NOTE = new RegExp(`^${_COMMON_TERM_PATTERN}(?=$|\\s*\\()`, 'i');
   const _COMMON_TERM_MARK = new RegExp(`(${_COMMON_TERM_PATTERN})\\s*\\*`, 'gi');
 
