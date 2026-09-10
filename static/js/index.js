@@ -39,6 +39,7 @@ async function addTermExclusion(ev) {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('.term-excl-del');
   if (!b) return;
+  if (!confirm(`'${b.dataset.term}'을(를) 제외 목록에서 뺄까요?`)) return;
   try { await YS.apiTermExclusion(b.dataset.term, true); await renderTermExclusions(); }
   catch (err) { alert('제거 실패: ' + err.message); }
 });
@@ -50,7 +51,7 @@ function openPromptModal() {
   document.getElementById('save-status').textContent = '';
   document.getElementById('prompt-overlay').hidden = false;
   document.body.style.overflow = 'hidden';
-  renderTermExclusions();                                  // 각주 제외 용어 칩
+  renderTermExclusions();                                  // 패널 하단 각주 제외 용어 칩
   const ta = document.getElementById('prompt-text');
   ta.focus();
   // 커서를 끝으로

@@ -323,6 +323,7 @@
       e.preventDefault(); e.stopPropagation();
       const term = btn.dataset.term || '';
       if (!term || btn.disabled) return;
+      if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?\n앞으로 화면·블로그·새 요약에서 이 용어의 각주를 붙이지 않습니다.`)) return;
       btn.disabled = true;
       try {
         await apiTermExclusion(term, false);
