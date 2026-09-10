@@ -795,7 +795,7 @@
 /* 상·하 여백은 래퍼 패딩이 전담한다. 내부 마진을 남기면 원문 병기 유무에 따라
    아래쪽만 달라진다(h1 margin-bottom vs 병기의 음수 margin-top이 상쇄). */
 .sum-head-sticky h1{margin:0 !important;}
-.sum-head-sticky .sum-title-orig{margin:.28rem 0 0 !important;}
+.sum-head-sticky .sum-title-orig{margin:.08rem 0 0 !important;}   /* 한글 제목-원문 간격 .28→.08rem (2026-09-10 지시) */
 /* ── 메타 칩 헤더(메타정보 표 → 변환) ── */
 .ys-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.42rem 0 .95rem;padding-bottom:.68rem;border-bottom:1px solid var(--border,#e5e5e5);}
 .ys-meta-compact{gap:.26rem;}
