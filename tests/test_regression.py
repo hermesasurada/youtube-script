@@ -135,6 +135,18 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     assert '"/terms/excluded",' in app_src.split("_REMOTE_DATA_ALLOWED = {")[1].split("}")[0]
 
 
+def test_title_translation_never_says_nobyeondamhwa_for_fireside_chat():
+    """fireside chat → '대담'. 모델이 '노변담화'를 내놔도 결정적으로 바로잡는다."""
+    src = "Commerce Sec. Lutnick and Nvidia CEO Jensen Huang in a fireside chat at G20 meeting — 9/2/2026"
+    out = app._preserve_title_terms(src, "러트닉 상무장관과 NVIDIA CEO 젠슨 황, G20 회의에서 노변담화 — 9/2/2026")
+    assert "노변담화" not in out and "대담" in out
+    out2 = app._preserve_title_terms("Alex Karp participate in a fireside chat", "Alex Karp, 노변담화 참여 — 9/2")
+    assert out2 == "Alex Karp, 대담 — 9/2"
+    # fireside chat이 아닌 제목은 손대지 않는다
+    assert app._preserve_title_terms("Radio address", "노변담화 라디오 연설") == "노변담화 라디오 연설"
+    assert "노변담화" in app._TITLE_TR_PROMPT and "대담" in app._TITLE_TR_PROMPT
+
+
 def test_title_translation_preserves_neocloud_original_spelling():
     source = "Most Neoclouds Suck At Security (Neoclouds, Security)"
     translated = "대부분의 뉴클라우드는 보안에 취약하다 (네오클라우드, 보안)"
