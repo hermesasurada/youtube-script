@@ -2678,3 +2678,16 @@ header h1 { font-size: 15px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ── 프롬프트 패널: 각주 제외 용어 칩 (2026-09-10) ── */
+.term-excl { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border, #e5e7eb); }
+.term-excl-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.term-excl-title { font-weight: 700; font-size: .9rem; }
+.term-excl-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; margin-bottom: 8px; }
+.term-excl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 9px; border: 1px solid var(--border, #e5e7eb); border-radius: 999px; background: var(--surface2, #f5f5f4); font-size: .82rem; }
+.term-excl-del { border: 0; background: transparent; color: var(--muted, #9aa0ac); cursor: pointer; font-size: .8em; line-height: 1; padding: 2px 3px; }
+.term-excl-del:hover { color: #c0392b; }
+.term-excl-empty { color: var(--muted, #9aa0ac); font-size: .82rem; }
+.term-excl-form { display: flex; gap: 6px; }
+.term-excl-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; font: inherit; font-size: .85rem; }
+.term-excl-add { padding: 6px 12px; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; background: var(--surface, #fff); cursor: pointer; font: inherit; font-size: .85rem; }

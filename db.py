@@ -333,6 +333,15 @@ def init() -> None:
                     "ALTER TABLE monitor_settings ADD COLUMN summary_cursor INTEGER NOT NULL DEFAULT 0"
                 )
             c.execute("PRAGMA user_version = 17")
+        if ver < 18:
+            # v18: 각주 제외 용어(사용자 지정). 요약 뷰어의 ✕ 버튼으로 쌓이며 화면 렌더·
+            # 블로그 발행·새 요약 프롬프트에 모두 적용된다. key는 비교용 정규화 형태.
+            c.execute("""CREATE TABLE IF NOT EXISTS term_exclusions (
+                key      TEXT PRIMARY KEY,
+                term     TEXT NOT NULL,
+                added_at TEXT NOT NULL
+            )""")
+            c.execute("PRAGMA user_version = 18")
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -750,6 +759,41 @@ def set_monitor_model_orders(*, summary=None, capture=None) -> dict[str, list[st
         if summary is not None:
             conn.execute("UPDATE monitor_settings SET summary_cursor = 0 WHERE id = 1")
     return {"summary": summary_order, "capture": capture_order}
+
+
+# ── 각주 제외 용어(사용자 지정) ────────────────────────────────────────
+_TERM_HYPHENS_RE = re.compile(r"[\u2010-\u2015]")
+
+
+def normalize_term(term: str) -> str:
+    """비교 키: 공백 정리 + 하이픈 계열 통일 + casefold. 표시는 원문(term)을 쓴다."""
+    t = _TERM_HYPHENS_RE.sub("-", (term or "").replace("\u00a0", " "))
+    t = re.sub(r"\s+", " ", t).strip()
+    return t.casefold()
+
+
+def list_term_exclusions() -> list[str]:
+    return [r["term"] for r in _conn().execute(
+        "SELECT term FROM term_exclusions ORDER BY rowid")]   # 추가한 순서
+
+
+def add_term_exclusion(term: str) -> bool:
+    """제외 용어 추가. 이미 있으면 False."""
+    key = normalize_term(term)
+    if not key:
+        return False
+    display = re.sub(r"\s+", " ", (term or "").strip())
+    with _lock:
+        cur = _conn().execute(
+            "INSERT OR IGNORE INTO term_exclusions (key, term, added_at) VALUES (?, ?, ?)",
+            (key, display, _now()))
+        return cur.rowcount > 0
+
+
+def remove_term_exclusion(term: str) -> bool:
+    with _lock:
+        cur = _conn().execute("DELETE FROM term_exclusions WHERE key = ?", (normalize_term(term),))
+        return cur.rowcount > 0
 
 
 def get_monitor_summary_config() -> dict:

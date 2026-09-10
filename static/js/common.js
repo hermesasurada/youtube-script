@@ -228,6 +228,113 @@
   const _COMMON_TERM_NOTE = new RegExp(`^${_COMMON_TERM_PATTERN}(?=$|\\s*\\()`, 'i');
   const _COMMON_TERM_MARK = new RegExp(`(${_COMMON_TERM_PATTERN})\\s*\\*`, 'gi');
 
+  // ── 사용자 지정 각주 제외 용어(서버 /terms/excluded) ─────────────────────
+  // 요약 뷰어의 각주 행 ✕ 버튼으로 쌓인다. 화면 렌더·블로그 발행에서 해당 각주와
+  // 본문 별표를 지우고, 서버는 새 요약 프롬프트에도 같은 목록을 심는다.
+  const _termExcl = new Set();
+  let _termExclLoading = null;
+  function _normTerm(s) {
+    return String(s || '').replace(/\u00a0/g, ' ').replace(/[\u2010-\u2015]/g, '-')
+      .replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+  function _setTermExclusions(list) {
+    _termExcl.clear();
+    (list || []).forEach(t => { const k = _normTerm(t); if (k) _termExcl.add(k); });
+  }
+  async function ensureTermExclusions(force) {
+    if (_termExclLoading && !force) return _termExclLoading;
+    _termExclLoading = fetch('/terms/excluded', { headers: { Accept: 'application/json' } })
+      .then(r => (r.ok ? r.json() : { terms: [] }))
+      .then(d => { _setTermExclusions(d.terms); return d.terms || []; })
+      .catch(() => []);
+    return _termExclLoading;
+  }
+  async function apiTermExclusion(term, remove) {
+    const r = await fetch('/terms/excluded', {
+      method: remove ? 'DELETE' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    _setTermExclusions(d.terms);
+    return d;
+  }
+  function _noteLabel(note) {
+    const strong = note.querySelector('strong');
+    const raw = (strong ? strong.textContent : note.textContent.replace(/^\s*\*\s*/, '')).trim();
+    return raw.replace(/\s*\([^()]*\)\s*$/, '').trim();   // '용어 (원어)' → '용어'
+  }
+  function _excludedMarkRegex() {
+    if (!_termExcl.size) return null;
+    const alts = [..._termExcl].map(t => t
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/[ -]/g, '[\\s\\-\\u2010-\\u2015]*'));
+    return new RegExp('(' + alts.join('|') + ')\\s*\\\\?\\*', 'gi');
+  }
+  /** 현재 DOM에서 제외 용어의 각주 행과 본문 별표를 지운다(렌더 직후·✕ 클릭 직후 공용). */
+  function applyTermExclusions(root) {
+    if (!root || !_termExcl.size) return;
+    root.querySelectorAll('p.term-note').forEach(note => {
+      if (_termExcl.has(_normTerm(_noteLabel(note)))) note.remove();
+    });
+    root.querySelectorAll('.term-notes').forEach(box => { if (!box.querySelector('p.term-note')) box.remove(); });
+    const rx = _excludedMarkRegex();
+    if (!rx) return;
+    const walker = document.createTreeWalker(root, 4);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (!node.parentElement || node.parentElement.closest('.term-note')) return;
+      node.data = node.data.replace(rx, '$1');
+    });
+  }
+  /** 각주 행마다 ✕(이 용어를 제외 목록에 추가) 버튼을 단다. 블로그 HTML에서는 뗀다. */
+  function _decorateTermNotes(root) {
+    root.querySelectorAll('p.term-note').forEach(note => {
+      if (note.querySelector('.term-note-x')) return;
+      const label = _noteLabel(note);
+      if (!label) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'term-note-x';
+      btn.dataset.term = label;
+      btn.title = `'${label}' 각주를 앞으로 붙이지 않기`;
+      btn.setAttribute('aria-label', btn.title);
+      btn.textContent = '✕';
+      note.appendChild(btn);
+    });
+  }
+  function _ysToast(msg) {
+    if (typeof document === 'undefined' || !document.body) return;
+    let el = document.getElementById('ys-toast');
+    if (!el) { el = document.createElement('div'); el.id = 'ys-toast'; document.body.appendChild(el); }
+    el.textContent = msg;
+    el.classList.add('on');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove('on'), 2200);
+  }
+  function _setupTermNoteUI() {
+    if (global.__ysTermNoteUI || typeof document === 'undefined') return;
+    global.__ysTermNoteUI = true;
+    document.addEventListener('click', async (e) => {
+      const btn = e.target.closest && e.target.closest('.term-note-x');
+      if (!btn) return;
+      e.preventDefault(); e.stopPropagation();
+      const term = btn.dataset.term || '';
+      if (!term || btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await apiTermExclusion(term, false);
+        applyTermExclusions(document.body);
+        _ysToast(`'${term}' — 앞으로 각주를 붙이지 않습니다`);
+      } catch (err) {
+        btn.disabled = false;
+        _ysToast('제외 실패: ' + err.message);
+      }
+    }, true);
+  }
+
   /**
    * 용어 해설을 섹션별 단일 묶음으로 정규화한다.
    * 새 요약은 term-notes 컨테이너를 직접 만들지만, 기존 요약의 흩어진 term-note도
@@ -294,6 +401,9 @@
       notes.forEach(note => box.appendChild(note));
       heading.parentNode.insertBefore(box, boundary);
     });
+
+    applyTermExclusions(root);      // 사용자 지정 제외 용어(각주 행 + 본문 별표)
+    _decorateTermNotes(root);       // 남은 각주에 ✕ 버튼
   }
 
   function _normalizeTermNotesHtml(html) {
@@ -551,6 +661,7 @@
 
   function mdToBloggerHtml(md, opts = {}) {
     const { root, title, url, brief } = _summaryBodyDom(md);
+    root.querySelectorAll('.term-note-x').forEach(b => b.remove());   // 화면 전용 버튼
 
     // 블로거는 외부 CSS/클래스가 안 먹으므로 모든 서식을 인라인 style로 준다.
     root.querySelectorAll('h2').forEach(h => h.setAttribute('style', _BL.h2));
@@ -659,6 +770,10 @@
     ensureReaderAssets,
     applyTitleTranslation,
     stripSummaryPopupChrome,
+    ensureTermExclusions,
+    apiTermExclusion,
+    applyTermExclusions,
+    listTermExclusions: () => [..._termExcl],
   };
 
   // ── 키프레임 스트립(가로 스크롤) + 라이트박스(원본 보기) ────────────
@@ -726,7 +841,14 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
 .sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
 .sum-md .term-notes .term-note,.md-body .term-notes .term-note,.markdown .term-notes .term-note{margin:0!important;padding:0!important;border-left:0!important;}
-.sum-md .term-note strong,.md-body .term-note strong,.markdown .term-note strong{color:inherit;}`;
+.sum-md .term-note strong,.md-body .term-note strong,.markdown .term-note strong{color:inherit;}
+.term-note .term-note-x{margin-left:.35rem;border:0;background:transparent;color:var(--muted,#9aa0ac);cursor:pointer;font:inherit;font-size:.85em;line-height:1;padding:0 .25rem;opacity:0;transition:opacity .12s,color .12s;vertical-align:baseline;}
+.term-note:hover .term-note-x,.term-note .term-note-x:focus-visible{opacity:1;}
+.term-note .term-note-x:hover{color:#c0392b;}
+.term-note .term-note-x:disabled{opacity:.3;cursor:default;}
+@media (hover:none){.term-note .term-note-x{opacity:.55;padding:0 .45rem;}}
+#ys-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#222;color:#fff;padding:.5rem .95rem;border-radius:6px;font-size:.85rem;z-index:99999;opacity:0;transition:opacity .2s;pointer-events:none;max-width:88vw;}
+#ys-toast.on{opacity:.93;}`;
     const st = document.createElement("style");
     st.id = "ys-kf-style"; st.textContent = css;
     document.head.appendChild(st);
@@ -853,6 +975,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
   }
   if (document.body) _setupKeyframeUI();
   else document.addEventListener("DOMContentLoaded", _setupKeyframeUI);
+  _setupTermNoteUI();                       // 각주 ✕(제외) 버튼 — 위임 리스너라 시점 무관
 
   global.YS.setupKeyframeUI = _setupKeyframeUI;
 })(window);

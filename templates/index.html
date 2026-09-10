@@ -286,6 +286,17 @@
     <div class="prompt-modal-body utility-panel-body">
       <p class="prompt-hint utility-note">요약 생성에 사용됩니다. <code>{transcript}</code> 위치에 전사 본문이 삽입되므로 반드시 포함해야 합니다.</p>
       <textarea id="prompt-text" spellcheck="false" placeholder="요약 프롬프트…"></textarea>
+      <div class="term-excl" id="term-excl">
+        <div class="term-excl-head">
+          <span class="term-excl-title">각주 제외 용어</span>
+          <span class="utility-subtitle">요약 각주의 ✕로 추가된 용어 — 화면·블로그·새 요약 모두에 적용</span>
+        </div>
+        <div id="term-excl-list" class="term-excl-list"></div>
+        <form class="term-excl-form" onsubmit="addTermExclusion(event)">
+          <input id="term-excl-input" type="text" placeholder="용어 직접 추가 (예: 크롤링)" maxlength="80" autocomplete="off">
+          <button type="submit" class="term-excl-add">추가</button>
+        </form>
+      </div>
       <div class="prompt-warn" id="prompt-warn" hidden></div>
       <div class="prompt-modal-actions">
         <button class="btn-sm btn-ghost" type="button" onclick="restoreDefaultPrompt()"

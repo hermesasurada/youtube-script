@@ -18,6 +18,31 @@ async function loadSavedPrompt() {
   }
 }
 
+// ── 각주 제외 용어(프롬프트 패널 하단 칩) ─────────────────────────────
+async function renderTermExclusions() {
+  const list = document.getElementById('term-excl-list');
+  if (!list) return;
+  const terms = await YS.ensureTermExclusions(true);
+  list.innerHTML = terms.length
+    ? terms.map(t => `<span class="term-excl-chip">${YS.escapeHtml(t)}`
+        + `<button type="button" class="term-excl-del" data-term="${YS.attrEscape(t)}" title="목록에서 제거">✕</button></span>`).join('')
+    : '<span class="term-excl-empty">아직 없음 — 요약 각주의 ✕를 누르거나 아래에 입력</span>';
+}
+async function addTermExclusion(ev) {
+  if (ev) ev.preventDefault();
+  const input = document.getElementById('term-excl-input');
+  const term = (input.value || '').trim();
+  if (!term) return;
+  try { await YS.apiTermExclusion(term, false); input.value = ''; await renderTermExclusions(); }
+  catch (e) { alert('추가 실패: ' + e.message); }
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('.term-excl-del');
+  if (!b) return;
+  try { await YS.apiTermExclusion(b.dataset.term, true); await renderTermExclusions(); }
+  catch (err) { alert('제거 실패: ' + err.message); }
+});
+
 function openPromptModal() {
   if (IS_REMOTE && !document.getElementById('prompt-text').value) loadSavedPrompt();
   _applyPromptReadonly();
@@ -25,6 +50,7 @@ function openPromptModal() {
   document.getElementById('save-status').textContent = '';
   document.getElementById('prompt-overlay').hidden = false;
   document.body.style.overflow = 'hidden';
+  renderTermExclusions();                                  // 각주 제외 용어 칩
   const ta = document.getElementById('prompt-text');
   ta.focus();
   // 커서를 끝으로
@@ -2470,6 +2496,7 @@ async function openSummaryModal(itemId, title) {
     const [data] = await Promise.all([
       YS.apiSummaryContent(itemId),
       YS.ensureReaderAssets(),
+      YS.ensureTermExclusions(),                           // 제외 용어를 렌더 전에 확보
     ]);
     if (data.error) throw new Error(data.error);
     _summaryMd = data.content || '';

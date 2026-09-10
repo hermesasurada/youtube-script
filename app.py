@@ -1108,6 +1108,7 @@ _REMOTE_DATA_ALLOWED = {
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
     "/history/refresh-meta",  # 제목·썸네일 갱신 — 빠지면 원격 POST가 302로 튕겨 '갱신 실패'로 보인다(2026-09-03)
     "/history/publish-blog",  # 블로그스팟 발행(원격에서도 — 폰에서 읽고 바로 올린다)
+    "/terms/excluded",        # 각주 제외 용어 — 요약 뷰어 ✕ 버튼(폰에서도 누른다)
 }
 _PHONE_UA  = re.compile(r"iPhone|iPod|Windows Phone", re.I)
 _TABLET_UA = re.compile(r"iPad|Tablet|PlayBook|Kindle|Silk", re.I)
@@ -1998,7 +1999,9 @@ def summarize():
             os.path.basename(abs_path), keyframe_report._hms(opening_cutoff),
         )
 
-    prompt = (data.get("prompt") or DEFAULT_PROMPT).replace("{transcript}", transcript_blob)
+    template = _inject_term_exclusions(data.get("prompt") or DEFAULT_PROMPT,
+                                       db.list_term_exclusions())
+    prompt = template.replace("{transcript}", transcript_blob)
     save_path = _summary_path_for_md(abs_path)
     skip_claude = bool(
         data.get("skip_claude")
@@ -2040,6 +2043,40 @@ def get_prompt():
         with open(PROMPT_FILE, encoding="utf-8") as f:
             return _json({"prompt": f.read()})
     return _json({"prompt": DEFAULT_PROMPT})
+
+
+def _inject_term_exclusions(prompt: str, terms: list[str]) -> str:
+    """사용자 지정 각주 제외 용어를 요약 프롬프트에 심는다.
+
+    프롬프트 본문의 고정 제외 목록과 같은 층위로 읽히도록 전사 자리표시자가 있는
+    줄 바로 앞에 한 줄로 넣는다(자리표시자가 없으면 끝에 붙인다).
+    """
+    terms = [str(t).strip() for t in (terms or []) if str(t).strip()]
+    if not terms:
+        return prompt
+    line = ("- 사용자가 지정한 다음 용어도 설명 없이 이해되는 말로 보고 별표와 해설을 붙이지 않는다: "
+            + "·".join(terms) + "\n\n")
+    idx = prompt.find("{transcript}")
+    if idx < 0:
+        return prompt.rstrip("\n") + "\n\n" + line.rstrip("\n")
+    line_start = prompt.rfind("\n", 0, idx) + 1
+    return prompt[:line_start] + line + prompt[line_start:]
+
+
+@app.route("/terms/excluded", methods=["GET", "POST", "DELETE"])
+def term_exclusions():
+    """각주 제외 용어 목록 조회/추가/삭제. 요약 뷰어의 ✕ 버튼과 프롬프트 패널이 쓴다."""
+    if request.method == "GET":
+        return _json({"terms": db.list_term_exclusions()})
+    data = request.get_json(force=True) or {}
+    term = str(data.get("term") or "").strip()
+    if not term or len(term) > 80:
+        return _json({"error": "용어를 입력하세요(80자 이내)."}, 400)
+    if request.method == "POST":
+        added = db.add_term_exclusion(term)
+        return _json({"ok": True, "added": added, "terms": db.list_term_exclusions()})
+    removed = db.remove_term_exclusion(term)
+    return _json({"ok": True, "removed": removed, "terms": db.list_term_exclusions()})
 
 
 @app.route("/prompt/default")

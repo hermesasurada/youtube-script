@@ -74,6 +74,62 @@ def test_image_captions_are_excluded_from_term_notes():
     assert "root.querySelectorAll('.kf-strip figcaption')" in common_js
 
 
+def test_term_exclusions_db_roundtrip(tmp_path, monkeypatch):
+    """각주 제외 용어: 정규화 키로 중복 억제, 표시는 원문, 삭제는 어떤 표기로도 된다."""
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
+    db._local.c = None
+    db.init()
+    assert db.add_term_exclusion("크롤링") is True
+    assert db.add_term_exclusion(" 크롤링 ") is False          # 공백만 다르면 같은 용어
+    assert db.add_term_exclusion("Product–Market Fit") is True  # 하이픈 계열 통일
+    assert db.add_term_exclusion("product-market fit") is False
+    assert db.add_term_exclusion("") is False
+    assert db.list_term_exclusions() == ["크롤링", "Product–Market Fit"]
+    assert db.remove_term_exclusion("PRODUCT-MARKET FIT") is True
+    assert db.list_term_exclusions() == ["크롤링"]
+    db._local.c = None
+
+
+def test_term_exclusions_route_and_prompt_injection(monkeypatch):
+    """/terms/excluded GET·POST·DELETE, 그리고 요약 프롬프트에 제외 목록이 심긴다."""
+    store = []
+    monkeypatch.setattr(db, "list_term_exclusions", lambda: list(store))
+    monkeypatch.setattr(db, "add_term_exclusion", lambda t: (store.append(t) or True) if t not in store else False)
+    monkeypatch.setattr(db, "remove_term_exclusion", lambda t: (store.remove(t) or True) if t in store else False)
+    c = app.app.test_client()
+    assert c.get("/terms/excluded").get_json() == {"terms": []}
+    r = c.post("/terms/excluded", json={"term": "크롤링"}).get_json()
+    assert r["added"] is True and r["terms"] == ["크롤링"]
+    assert c.post("/terms/excluded", json={"term": "  "}).status_code == 400
+    c.post("/terms/excluded", json={"term": "색인"})
+    r = c.delete("/terms/excluded", json={"term": "크롤링"}).get_json()
+    assert r["removed"] is True and r["terms"] == ["색인"]
+
+    tpl = "# 규칙\n- 별표 규칙\n\n전사:\n{transcript}\n"
+    out = app._inject_term_exclusions(tpl, ["크롤링", "색인"])
+    assert "크롤링·색인" in out
+    assert out.index("크롤링·색인") < out.index("{transcript}")      # 전사 앞에 들어간다
+    assert app._inject_term_exclusions(tpl, []) == tpl
+    assert "크롤링" in app._inject_term_exclusions("규칙만 있음", ["크롤링"])
+
+
+def test_term_exclusion_ui_is_wired_on_every_surface():
+    project = os.path.dirname(os.path.dirname(__file__))
+    common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
+    assert "function applyTermExclusions(root)" in common_js
+    assert "className = 'term-note-x'" in common_js
+    assert "root.querySelectorAll('.term-note-x').forEach(b => b.remove())" in common_js   # 블로그 HTML에서는 제거
+    assert "ensureTermExclusions," in common_js
+    index_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
+    mobile = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()
+    assert index_js.count("YS.ensureTermExclusions(") >= 2      # 요약 뷰어 + 프롬프트 패널
+    assert "YS.ensureTermExclusions()" in mobile
+    index_html = open(os.path.join(project, "templates/index.html"), encoding="utf-8").read()
+    assert 'id="term-excl-list"' in index_html and 'id="term-excl-input"' in index_html
+    app_src = open(os.path.join(project, "app.py"), encoding="utf-8").read()
+    assert '"/terms/excluded",' in app_src.split("_REMOTE_DATA_ALLOWED = {")[1].split("}")[0]
+
+
 def test_title_translation_preserves_neocloud_original_spelling():
     source = "Most Neoclouds Suck At Security (Neoclouds, Security)"
     translated = "대부분의 뉴클라우드는 보안에 취약하다 (네오클라우드, 보안)"
