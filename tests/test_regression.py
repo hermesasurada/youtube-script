@@ -147,6 +147,18 @@ def test_title_translation_never_says_nobyeondamhwa_for_fireside_chat():
     assert "노변담화" in app._TITLE_TR_PROMPT and "대담" in app._TITLE_TR_PROMPT
 
 
+def test_title_translation_prompt_covers_recurring_failure_modes():
+    """2026-09-11 362건 감사에서 드러난 유형: 인명·제품명 음차, 영어 앞머리 방치, 사전 직역, 한자."""
+    p = app._TITLE_TR_PROMPT
+    assert "음차하지 않는다" in p and "제이미 다이먼 ×" in p           # 인명 음차 금지 + 반례
+    assert "Hugging Face, Jalapeño, GPT-5.6 Sol, Neutron" in p       # 제품·코드명 원문 유지
+    assert "같은 사람·회사는 어느 제목에서든 같은 표기" in p          # 제목 간 표기 통일
+    assert "Making Cities Awesome" in p and "시리즈·프로그램명" in p    # 영어 앞머리 번역 vs 시리즈명 보존
+    assert "fireside chat → 대담" in p and "All-Hands → 전사 미팅" in p  # 상투 표현 대응표
+    assert "한자(發" in p                                             # 한자 금지
+    assert "9/2/2026" in p                                            # 날짜 형식 유지
+
+
 def test_title_translation_preserves_neocloud_original_spelling():
     source = "Most Neoclouds Suck At Security (Neoclouds, Security)"
     translated = "대부분의 뉴클라우드는 보안에 취약하다 (네오클라우드, 보안)"
