@@ -135,6 +135,38 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     assert '"/terms/excluded",' in app_src.split("_REMOTE_DATA_ALLOWED = {")[1].split("}")[0]
 
 
+def test_collapse_retry_judges_coverage_and_chunk_merge(tmp_path):
+    """붕괴 재전사는 반복 소멸만이 아니라 세그먼트 커버리지로 판정한다(#1139: 24분 중 3분만 남음)."""
+    import json as _json
+
+    def seg(a_ms, b_ms, text="x"):
+        return {"offsets": {"from": a_ms, "to": b_ms},
+                "timestamps": {"from": app._ms_to_ts(a_ms), "to": app._ms_to_ts(b_ms)}, "text": text}
+
+    # 24분 중 앞 3분 15초만 덮은 결과 → 커버리지 14% → 분할 재전사 대상
+    sparse = tmp_path / "sparse.json"
+    sparse.write_text(_json.dumps({"transcription": [seg(0, 195_000)]}), encoding="utf-8")
+    assert round(app._coverage_ratio(str(sparse), 1443), 2) == 0.14
+    full = tmp_path / "full.json"
+    full.write_text(_json.dumps({"transcription": [seg(0, 600_000), seg(590_000, 1_400_000)]}), encoding="utf-8")
+    assert app._coverage_ratio(str(full), 1443) > 0.95          # 겹치는 구간은 한 번만 센다
+    assert app._coverage_ratio(str(tmp_path / "missing.json"), 1443) == 0.0
+    assert app._coverage_ratio(str(sparse), 0) == 1.0            # 길이를 모르면 판정 보류
+    assert app._MIN_COVERAGE > 0.14
+
+    # 구간 병합: 절대 시각 구간은 그대로, 상대 시각으로 온 구간은 offset을 더한다
+    c0 = tmp_path / "c0.json"; c0.write_text(_json.dumps({"transcription": [seg(0, 5_000, "a")]}), encoding="utf-8")
+    c1 = tmp_path / "c1.json"; c1.write_text(_json.dumps({"transcription": [seg(600_000, 605_000, "b")]}), encoding="utf-8")
+    c2 = tmp_path / "c2.json"; c2.write_text(_json.dumps({"transcription": [seg(0, 4_000, "c")]}), encoding="utf-8")  # 상대 시각
+    out = tmp_path / "merged.json"
+    n = app._merge_whisper_chunks([(0, str(c0)), (600_000, str(c1)), (1_200_000, str(c2))], str(out))
+    merged = _json.loads(out.read_text(encoding="utf-8"))["transcription"]
+    assert n == 3 and [m["text"] for m in merged] == ["a", "b", "c"]
+    assert merged[2]["offsets"] == {"from": 1_200_000, "to": 1_204_000}
+    assert merged[2]["timestamps"]["from"] == "00:20:00,000"
+    assert app._ms_to_ts(3_723_456) == "01:02:03,456"
+
+
 def test_title_translation_never_says_nobyeondamhwa_for_fireside_chat():
     """fireside chat → '대담'. 모델이 '노변담화'를 내놔도 결정적으로 바로잡는다."""
     src = "Commerce Sec. Lutnick and Nvidia CEO Jensen Huang in a fireside chat at G20 meeting — 9/2/2026"

@@ -496,6 +496,11 @@ def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, 
 
 _COLLAPSE_MIN_RUN    = 50     # 같은 문장이 이만큼 연달아 나오면 붕괴로 본다
 _COLLAPSE_CONTEXT    = 64     # 붕괴 시 재전사에 쓸 컨텍스트 상한(토큰)
+# 붕괴 재전사 뒤 '반복이 사라졌는가'만 보면 부족하다 — 2026-09-10 Tom Brown G20(24분)은
+# 컨텍스트 제한 재전사가 반복 없이 끝났지만 3분 15초 이후가 통째로 비어 2,983자만 남았다.
+# 세그먼트가 실제로 덮는 시간이 전체의 이 비율에 못 미치면 구간 분할로 다시 돈다.
+_MIN_COVERAGE        = float(os.environ.get("WHISPER_MIN_COVERAGE", "0.6"))
+_CHUNK_SEC           = int(os.environ.get("WHISPER_CHUNK_SEC", "600"))   # 분할 재전사 구간(초)
 
 
 def _looks_collapsed(json_path: str) -> tuple[bool, str]:
@@ -535,7 +540,10 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
 
 
 def _run_whisper(job_id: str, audio_path: str, language: str,
-                 threads: str, total: float, max_context: int | None = None) -> int:
+                 threads: str, total: float, max_context: int | None = None,
+                 *, offset_ms: int | None = None, duration_ms: int | None = None,
+                 output_prefix: str | None = None) -> int:
+    """whisper.cpp 1회 실행. offset/duration/output_prefix는 구간 분할 재전사용."""
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
 
@@ -574,6 +582,12 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
                "--no-speech-thold", "0.8", "--flash-attn"]
         if max_context is not None:
             cmd += ["--max-context", str(max_context)]
+        if offset_ms:
+            cmd += ["--offset-t", str(int(offset_ms))]
+        if duration_ms:
+            cmd += ["--duration", str(int(duration_ms))]
+        if output_prefix:
+            cmd += ["--output-file", output_prefix]
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=BASE_DIR,
@@ -598,6 +612,122 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
         return proc.returncode
     finally:
         _transcribe_sem.release()
+
+
+def _coverage_ratio(json_path: str, total: float) -> float:
+    """whisper 세그먼트가 실제로 덮는 시간의 비율(0~1). JSON을 못 읽으면 0."""
+    if not total or total <= 0:
+        return 1.0
+    try:
+        with open(json_path, encoding="utf-8", errors="replace") as f:
+            segs = json.load(f).get("transcription", [])
+    except Exception:
+        return 0.0
+    spans = []
+    for s in segs:
+        if not (s.get("text") or "").strip():
+            continue
+        off = s.get("offsets") or {}
+        try:
+            a, b = int(off.get("from", 0)) / 1000, int(off.get("to", 0)) / 1000
+        except (TypeError, ValueError):
+            continue
+        if b > a:
+            spans.append((a, b))
+    spans.sort()
+    covered, cur_a, cur_b = 0.0, None, None
+    for a, b in spans:
+        if cur_b is None or a > cur_b:
+            if cur_b is not None:
+                covered += cur_b - cur_a
+            cur_a, cur_b = a, b
+        else:
+            cur_b = max(cur_b, b)
+    if cur_b is not None:
+        covered += cur_b - cur_a
+    return max(0.0, min(1.0, covered / total))
+
+
+def _ms_to_ts(ms: int) -> str:
+    h, rem = divmod(int(ms), 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _merge_whisper_chunks(chunk_files: list[tuple[int, str]], out_path: str) -> int:
+    """구간별 whisper JSON을 하나로 합친다. 반환값은 세그먼트 수.
+
+    whisper.cpp는 --offset-t를 줘도 절대 시각으로 찍지만, 혹시 상대 시각으로 온
+    구간(첫 세그먼트가 offset보다 한참 앞)은 offset을 더해 절대 시각으로 맞춘다.
+    """
+    merged: list[dict] = []
+    for offset_ms, path in chunk_files:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                segs = json.load(f).get("transcription", [])
+        except Exception:
+            continue
+        shift = 0
+        if segs:
+            try:
+                first = int((segs[0].get("offsets") or {}).get("from", 0))
+            except (TypeError, ValueError):
+                first = 0
+            if offset_ms and first < offset_ms - 1000:
+                shift = offset_ms
+        for s in segs:
+            off = dict(s.get("offsets") or {})
+            try:
+                a, b = int(off.get("from", 0)) + shift, int(off.get("to", 0)) + shift
+            except (TypeError, ValueError):
+                continue
+            merged.append({**s, "offsets": {"from": a, "to": b},
+                           "timestamps": {"from": _ms_to_ts(a), "to": _ms_to_ts(b)}})
+    merged.sort(key=lambda s: s["offsets"]["from"])
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"transcription": merged}, f, ensure_ascii=False)
+    return len(merged)
+
+
+def _run_whisper_chunked(job_id: str, audio_path: str, language: str,
+                         threads: str, total: float, chunk_sec: int = _CHUNK_SEC) -> int:
+    """오디오를 고정 길이 구간으로 잘라 구간마다 컨텍스트 없이 새로 전사한 뒤 합친다.
+
+    붕괴는 컨텍스트가 스스로를 강화해 생기므로 구간 경계마다 컨텍스트를 끊으면
+    한 구간이 무너져도 나머지는 살아남는다. 결과는 audio_path + ".json"에 쓴다.
+    """
+    q = jobs[job_id]["queue"]
+    stop = jobs[job_id]["stop_event"]
+    total_ms = int(max(total, 0) * 1000)
+    if total_ms <= 0:
+        return -1
+    step = max(60, int(chunk_sec)) * 1000
+    chunks: list[tuple[int, str]] = []
+    n = (total_ms + step - 1) // step
+    for i in range(n):
+        if stop.is_set():
+            return -1
+        off = i * step
+        prefix = f"{audio_path}.chunk{i:03d}"
+        q.put(f"구간 분할 재전사 {i + 1}/{n} ({_format_duration(off / 1000)}~)")
+        rc = _run_whisper(job_id, audio_path, language, threads, total, max_context=0,
+                          offset_ms=off, duration_ms=min(step, total_ms - off),
+                          output_prefix=prefix)
+        if rc != 0:
+            log.warning("chunked whisper failed at chunk %d/%d (rc=%s)", i + 1, n, rc)
+        elif os.path.isfile(prefix + ".json"):
+            chunks.append((off, prefix + ".json"))
+    if not chunks:
+        return -1
+    count = _merge_whisper_chunks(chunks, audio_path + ".json")
+    for _, p in chunks:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    log.info("chunked whisper merged: %d segments from %d/%d chunks", count, len(chunks), n)
+    return 0 if count else -1
 
 
 def _set_job_error(job_id: str, stage: str, message: object) -> str:
@@ -824,7 +954,18 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
             rc = _run_whisper(job_id, audio_path, lang, thr, total,
                               max_context=_COLLAPSE_CONTEXT)
             still, detail2 = _looks_collapsed(audio_path + ".json")
-            log.info("collapse retry result: %s", "여전히 붕괴" if still else f"정상화({detail2 or 'OK'})")
+            coverage = _coverage_ratio(audio_path + ".json", total) if rc == 0 else 0.0
+            # 반복이 사라졌어도 내용이 비면 실패다 — 세그먼트가 덮는 시간으로 판정한다.
+            if rc == 0 and not stop.is_set() and (still or coverage < _MIN_COVERAGE):
+                log.warning("collapse retry insufficient: %s — 붕괴=%s, 커버리지 %.0f%% → 구간 분할 재전사",
+                            os.path.basename(audio_path), "예" if still else "아니오", coverage * 100)
+                q.put(f"재전사 결과가 비어 있음(커버리지 {coverage:.0%}) — {_CHUNK_SEC // 60}분 구간으로 분할 재전사")
+                rc = _run_whisper_chunked(job_id, audio_path, lang, thr, total)
+                coverage = _coverage_ratio(audio_path + ".json", total) if rc == 0 else 0.0
+                log.info("chunked retry coverage: %.0f%%", coverage * 100)
+            else:
+                log.info("collapse retry result: %s (커버리지 %.0f%%)",
+                         "여전히 붕괴" if still else f"정상화({detail2 or 'OK'})", coverage * 100)
     # 언어 오판 폴백: 결과가 백지에 가깝고 대체 언어 후보가 있으면 그 언어로 한 번만
     # 다시 돌린다. 어느 쪽이 맞는지는 결과가 말해 준다 — 백지가 아닌 쪽이 정답이다.
     if rc == 0 and not stop.is_set() and lang == "auto":
