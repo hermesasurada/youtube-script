@@ -339,7 +339,10 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     summary = summary_dir / md.name
     md.write_text(
         "---\ntitle: 경량 이력 API\nuploader: 테스트 채널\nduration: 60\n"
-        "id: LIGHTAPI01\nwebpage_url: https://youtu.be/LIGHTAPI01\n---\n\n전사 본문",
+        "id: LIGHTAPI01\nwebpage_url: https://youtu.be/LIGHTAPI01\n"
+        "original_video_url: https://youtu.be/ORIGINAL01\n"
+        "original_video_title: Original Interview\n"
+        "original_video_uploader: Source Channel\n---\n\n전사 본문",
         encoding="utf-8",
     )
     summary.write_text("# 경량 이력 API\n\n요약 본문", encoding="utf-8")
@@ -360,6 +363,9 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     assert "요약 본문" in summary_payload["content"]
     assert summary_payload["is_read"] is False
     assert summary_payload["webpage_url"] == "https://youtu.be/LIGHTAPI01"
+    assert summary_payload["original_video_url"] == "https://www.youtube.com/watch?v=ORIGINAL01"
+    assert summary_payload["original_video_title"] == "Original Interview"
+    assert summary_payload["original_video_uploader"] == "Source Channel"
 
     marked = client.patch(
         "/history/mark_read", json={"item_id": item["item_id"], "is_read": True}

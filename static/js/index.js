@@ -2225,12 +2225,20 @@ let _titleKo = '';        // 현재 열린 요약의 번역 제목(외국어 제
 let _summaryItemId = 0;   // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
 let _summaryRead = false;
 
-function _setSummaryYouTubeLink(url) {
+function _setSummaryVideoLinks(url, originalUrl = '', originalTitle = '') {
   const link = document.getElementById('sum-youtube-link');
-  if (!link) return;
+  const original = document.getElementById('sum-original-link');
+  if (!link || !original) return;
   const href = String(url || '').trim();
+  const originalHref = String(originalUrl || '').trim();
   link.hidden = !href;
   link.href = href || '#';
+  const label = link.querySelector('.sum-youtube-label');
+  if (label) label.textContent = originalHref ? '번역본' : 'YouTube에서 보기';
+  link.title = originalHref ? '번역·재게시 영상 보기' : 'YouTube에서 보기';
+  original.hidden = !originalHref;
+  original.href = originalHref || '#';
+  original.title = originalTitle ? `원본 영상: ${originalTitle}` : '원본 영상 보기';
 }
 
 let _distill = null;      // 현재 영상의 증류 상태 {override, channel, effective}
@@ -2482,7 +2490,7 @@ async function openSummaryModal(itemId, title) {
 
   _summaryItemId = itemId;                              // 증류 설정 변경 대상
   _setSummaryReadUI(false);
-  _setSummaryYouTubeLink('');
+  _setSummaryVideoLinks('');
   _setDistillUI(null);                                   // 값 로드 전에는 기본 표시
   bodyEl.innerHTML    = '<p class="sum-loading">불러오는 중…</p>';
   document.getElementById('sum-panel-footer').hidden = true;
@@ -2505,7 +2513,11 @@ async function openSummaryModal(itemId, title) {
     _setPubBtn(data.blog_url);                               // 발행 여부에 따라 📤 / 🔗
     _setSummaryReadUI(data.is_read);
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
-    _setSummaryYouTubeLink(data.webpage_url);
+    _setSummaryVideoLinks(
+      data.webpage_url,
+      data.original_video_url,
+      data.original_video_title,
+    );
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략

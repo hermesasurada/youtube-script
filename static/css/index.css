@@ -1948,7 +1948,10 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 }
 .sum-youtube-btn[hidden] { display: none; }
 .sum-youtube-btn:hover { color: #fff; background: #c00; border-color: #c00; }
+.sum-original-btn { color: var(--highlight); }
+.sum-original-btn:hover { background: var(--highlight); border-color: var(--highlight); }
 [data-theme="dark"] .sum-youtube-btn { color: #ff5a5a; }
+[data-theme="dark"] .sum-original-btn { color: var(--highlight); }
 [data-theme="dark"] .sum-youtube-btn:hover { color: #fff; }
 .sum-panel-footer {
   min-height: 54px; padding: .6rem 1rem;
