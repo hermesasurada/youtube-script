@@ -57,6 +57,17 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     assert "언어\\s*모델|코딩\\s*에이전트" in common_js
 
 
+def test_summary_popup_sticky_sections_are_wired_for_desktop_and_mobile():
+    project = os.path.dirname(os.path.dirname(__file__))
+    common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
+    desktop_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
+    mobile_html = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()
+    assert "function setupStickySummarySections(rootEl)" in common_js
+    assert ".sum-topic-section>h3{position:sticky" in common_js
+    assert desktop_js.count("YS.setupStickySummarySections") == 2
+    assert mobile_html.count("YS.setupStickySummarySections") == 1
+
+
 def test_image_captions_are_excluded_from_term_notes():
     """캡션은 각주 대상이 아니다 — 프롬프트·주입·렌더 세 곳 모두 별표를 남기지 않는다."""
     import keyframe_report

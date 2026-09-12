@@ -522,7 +522,7 @@
     .modal-body.markdown .sum-title-orig::-webkit-scrollbar { display: none; }
     .modal-body.markdown .sum-title-orig { font-size: 12.5px; }   /* 병기는 제목보다 작게 유지 */
     /* 요약 상단은 여백을 줄이고, 제목(+원문 병기)은 스크롤해도 상단에 고정 */
-    .modal-body.markdown { padding-top: 0; }
+    .modal-body.markdown { --sum-topic-sticky-bg: var(--bg); padding-top: 0; }
     .modal-body.markdown > .sum-head-sticky {
       margin: 0 -1rem .25em; padding: .35rem 1rem;   /* 상·하 대칭 — .6rem→.35rem (2026-09-10 지시) */
       background: var(--bg);
@@ -1714,6 +1714,7 @@ async function openSummary(itemId, title) {
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
+      YS.setupStickySummarySections($('modal-body'));         // 소제목은 해당 h3 섹션 안에서만 고정
       $('modal-youtube-link').href = d.webpage_url || '#';
       $('modal-youtube-link').hidden = !d.webpage_url;
       _setSummaryReadUIM(d.is_read);

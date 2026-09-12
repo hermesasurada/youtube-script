@@ -415,6 +415,41 @@
     return tpl.innerHTML;
   }
 
+  // 각 h3와 다음 h3 사이를 실제 섹션으로 묶는다. h3에 sticky만 적용하면 문서
+  // 끝까지 남지만, 이 래퍼가 있으면 해당 섹션 끝에서 자연스럽게 밀려난다.
+  const _stickySectionObservers = new WeakMap();
+  function setupStickySummarySections(rootEl) {
+    if (!rootEl) return;
+    const previous = _stickySectionObservers.get(rootEl);
+    if (previous) previous.disconnect();
+
+    let section = null;
+    [...rootEl.childNodes].forEach(node => {
+      if (node.nodeType === 1 && node.matches('h3')) {
+        section = document.createElement('section');
+        section.className = 'sum-topic-section';
+        rootEl.insertBefore(section, node);
+        section.appendChild(node);
+      } else if (node.nodeType === 1 && node.matches('h2')) {
+        section = null;
+      } else if (section) {
+        section.appendChild(node);
+      }
+    });
+
+    const syncOffset = () => {
+      const head = rootEl.querySelector(':scope > .sum-head-sticky');
+      rootEl.style.setProperty('--sum-topic-sticky-top', `${head ? head.offsetHeight : 0}px`);
+    };
+    syncOffset();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(syncOffset);
+      const head = rootEl.querySelector(':scope > .sum-head-sticky');
+      if (head) observer.observe(head);
+      _stickySectionObservers.set(rootEl, observer);
+    }
+  }
+
   /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목·요약 꾸미기. */
   function renderMarkdown(src) {
     src = String(src || '').replace(/^---\n[\s\S]*?\n---\n?/, '');
@@ -774,6 +809,7 @@
     ensureTermExclusions,
     apiTermExclusion,
     applyTermExclusions,
+    setupStickySummarySections,
     listTermExclusions: () => [..._termExcl],
   };
 
@@ -838,6 +874,9 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .kf-time{display:none;margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}
 /* 요약 소제목(h3) 리본: 좌측 강조 바 + 틴트, 시각 pill은 우측 정렬 */
 .sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius: 2px;margin:1.7rem 0 .75rem;}
+/* 뷰어에서 JS가 h3별로 만든 경계 안에서만 소제목을 고정한다. */
+.sum-topic-section{display:flow-root;min-width:0;}
+.sum-topic-section>h3{position:sticky;top:var(--sum-topic-sticky-top,0);z-index:5;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%),var(--sum-topic-sticky-bg,var(--surface,#fff));box-shadow:0 8px 10px -12px rgba(0,0,0,.45);}
 /* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */
 .sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
 .sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}

@@ -1899,6 +1899,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 }
 .sum-panel-close:hover { color: var(--text); background: var(--surface2); border-color: var(--border-strong); }
 .sum-panel-body {
+  --sum-topic-sticky-bg: var(--surface);
   padding: 0 2rem 2.5rem;    /* 상단 여백은 고정 제목(.sum-head-sticky)의 패딩으로 대체 */
   overflow-y: auto;
   flex: 1 1 auto;
@@ -2056,6 +2057,7 @@ a.hist-card-uploader:hover { color: var(--highlight); }
 .imm-text { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 0 2rem 3rem; }
 .imm-text > * { max-width: 660px; }   /* 가독 칼럼 폭 제한 */
 /* 몰입형 우측 본문은 한 단계 작게 */
+.imm-text { --sum-topic-sticky-bg: var(--surface); }
 .imm-text.sum-md p, .imm-text.sum-md li { font-size: calc(.85rem * var(--reader-scale, 1)); line-height: 1.68; }
 .imm-text.sum-md h1 { font-size: 1.18rem; margin-bottom: .8rem; }
 .imm-text.sum-md h3 { font-size: .85rem; }

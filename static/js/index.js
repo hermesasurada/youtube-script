@@ -2509,6 +2509,7 @@ async function openSummaryModal(itemId, title) {
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
+    YS.setupStickySummarySections(bodyEl);                 // 소제목은 해당 h3 섹션 안에서만 고정
     bodyEl.scrollTop = 0;
     _updateSumProgress(bodyEl);
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
@@ -2558,6 +2559,7 @@ function _setImmersive(on) {
     ? `<div class="kf-strip">${figs.map(f => f.outerHTML).join('')}</div>`   // kf-strip 유지 → 라이트박스 동작
     : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
   txt.innerHTML = tmp.innerHTML;
+  YS.setupStickySummarySections(txt);                      // 몰입형 본문도 같은 섹션 경계 적용
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
   _updateSumProgress(txt);
 }
