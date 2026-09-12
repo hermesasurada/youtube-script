@@ -1641,3 +1641,10 @@ def test_summarize_ordered_han_leak_persisting_after_retry_moves_to_next_model(m
     bodies = _ordered_bodies(output)
     assert any("중국 시장" in b for b in bodies) and not any("中国" in b for b in bodies)
     assert len(grok_calls) == 2 and len(gpt_calls) == 1
+
+
+def test_prompt_forbids_coined_hanja_terms():
+    for name in ("prompt.txt", "prompt_default.txt"):
+        text = open(os.path.join(os.path.dirname(app.__file__), name), encoding="utf-8").read()
+        assert "한자 조어를 만들지 않는다" in text, name
+        assert "데이터 비누지" in text and "데이터 무보존(ZDR)" in text, name
