@@ -1574,3 +1574,70 @@ def test_script_mix_allows_normal_hanja_annotation():
                "거주 주(州)에 따라 세율이 다르다",
                "RC 상수(τ = R × C)는 지연을 뜻한다"):
         assert not app._warn_script_mix("x.md", ok), ok
+
+
+# ── 한자·이질 문자 누출 게이트 (2026-09-12 All-In 요약 "主张하는") ──────────────
+
+def test_script_leaks_detects_chinese_words_but_allows_korean_hanja_usage():
+    leaks = {
+        "AI 부처를 主张하는 AI Policy Network",   # 중국어 단어 + 한글 조사
+        "측면 이동(lateral移動)",                # 영문에 붙은 두 글자
+        "우주왕복선 退役 후",                     # 공백 사이 두 글자
+        "민粹주의",                              # 한글 사이에 낀 한 글자
+        "그 문제는 невероятно 어렵다",            # 키릴
+    }
+    fine = {
+        "친(親)데이터센터 인사",
+        "무\\(無\\)베이스라인",                   # 마크다운 이스케이프 괄호
+        "톈궁(天工, Tiangong) 등 제조사",
+        "킨츠기(金継ぎ)에서 유래",
+        "전년比 12% 증가",
+        "對중국 수출과 前 InSitu CEO, 마이크로범프 有",
+        "정상 한국어 요약 NVIDIA GPU",
+    }
+    for t in leaks:
+        assert app._script_leaks(t), t
+    for t in fine:
+        assert not app._script_leaks(t), t
+
+
+def _ordered_bodies(output):
+    return [json.loads(chunk[6:].strip()) for chunk in output
+            if chunk.startswith("data: ") and chunk[6:].strip()]
+
+
+def test_summarize_ordered_retries_once_on_han_leak_then_falls_through(monkeypatch):
+    calls = []
+
+    def fake_grok(prompt, **kwargs):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "# 요약\n\nAI 부처를 主张하는 단체", ""
+        return "# 요약\n\nAI 부처를 주장하는 단체", ""
+
+    monkeypatch.setattr(app, "_summarize_with_grok", fake_grok)
+    monkeypatch.setattr(app, "_summarize_with_gpt", lambda *a, **k: ("", "unused"))
+    output = list(app._summarize_ordered("프롬프트", None, ["grok"], transcript_chars=100))
+    bodies = _ordered_bodies(output)
+    assert any("주장하는" in b for b in bodies) and not any("主张" in b for b in bodies)
+    assert output[-1].startswith("event: done")
+    assert len(calls) == 2 and "재출력 요청" in calls[1] and "主张" in calls[1]
+
+
+def test_summarize_ordered_han_leak_persisting_after_retry_moves_to_next_model(monkeypatch):
+    grok_calls, gpt_calls = [], []
+
+    def fake_grok(prompt, **kwargs):
+        grok_calls.append(prompt)
+        return "# 요약\n\n中国 시장에서", ""
+
+    def fake_gpt(prompt, **kwargs):
+        gpt_calls.append(prompt)
+        return "# 요약\n\n중국 시장에서", ""
+
+    monkeypatch.setattr(app, "_summarize_with_grok", fake_grok)
+    monkeypatch.setattr(app, "_summarize_with_gpt", fake_gpt)
+    output = list(app._summarize_ordered("프롬프트", None, ["grok", "gpt"], transcript_chars=100))
+    bodies = _ordered_bodies(output)
+    assert any("중국 시장" in b for b in bodies) and not any("中国" in b for b in bodies)
+    assert len(grok_calls) == 2 and len(gpt_calls) == 1

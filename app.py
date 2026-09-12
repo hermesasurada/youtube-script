@@ -1649,17 +1649,54 @@ _ALIEN_SCRIPT_RE = re.compile(r"[؀-ۿݐ-ݿ֐-׿ऀ-ॿ฀-๿Ѐ-ӿ԰-֏]+")
 _CJK_INLINE_RE = re.compile(r"(?<=[가-힣])[一-鿿぀-ゟ゠-ヿ]+(?=[가-힣])")
 
 
+_HAN_RUN_RE = re.compile(r"[一-鿿]+")
+
+
+def _script_leaks(text: str) -> list[str]:
+    """한국어 요약에 섞인 이질 문자(아랍·키릴 등)와 '누출' 한자를 찾는다.
+
+    정상 한자 표기는 두 가지로 본다 — 한글 뒤 괄호 병기(반(反), 톈궁(天工, Tiangong),
+    킨츠기(金継ぎ))와 한 글자 단독 사용(前 CEO, 對중국, 전년比, 마이크로범프 有). 두 글자
+    이상의 한자가 병기 괄호 밖에 있거나(主张하는, lateral移動, 退役) 한 글자라도 한글 사이에
+    끼어 단어를 깨면(민粹주의) 모델이 중국어로 미끄러진 것이다(2026-09-12 All-In 요약
+    "主张하는" — Grok). 발견 목록을 문맥과 함께 돌려준다. 요약 1,061건 대상 보정:
+    오탐 0, 실제 누출 2건 검출.
+    """
+    text = (text or "").replace("\\(", "(").replace("\\)", ")")
+    found: list[str] = []
+    for m in _ALIEN_SCRIPT_RE.finditer(text):
+        found.append(f"{m.group(0)!r} … {text[max(0, m.start() - 30):m.end() + 20]!r}")
+    for m in _HAN_RUN_RE.finditer(text):
+        run, a, b = m.group(0), m.start(), m.end()
+        before = text[a - 1] if a > 0 else ""
+        after = text[b] if b < len(text) else ""
+        before2 = text[a - 2] if a > 1 else ""
+        hangul_before = bool(re.match(r"[가-힣]", before or " "))
+        hangul_after = bool(re.match(r"[가-힣]", after or " "))
+        # 한글(漢字…) 병기: 여는 괄호 바로 앞이 한글
+        if before == "(" and re.match(r"[가-힣]", before2 or " "):
+            continue
+        # 한 글자는 한글 사이에 낀 경우만 누출
+        if len(run) == 1 and not (hangul_before and hangul_after):
+            continue
+        found.append(f"{run!r} … {text[max(0, a - 30):b + 20]!r}")
+    return found
+
+
 def _warn_script_mix(save_path: str, text: str) -> list[str]:
     """요약에 섞인 이질 문자를 로그로 경고한다(수정하지 않음). 발견 목록 반환."""
-    found = []
-    for pat in (_ALIEN_SCRIPT_RE, _CJK_INLINE_RE):
-        for m in pat.finditer(text or ""):
-            start = max(0, m.start() - 30)
-            found.append(f"{m.group(0)!r} … {text[start:m.end() + 20]!r}")
+    found = _script_leaks(text)
     if found:
         log.warning("summary script mix: %s — %s",
                     os.path.basename(save_path), " | ".join(found[:4]))
     return found
+
+
+_SCRIPT_RETRY_NOTE = (
+    "\n\n[재출력 요청] 직전 응답에 한자·중국어 단어나 다른 문자체계가 섞여 있었다"
+    "({leaks}). 한글로만 쓰고(영문 고유명사·약어는 그대로), 한자는 '반(反)'처럼 한글 뒤 "
+    "괄호 병기 외에는 쓰지 말 것. 예: 主张 → 주장. 같은 형식·같은 분량으로 다시 출력한다."
+)
 
 
 def _reindex_summary(save_path: str) -> None:
@@ -2085,13 +2122,29 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
                 yield reset
             continue
 
+        def _call(p: str):
+            if key == "gpt":
+                return _summarize_with_gpt(p, reasoning_effort=reasoning["gpt"])
+            return _summarize_with_grok(p, reasoning_effort=reasoning["grok"])
+        body, err = _call(prompt)
         if key == "gpt":
-            body, err = _summarize_with_gpt(prompt, reasoning_effort=reasoning["gpt"])
             label = _model_label(GPT_MODEL or "gpt")
         else:
-            body, err = _summarize_with_grok(prompt, reasoning_effort=reasoning["grok"])
             # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.
             label = _model_label(GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok")
+        # 한자·이질 문자 누출 게이트: 같은 모델에 한 번만 재요청하고, 그래도 섞이면 실패로
+        # 보고 다음 모델로 넘긴다(2026-09-12 사용자 지적: All-In 요약의 主张).
+        if body:
+            leaks = _script_leaks(body)
+            if leaks:
+                log.warning("summarize %s: 문자 누출 %d건 — 같은 모델로 1회 재요청: %s",
+                            key, len(leaks), leaks[0][:80])
+                retry, rerr = _call(prompt + _SCRIPT_RETRY_NOTE.format(
+                    leaks=", ".join(l.split(" … ")[0] for l in leaks[:3])))
+                if retry and not _script_leaks(retry):
+                    body = retry
+                else:
+                    body, err = "", f"한자·이질 문자 누출({len(leaks)}건) — 재요청 후에도 남음"
         if not body:
             failures.append(f"{key.upper()}: {err or '빈 응답'}")
             log.warning("summarize %s 실패 → 다음 모델: %s", key, failures[-1])
