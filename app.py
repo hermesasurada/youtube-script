@@ -3077,7 +3077,7 @@ def summary_content():
 
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
-BLOG_RENDER_VERSION = "2026-09-14-tight-leading"
+BLOG_RENDER_VERSION = "2026-09-14-tight-leading-2"
 
 
 def _blog_state(item: dict | None) -> dict:
@@ -3255,9 +3255,10 @@ def history_refresh_meta():
     })
 
 
+# 원제 줄은 작은 글씨지만 본문보다 줄간격이 크면 따로 놀아서, 본문(1.6)에 맞춰 좁힌다.
 _BLOG_ORIGINAL_STYLE = (
     "margin:0 0 1.4em;font-size:13px;font-weight:400;"
-    "line-height:1.65;color:#7b8393;"
+    "line-height:1.5;color:#7b8393;"
 )
 
 
@@ -3297,7 +3298,7 @@ def _include_blog_notes(body_html, notes):
         # 블로거는 인라인 style만 먹어서 ::before를 못 쓴다 — 전구를 본문 앞에 직접 넣는다.
         block = ('<aside style="margin:.9em 0;padding:9px 13px;border-left:3px solid #728d79;'
                  'background:#f1f5f1;border-radius:6px;color:#34443a;">'
-                 '<div style="white-space:pre-wrap;font-size:15px;line-height:1.65;">'
+                 '<div style="white-space:pre-wrap;font-size:15px;line-height:1.6;">'
                  '\U0001F4A1 ' + html_lib.escape(note) + '</div></aside>')
         # 마지막 섹션도 최상위 본문 wrapper 닫힘 앞에 삽입한다.
         end = part.rfind('</div>') if i == len(parts) - 1 else -1

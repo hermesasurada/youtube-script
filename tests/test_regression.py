@@ -206,6 +206,12 @@ def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
     assert "margin:0 0 1.6em" in para and "margin:0 0 .7em" in li      # 간격은 그대로
     assert float(re.search(r"line-height:([\d.]+)", para).group(1)) <= 1.6
     assert float(re.search(r"line-height:([\d.]+)", li).group(1)) <= 1.6
+    # 서버가 붙이는 블록(메모·원제 줄)도 본문보다 넓게 벌어지지 않는다
+    app_src = open(os.path.join(os.path.dirname(app.__file__), "app.py"), encoding="utf-8").read()
+    memo = re.search(r"white-space:pre-wrap;font-size:15px;line-height:([\d.]+)", app_src)
+    assert memo and float(memo.group(1)) <= 1.6
+    assert float(re.search(r"line-height:([\d.]+)", app._BLOG_ORIGINAL_STYLE).group(1)) <= 1.6
+    assert float(re.search(r"foot:\s*'[^']*line-height:([\d.]+)", common).group(1)) <= 1.6
 
 
 def test_publish_button_offers_open_and_update_on_both_surfaces():

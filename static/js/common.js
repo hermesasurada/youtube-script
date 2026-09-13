@@ -781,10 +781,10 @@
         + 'background:#f7f7f6;',
     termRow: 'margin:0;padding:0;font-size:12.5px;line-height:1.55;'
         + 'font-weight:400;color:#7a7f87;',
-    originalTitle: 'margin:0 0 1.4em;font-size:13px;font-weight:400;line-height:1.65;color:#7b8393;',
+    originalTitle: 'margin:0 0 1.4em;font-size:13px;font-weight:400;line-height:1.5;color:#7b8393;',
     li:   'margin:0 0 .7em;line-height:1.57;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
-    foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
+    foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.5;',
   };
 
   /* 요약 md → 블로그 발행용 본문 DOM.
