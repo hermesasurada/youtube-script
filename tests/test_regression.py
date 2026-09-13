@@ -86,6 +86,12 @@ def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
     assert '&lt;script&gt;' in published
     assert published.index('나의 의견') < published.index('>다음</h3>')
     assert published.count('<aside') == 1
+    # 마지막 섹션의 메모는 '원본 영상' 푸터(<div data-summary-footer>) 앞에 들어간다
+    footed = ('<div><h3 data-summary-section="전력 &amp; 투자::1">전력</h3><p>본문</p>'
+              '<div data-summary-footer="1">원본 영상: u</div></div>')
+    out = app._include_blog_notes(footed, db.get_summary_notes(item['md_path']))
+    assert out.index('나의 의견') < out.index('원본 영상')
+    assert out.endswith('원본 영상: u</div></div>')
     assert client.post('/summary/note', json={**payload, 'body': 'x' * 10001}).status_code == 400
     assert client.post('/summary/note', json={**payload, 'body': '  '}).status_code == 200
     assert db.get_summary_notes(item['md_path']) == {}

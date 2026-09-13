@@ -3244,7 +3244,9 @@ def _ensure_blog_original_title(body_html: str, original_title: str | None,
 def _include_blog_notes(body_html, notes):
     """클라이언트의 소제목 식별자를 기준으로 저장된 최신 메모를 삽입한다."""
     import html as html_lib
-    parts = re.split(r'(?=<h[23]\b|<p\b[^>]*data-summary-footer="1")', body_html, flags=re.I)
+    # 푸터(원본 영상 링크)는 mdToBloggerHtml이 <div data-summary-footer>로 만든다 — <p>만
+    # 찾으면 분리되지 않아 마지막 섹션 메모가 푸터 뒤에 붙는다(2026-09-13 검증에서 발견).
+    parts = re.split(r'(?=<h[23]\b|<(?:p|div)\b[^>]*data-summary-footer="1")', body_html, flags=re.I)
     for i, part in enumerate(parts):
         match = re.match(r'<h3\b[^>]*data-summary-section="([^"]*)"[^>]*>', part, re.I)
         if not match:
