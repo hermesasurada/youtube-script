@@ -524,6 +524,97 @@
     });
   }
 
+  /**
+   * 요약 마크다운을 `###` 소제목 단위로 자른다. 화면의 h3 순서와 1:1로 대응하므로
+   * 뷰어는 인덱스로 짝지으면 된다. 코드펜스(```) 안의 `###`는 소제목이 아니다.
+   * 첫 소제목 앞의 머리말(메타·한눈 요약)은 편집 대상이 아니라 결과에 넣지 않는다.
+   */
+  function splitSummarySections(md) {
+    const lines = String(md || '').split('\n');
+    const starts = [];
+    let fence = false;
+    lines.forEach((line, i) => {
+      if (/^\s*```/.test(line)) fence = !fence;
+      else if (!fence && /^###\s+\S/.test(line)) starts.push(i);
+    });
+    return starts.map((from, n) => {
+      const to = n + 1 < starts.length ? starts[n + 1] : lines.length;
+      return { from, to, text: lines.slice(from, to).join('\n') };
+    });
+  }
+
+  /**
+   * 소제목마다 ✏️ 편집 버튼을 달아 그 구간의 마크다운을 직접 고치게 한다.
+   * 저장은 '원래 구간 텍스트'와 함께 보내 서버가 중간 변경을 감지하도록 한다.
+   * onSaved(새 전체 마크다운, blog 상태)로 뷰어가 다시 그린다.
+   */
+  function attachSectionEditors(root, { md, itemId, onSaved }) {
+    if (!root || typeof document === 'undefined') return;
+    root.querySelectorAll('.sec-edit-btn, .sec-edit-box').forEach(n => n.remove());
+    const sections = splitSummarySections(md);
+    [...root.querySelectorAll('h3')].forEach((heading, i) => {
+      const section = sections[i];
+      if (!section) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sec-edit-btn';
+      btn.title = '이 소제목 구간을 직접 편집';
+      btn.setAttribute('aria-label', '구간 편집');
+      btn.textContent = '\u270E';
+      heading.appendChild(btn);
+      btn.onclick = () => openEditor(heading, section, btn);
+    });
+
+    function openEditor(heading, section, btn) {
+      const host = heading.closest('.sum-topic-section') || heading.parentElement;
+      if (host.querySelector('.sec-edit-box')) return;
+      btn.disabled = true;
+      const box = document.createElement('div');
+      box.className = 'sec-edit-box';
+      const ta = document.createElement('textarea');
+      ta.value = section.text;
+      ta.spellcheck = false;
+      ta.setAttribute('aria-label', '구간 마크다운');
+      const bar = document.createElement('div');
+      bar.className = 'sec-edit-bar';
+      const save = document.createElement('button');
+      save.type = 'button'; save.textContent = '저장';
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.textContent = '취소';
+      const status = document.createElement('span');
+      status.className = 'sec-edit-status'; status.setAttribute('role', 'status');
+      bar.append(save, cancel, status);
+      box.append(ta, bar);
+      heading.after(box);
+      // 내용에 맞춰 높이를 잡되 화면을 넘기지 않는다.
+      ta.style.height = Math.min(Math.max(ta.scrollHeight + 8, 160), 520) + 'px';
+      ta.focus();
+
+      const close = () => { box.remove(); btn.disabled = false; };
+      cancel.onclick = close;
+      save.onclick = async () => {
+        const body = ta.value;
+        if (!body.trim()) { status.textContent = '내용을 비울 수 없습니다'; return; }
+        if (body === section.text) { close(); return; }
+        save.disabled = cancel.disabled = true;
+        status.textContent = '저장 중…';
+        try {
+          const r = await fetch('/summary/section', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: itemId, original: section.text, body }),
+          });
+          const d = await r.json();
+          if (!r.ok || d.error) throw new Error(d.error || '저장 실패');
+          close();
+          if (onSaved) onSaved(d.content, d.blog);
+        } catch (e) {
+          status.textContent = e.message;
+          save.disabled = cancel.disabled = false;
+        }
+      };
+    }
+  }
+
   const _memoState = new Map();
   function setSummaryNotes(itemId, notes) { _memoState.set(String(itemId), notes || {}); }
   function attachSummaryNotes(root, itemId) {
@@ -865,7 +956,8 @@
   function mdToBloggerHtml(md, opts = {}) {
     const { root, title, url, brief } = _summaryBodyDom(md);
     summarySectionKeys(root).forEach(([h, key]) => h.setAttribute('data-summary-section', key));
-    root.querySelectorAll('.term-note-x').forEach(b => b.remove());   // 화면 전용 버튼
+    root.querySelectorAll('.term-note-x, .sec-edit-btn, .sec-edit-box')
+        .forEach(b => b.remove());                                   // 화면 전용 버튼·편집창
 
     // 블로거는 외부 CSS/클래스가 안 먹으므로 모든 서식을 인라인 style로 준다.
     root.querySelectorAll('h2').forEach(h => h.setAttribute('style', _BL.h2));
@@ -981,6 +1073,8 @@
     setupStickySummarySections,
     setSummaryNotes,
     attachSummaryNotes,
+    splitSummarySections,
+    attachSectionEditors,
     openBlogMenu,
     listTermExclusions: () => [..._termExcl],
   };
@@ -1049,6 +1143,14 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 /* 뷰어에서 JS가 h3별로 만든 경계 안에서만 소제목을 고정한다. */
 .sum-topic-section{display:flow-root;min-width:0;}
 .sum-topic-section>h3{position:sticky;top:calc(var(--sum-topic-sticky-top,0px) + 8px);z-index:5;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%),var(--sum-topic-sticky-bg,var(--surface,#fff));box-shadow:0 -8px 0 var(--sum-topic-sticky-bg,var(--surface,#fff)),0 8px 10px -12px rgba(0,0,0,.45);}
+.sec-edit-btn{margin-left:auto;flex:none;padding:0 .42em;border:0;border-radius:5px;background:none;color:var(--muted,#8a8f95);font-size:.95em;line-height:1.6;cursor:pointer;opacity:.55;}
+.sec-edit-btn:hover:not([disabled]){opacity:1;background:var(--surface2,#f1f3f1);}
+.sec-edit-btn[disabled]{opacity:.25;cursor:default;}
+.sec-edit-box{margin:.5rem 0 1rem;}
+.sec-edit-box textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86rem;line-height:1.6;padding:10px;border:1px solid var(--border,#ccd5ce);border-radius:7px;background:var(--surface,#fff);color:var(--text,#242424);}
+.sec-edit-bar{display:flex;align-items:center;gap:6px;margin-top:6px;}
+.sec-edit-bar button{font:inherit;font-size:.8rem;padding:6px 12px;border:1px solid var(--border,#d9deda);border-radius:6px;background:var(--surface,#fff);color:var(--text,#34443a);cursor:pointer;}
+.sec-edit-status{font-size:.78rem;color:var(--muted,#7a7f87);}
 .ys-blog-menu{position:fixed;z-index:9999;min-width:220px;padding:6px;border:1px solid var(--border,#d9deda);border-radius:10px;background:var(--surface,#fff);box-shadow:0 12px 28px -12px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:2px;}
 .ys-blog-menu-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:var(--text,#242424);font:inherit;font-size:.9rem;text-align:left;cursor:pointer;}
 .ys-blog-menu-item:hover:not([disabled]){background:var(--surface2,#f3f5f3);}

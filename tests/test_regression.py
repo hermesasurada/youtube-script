@@ -65,8 +65,10 @@ def test_summary_popup_sticky_sections_are_wired_for_desktop_and_mobile():
     mobile_html = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()
     assert "function setupStickySummarySections(rootEl)" in common_js
     assert ".sum-topic-section>h3{position:sticky" in common_js
-    assert desktop_js.count("YS.setupStickySummarySections") == 2
-    assert mobile_html.count("YS.setupStickySummarySections") == 1
+    # 일반·몰입형·구간 편집 후 재렌더 — 본문을 다시 그리는 모든 경로에서 부른다
+    assert desktop_js.count("YS.setupStickySummarySections") == 3
+    # 모바일은 최초 렌더 + 구간 편집 후 재렌더
+    assert mobile_html.count("YS.setupStickySummarySections") == 2
 
 
 def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
@@ -198,6 +200,55 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
     assert r.status_code == 400 and r.get_json()["code"] == "not_published"
 
 
+def test_summary_section_edit_replaces_only_that_block(tmp_path, monkeypatch):
+    """소제목 구간 직접 편집 — 원본 구간이 정확히 한 번 나올 때만 갈아 끼운다."""
+    summary = tmp_path / "s.md"
+    body = ("# 제목\n\n## 3. 핵심 내용\n\n### 가 [00:01]\n\n첫 구간\n\n"
+            "### 나 [01:00]\n\n둘째 구간\n")
+    summary.write_text(body, encoding="utf-8")
+    item = {"item_id": 11, "md_path": str(tmp_path / "v.md"), "summary_path": str(summary),
+            "blog_url": "", "blog_published_at": ""}
+    monkeypatch.setattr(db, "get_history_item", lambda i: item if int(i) == 11 else None)
+    monkeypatch.setattr(app, "SUMMARY_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_reindex_summary", lambda p: None)
+    client = app.app.test_client()
+
+    original = "### 가 [00:01]\n\n첫 구간\n"
+    r = client.post("/summary/section",
+                    json={"item_id": 11, "original": original, "body": "### 가 [00:01]\n\n고친 구간\n"})
+    assert r.status_code == 200
+    saved = summary.read_text(encoding="utf-8")
+    assert "고친 구간" in saved and "둘째 구간" in saved and "첫 구간" not in saved
+    assert r.get_json()["content"] == saved
+
+    # 이미 바뀐 원본으로 다시 저장하면 못 찾으므로 덮어쓰지 않는다
+    r2 = client.post("/summary/section",
+                     json={"item_id": 11, "original": original, "body": "x"})
+    assert r2.status_code == 409 and r2.get_json()["code"] == "conflict"
+    assert summary.read_text(encoding="utf-8") == saved
+
+    # 빈 내용 저장은 거절
+    assert client.post("/summary/section", json={"item_id": 11, "original": "### 나 [01:00]\n\n둘째 구간\n",
+                                                 "body": "   "}).status_code == 400
+    # 없는 항목
+    assert client.post("/summary/section", json={"item_id": 999, "original": "a", "body": "b"}).status_code == 404
+
+
+def test_section_editor_is_wired_and_never_reaches_the_blog():
+    root = os.path.dirname(app.__file__)
+    common = open(os.path.join(root, "static/js/common.js"), encoding="utf-8").read()
+    js = open(os.path.join(root, "static/js/index.js"), encoding="utf-8").read()
+    mobile = open(os.path.join(root, "templates/mobile.html"), encoding="utf-8").read()
+    assert "splitSummarySections" in common and "attachSectionEditors" in common
+    assert "'/summary/section'" in common
+    # 블로그 내보내기에서 편집 버튼·편집창을 지운다
+    strip = re.search(r"querySelectorAll\('([^']*sec-edit-btn[^']*)'\)", common)
+    assert strip and "sec-edit-box" in strip.group(1)
+    for src in (js, mobile):
+        assert "attachSectionEditors" in src
+    assert "/summary/section" in open(os.path.join(root, "app.py"), encoding="utf-8").read()
+
+
 def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
     """문단 내 줄간격은 좁히고 문단 사이 간격(margin)은 유지한다(2026-09-14)."""
     common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"), encoding="utf-8").read()
@@ -293,7 +344,9 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     assert "function applyTermExclusions(root)" in common_js
     assert "className = 'term-note-x'" in common_js
-    assert "root.querySelectorAll('.term-note-x').forEach(b => b.remove())" in common_js   # 블로그 HTML에서는 제거
+    # 블로그 HTML에서는 화면 전용 버튼을 지운다(구간 편집 버튼과 같은 자리에서 함께 제거)
+    strip = re.search(r"querySelectorAll\('([^']*term-note-x[^']*)'\)[\s\n]*\.?\s*forEach\(b => b\.remove\(\)\)", common_js)
+    assert strip, "블로그 내보내기에서 term-note-x 제거 코드를 찾지 못함"
     assert "ensureTermExclusions," in common_js
     index_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
     mobile = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()

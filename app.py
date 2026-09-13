@@ -1358,7 +1358,7 @@ def _bg_reindex():
 _LOOPBACK = {"127.0.0.1", "::1"}
 # 원격에서 허용되는 데이터 엔드포인트(이력 조회/요약/읽음/삭제). 페이지(/, /m)는 별도 처리.
 _REMOTE_DATA_ALLOWED = {
-    "/summary/note",
+    "/summary/note", "/summary/section",
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
@@ -3129,6 +3129,54 @@ def summary_note():
     # 메모도 블로그 본문에 실리므로, 저장 즉시 '발행 이후 변경' 상태를 함께 돌려준다
     # (뷰어가 발행 버튼을 다시 열지 않고도 갱신할 수 있게).
     return _json({"body": body.strip(), "blog": _blog_state(item)})
+
+
+@app.route("/summary/section", methods=["POST"])
+def summary_section():
+    """요약의 소제목(###) 한 구간을 직접 고쳐 저장한다.
+
+    뷰어가 자기 화면의 마크다운을 `###` 단위로 잘라 고친 구간의 '원래 텍스트'와 '새 텍스트'를
+    함께 보낸다. 서버는 마크다운 구조를 해석하지 않고 원래 텍스트가 파일에 정확히 한 번
+    나오는지만 확인한 뒤 갈아 끼운다 — 다른 곳에서 파일이 바뀌었으면(요약 재생성, 다른 탭
+    편집) 찾지 못하거나 여러 번 걸리므로 덮어쓰지 않고 409로 돌려보낸다.
+    """
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    path = (item or {}).get("summary_path") or ""
+    if not path or not os.path.isfile(path):
+        return _json({"error": "요약 파일 없음"}, 404)
+    abs_path = os.path.realpath(path)
+    summary_real = os.path.realpath(SUMMARY_DIR)
+    if not (abs_path.startswith(summary_real + os.sep) or abs_path == summary_real):
+        return _json({"error": "접근 거부"}, 403)
+    original, body = data.get("original"), data.get("body")
+    if not isinstance(original, str) or not original.strip():
+        return _json({"error": "원본 구간이 필요합니다"}, 400)
+    if not isinstance(body, str) or not body.strip():
+        return _json({"error": "내용을 비울 수 없습니다"}, 400)
+    if len(body) > 200_000:
+        return _json({"error": "구간이 너무 깁니다"}, 400)
+    try:
+        with open(abs_path, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except OSError as e:
+        return _json({"error": str(e)}, 500)
+    hits = content.count(original)
+    if hits != 1:
+        return _json({"error": "요약이 그 사이 바뀌었습니다. 새로고침 후 다시 편집해주세요.",
+                      "code": "conflict"}, 409)
+    updated = content.replace(original, body)
+    try:
+        document_io.atomic_write_text(abs_path, updated)
+    except OSError as e:
+        return _json({"error": "저장 실패: " + str(e)}, 500)
+    _reindex_summary(abs_path)
+    log.info("summary section edited item=%s (%d→%d chars)",
+             item.get("item_id"), len(content), len(updated))
+    fresh = db.get_history_item(item["item_id"]) or item
+    return _json({"content": updated, "blog": _blog_state(fresh)})
 
 
 @app.route("/history/refresh-meta", methods=["POST"])

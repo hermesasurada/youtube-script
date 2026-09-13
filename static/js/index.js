@@ -2381,6 +2381,32 @@ function _setPubBtn(url, state) {
   b.disabled = false;
 }
 
+/* 소제목 구간 직접 편집(✏️). 저장되면 화면을 지금 내용으로 다시 그린다. */
+function _attachSectionEditors(rootEl) {
+  if (!rootEl || !_summaryItemId) return;
+  YS.attachSectionEditors(rootEl, {
+    md: _summaryMd, itemId: _summaryItemId,
+    onSaved: (content, blog) => {
+      _summaryMd = content || _summaryMd;
+      if (blog && _blogUrl) _setPubBtn(_blogUrl, blog);
+      const imm = document.getElementById('sum-immersive-body');
+      if (imm && !imm.hidden) { _setImmersive(true); return; }
+      const body = document.getElementById('sum-panel-body');
+      if (!body) return;
+      const top = body.scrollTop;
+      body.innerHTML = YS.renderMarkdown(_summaryMd);
+      YS.applyTitleTranslation(body, _titleKo);
+      YS.stripSummaryPopupChrome(body);
+      YS.setupStickySummarySections(body);
+      YS.attachSummaryNotes(body, _summaryItemId);
+      _attachSectionEditors(body);
+      body.scrollTop = top;
+      _updateSumProgress(body);
+      if (typeof loadHistory === 'function') loadHistory(true);
+    },
+  });
+}
+
 /* 메모 저장/삭제 즉시 발행 버튼 상태를 갱신한다(common.js가 알림). */
 document.addEventListener('ys:blog-state', e => {
   const { itemId, blog } = e.detail || {};
@@ -2576,6 +2602,7 @@ async function openSummaryModal(itemId, title) {
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
     YS.setupStickySummarySections(bodyEl);                 // 소제목은 해당 h3 섹션 안에서만 고정
     YS.attachSummaryNotes(bodyEl, itemId);
+    _attachSectionEditors(bodyEl);
     bodyEl.scrollTop = 0;
     _updateSumProgress(bodyEl);
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
@@ -2627,6 +2654,7 @@ function _setImmersive(on) {
   txt.innerHTML = tmp.innerHTML;
   YS.setupStickySummarySections(txt);                      // 몰입형 본문도 같은 섹션 경계 적용
   YS.attachSummaryNotes(txt, _summaryItemId);
+  _attachSectionEditors(txt);
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
   _updateSumProgress(txt);
 }

@@ -1728,6 +1728,7 @@ async function openSummary(itemId, title) {
       YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
       YS.setupStickySummarySections($('modal-body'));         // 소제목은 해당 h3 섹션 안에서만 고정
       YS.attachSummaryNotes($('modal-body'), itemId);
+      _attachSectionEditorsM($('modal-body'));
       const originalUrl = d.original_video_url || '';
       $('modal-youtube-link').href = d.webpage_url || '#';
       $('modal-youtube-link').hidden = !d.webpage_url;
@@ -1867,6 +1868,27 @@ function _setPubBtnM(url, state) {
       + (_blogStateM.stale ? ' — 이후 내용이 바뀜, 열기 또는 수정' : ' — 열기 또는 수정')
     : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.disabled = false;
+}
+/* 소제목 구간 직접 편집(✏️) — 저장되면 본문을 다시 그린다(데스크톱과 같은 엔드포인트). */
+function _attachSectionEditorsM(rootEl) {
+  if (!rootEl || !_summaryItemId) return;
+  YS.attachSectionEditors(rootEl, {
+    md: _summaryMd, itemId: _summaryItemId,
+    onSaved: (content, blog) => {
+      _summaryMd = content || _summaryMd;
+      if (blog && _blogUrl) _setPubBtnM(_blogUrl, blog);
+      const body = $('modal-body');
+      const top = body.scrollTop;
+      body.innerHTML = YS.renderMarkdown(_summaryMd);
+      YS.applyTitleTranslation(body, _titleKoM);
+      YS.stripSummaryPopupChrome(body);
+      YS.setupStickySummarySections(body);
+      YS.attachSummaryNotes(body, _summaryItemId);
+      _attachSectionEditorsM(body);
+      body.scrollTop = top;
+      if (typeof loadHistory === 'function') loadHistory(true);
+    },
+  });
 }
 /* 메모 저장/삭제 즉시 발행 버튼 상태를 갱신한다(common.js가 알림). */
 document.addEventListener('ys:blog-state', e => {
