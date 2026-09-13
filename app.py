@@ -3077,7 +3077,7 @@ def summary_content():
 
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
-BLOG_RENDER_VERSION = "2026-09-14-memo-bulb"
+BLOG_RENDER_VERSION = "2026-09-14-tight-leading"
 
 
 def _blog_state(item: dict | None) -> dict:

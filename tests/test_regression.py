@@ -9,6 +9,7 @@
 import json
 import gzip
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -195,6 +196,16 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
     monkeypatch.setattr(db, "get_history_item", lambda i: item2 if int(i) == 7 else None)
     r = client.post("/history/publish-blog", json={**body, "item_id": 7, "mode": "update"})
     assert r.status_code == 400 and r.get_json()["code"] == "not_published"
+
+
+def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
+    """문단 내 줄간격은 좁히고 문단 사이 간격(margin)은 유지한다(2026-09-14)."""
+    common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"), encoding="utf-8").read()
+    para = re.search(r"p:\s*'([^']*)'", common).group(1)
+    li = re.search(r"li:\s*'([^']*)'", common).group(1)
+    assert "margin:0 0 1.6em" in para and "margin:0 0 .7em" in li      # 간격은 그대로
+    assert float(re.search(r"line-height:([\d.]+)", para).group(1)) <= 1.6
+    assert float(re.search(r"line-height:([\d.]+)", li).group(1)) <= 1.6
 
 
 def test_publish_button_offers_open_and_update_on_both_surfaces():

@@ -772,7 +772,9 @@
     // 본문 글자 크기는 여기서만 준다(2026-08-30 사용자 지시: 본문 15px). 래퍼는
     // 16px 그대로라 소제목(h3, 1em)·h2·푸터는 종전 크기를 유지한다 — 래퍼를
     // 줄이면 소제목까지 같이 작아진다.
-    p:    'margin:0 0 1.6em;line-height:1.9;font-weight:400;font-size:15px;',
+    // 줄간격은 '글자 높이(1em) + 줄 사이 여백'이다. 문단 사이 간격(margin)은 그대로 두고
+    // 줄 사이 여백만 2/3로 줄였다(0.9em → 0.6em, 2026-09-14 사용자 지시).
+    p:    'margin:0 0 1.6em;line-height:1.6;font-weight:400;font-size:15px;',
     term: 'margin:-.85em 0 1.45em;padding-left:.72em;border-left:2px solid #d8dadd;'
         + 'font-size:12.5px;line-height:1.55;font-weight:400;color:#7a7f87;',
     termGroup: 'margin:-.85em 0 1.45em;padding:.28em .8em;border-left:2px solid #d8dadd;'
@@ -780,7 +782,7 @@
     termRow: 'margin:0;padding:0;font-size:12.5px;line-height:1.55;'
         + 'font-weight:400;color:#7a7f87;',
     originalTitle: 'margin:0 0 1.4em;font-size:13px;font-weight:400;line-height:1.65;color:#7b8393;',
-    li:   'margin:0 0 .7em;line-height:1.85;font-weight:400;font-size:15px;',
+    li:   'margin:0 0 .7em;line-height:1.57;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.7;',
   };
