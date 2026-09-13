@@ -358,6 +358,20 @@ def get_summary_notes(md_path: str) -> dict:
         "SELECT section_key, body FROM summary_notes WHERE md_path = ?", (md_path,))}
 
 
+def summary_notes_mtime(md_path: str) -> float:
+    """이 영상 메모의 최종 수정시각(epoch). 메모가 없으면 0.
+
+    메모는 블로그 본문에도 실리므로 '발행 이후 변경'을 따질 때 요약 파일 mtime과 함께
+    본다. updated_at은 로컬 naive ISO 문자열이라 그대로 epoch로 바꾼다."""
+    row = _conn().execute(
+        "SELECT MAX(updated_at) AS m FROM summary_notes WHERE md_path = ?", (md_path,)).fetchone()
+    raw = (row["m"] if row else None) or ""
+    try:
+        return datetime.fromisoformat(raw).timestamp()
+    except ValueError:
+        return 0.0
+
+
 def save_summary_note(md_path: str, section_key: str, body: str) -> None:
     with _lock:
         if not body.strip():
@@ -1557,7 +1571,8 @@ def get_history_item(item_id: int) -> dict | None:
         return None
     r = _conn().execute(
         """SELECT rowid AS item_id, md_path, summary_path, title, has_txt, is_read,
-                  yt_id, webpage_url, title_ko, uploader, blog_url, blog_post_id
+                  yt_id, webpage_url, title_ko, uploader, blog_url, blog_post_id,
+                  blog_published_at
              FROM items WHERE rowid = ?""",
         (item_id,),
     ).fetchone()

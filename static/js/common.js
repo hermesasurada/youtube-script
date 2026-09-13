@@ -314,6 +314,72 @@
     clearTimeout(el._t);
     el._t = setTimeout(() => el.classList.remove('on'), 2200);
   }
+  /**
+   * 발행된 글 버튼의 선택 메뉴 — '블로그에서 보기' / '지금 내용으로 수정'.
+   * 데스크톱·모바일이 버튼 모양만 다르고 동작은 같아 여기서 공유한다. 수정은 발행 이후
+   * 요약·메모가 바뀐 경우(stale)에만 활성화하고, 아니면 이유를 함께 보여 준다.
+   */
+  function openBlogMenu(anchorEl, { url, stale, changedAt, onOpen, onUpdate }) {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('.ys-blog-menu').forEach(m => m.remove());
+    const menu = document.createElement('div');
+    menu.className = 'ys-blog-menu';
+    menu.setAttribute('role', 'menu');
+
+    const item = (label, hint, disabled, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ys-blog-menu-item';
+      b.setAttribute('role', 'menuitem');
+      b.disabled = !!disabled;
+      const t = document.createElement('span');
+      t.className = 'ys-blog-menu-label';
+      t.textContent = label;
+      b.appendChild(t);
+      if (hint) {
+        const h = document.createElement('span');
+        h.className = 'ys-blog-menu-hint';
+        h.textContent = hint;
+        b.appendChild(h);
+      }
+      if (!disabled) b.onclick = () => { close(); fn(); };
+      menu.appendChild(b);
+      return b;
+    };
+
+    item('블로그에서 보기', url ? url.replace(/^https?:\/\//, '') : '', false,
+         () => (onOpen ? onOpen() : window.open(url, '_blank', 'noopener')));
+    item('지금 내용으로 수정', stale
+           ? (changedAt ? changedAt.slice(0, 16) + ' 수정됨' : '변경 사항 반영')
+           : '발행 이후 바뀐 내용 없음',
+         !stale, () => onUpdate && onUpdate());
+
+    function close() {
+      menu.remove();
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onOut, true);
+    }
+    function onKey(e) { if (e.key === 'Escape') { close(); anchorEl && anchorEl.focus(); } }
+    function onOut(e) { if (!menu.contains(e.target) && e.target !== anchorEl) close(); }
+
+    document.body.appendChild(menu);
+    // 버튼 위에 띄우되, 자리가 없으면 아래로 뒤집고 마지막에 뷰포트 안으로 가둔다.
+    // (모바일 모달에서는 버튼이 화면 밖에 있을 수 있어 클램프가 없으면 메뉴가 사라진다.)
+    const r = anchorEl.getBoundingClientRect();
+    const h = menu.offsetHeight, w = menu.offsetWidth;
+    let top = r.top - h - 8;
+    if (top < 8) top = r.bottom + 8;
+    menu.style.top = Math.max(8, Math.min(top, window.innerHeight - h - 8)) + 'px';
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+    setTimeout(() => {
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('pointerdown', onOut, true);
+    }, 0);
+    const first = menu.querySelector('button:not([disabled])');
+    if (first) first.focus();
+    return menu;
+  }
+
   function _setupTermNoteUI() {
     if (global.__ysTermNoteUI || typeof document === 'undefined') return;
     global.__ysTermNoteUI = true;
@@ -901,6 +967,7 @@
     setupStickySummarySections,
     setSummaryNotes,
     attachSummaryNotes,
+    openBlogMenu,
     listTermExclusions: () => [..._termExcl],
   };
 
@@ -968,6 +1035,11 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 /* 뷰어에서 JS가 h3별로 만든 경계 안에서만 소제목을 고정한다. */
 .sum-topic-section{display:flow-root;min-width:0;}
 .sum-topic-section>h3{position:sticky;top:calc(var(--sum-topic-sticky-top,0px) + 8px);z-index:5;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%),var(--sum-topic-sticky-bg,var(--surface,#fff));box-shadow:0 -8px 0 var(--sum-topic-sticky-bg,var(--surface,#fff)),0 8px 10px -12px rgba(0,0,0,.45);}
+.ys-blog-menu{position:fixed;z-index:9999;min-width:220px;padding:6px;border:1px solid var(--border,#d9deda);border-radius:10px;background:var(--surface,#fff);box-shadow:0 12px 28px -12px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:2px;}
+.ys-blog-menu-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:var(--text,#242424);font:inherit;font-size:.9rem;text-align:left;cursor:pointer;}
+.ys-blog-menu-item:hover:not([disabled]){background:var(--surface2,#f3f5f3);}
+.ys-blog-menu-item[disabled]{opacity:.5;cursor:default;}
+.ys-blog-menu-hint{font-size:.75rem;color:var(--muted,#7a7f87);overflow-wrap:anywhere;}
 .summary-memo{margin:1.2rem 0;padding:12px 16px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
 .summary-memo-label{font-size:.8rem;font-weight:700;color:var(--muted,#67756c);margin-bottom:6px;}
 .summary-memo.empty{padding:0;border:0;background:none;}

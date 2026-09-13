@@ -680,6 +680,7 @@
     .summary-action-btn.primary { margin-left: auto; background: var(--highlight); color: #fff; }
     .summary-action-btn.active,
     .summary-action-btn.done { color: var(--highlight); background: var(--highlight-soft); }
+    .summary-action-btn.done.stale { color: var(--warn, #b7791f); background: color-mix(in oklab, var(--warn, #b7791f) 12%, var(--surface)); }
     .summary-action-btn.err { color: var(--error, #dc2626); }
     :where(button, input, select, textarea, a):focus-visible {
       outline: 2px solid var(--highlight); outline-offset: 2px;
@@ -1738,7 +1739,7 @@ async function openSummary(itemId, title) {
       $('modal-original-link').title = d.original_video_title
         ? `원본 영상: ${d.original_video_title}` : '원본 영상 보기';
       _setSummaryReadUIM(d.is_read);
-      _setPubBtnM(d.blog_url);
+      _setPubBtnM(d.blog_url, d.blog);
       _setDistillUI(d.distill);
       $('summary-actions').hidden = !_summaryMd;
     }
@@ -1850,16 +1851,51 @@ async function setItemDistill(value) {
 
 /* 블로그 발행 — '블로거용 복사'를 대체(2026-09-05). 데스크톱과 같은 엔드포인트. */
 let _blogUrl = '';
-function _setPubBtnM(url) {
+let _blogStateM = { stale: false, changed_at: '', published_at: '' };
+function _setPubBtnM(url, state) {
   _blogUrl = url || '';
+  if (state) _blogStateM = state;
+  if (!_blogUrl) _blogStateM = { stale: false, changed_at: '', published_at: '' };
   const b = $('pub-btn'); if (!b) return;
-  b.querySelector('.action-label').textContent = _blogUrl ? '블로그에서 보기' : '블로그 발행';
-  b.className = _blogUrl ? 'summary-action-btn primary done' : 'summary-action-btn primary';
-  b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
+  b.querySelector('.action-label').textContent = _blogUrl ? '발행됨' : '블로그 발행';
+  b.className = _blogUrl
+    ? 'summary-action-btn primary done' + (_blogStateM.stale ? ' stale' : '')
+    : 'summary-action-btn primary';
+  b.title = _blogUrl
+    ? (_blogStateM.stale ? '발행 이후 내용이 바뀜 — 열기 또는 수정' : '발행된 글 열기')
+    : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.disabled = false;
 }
+/* 발행된 글을 지금 요약·메모로 덮어쓴다(데스크톱 _updateBlogPost와 같은 엔드포인트). */
+async function updateBlogPostM(btn) {
+  if (!_summaryMd || !_summaryItemId) return;
+  if (!confirm('블로그 글을 지금 요약 내용으로 수정할까요? (기존 글이 덮어써집니다)')) return;
+  const lbl = btn.querySelector('.action-label');
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM });
+  btn.disabled = true; lbl.textContent = '수정 중…';
+  try {
+    const r = await fetch('/history/publish-blog', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({item_id:_summaryItemId, mode:'update', html, title})});
+    const d = await r.json();
+    if (d && d.status === 'updated') {
+      _setPubBtnM(d.url || _blogUrl, d.blog);
+      if (typeof loadHistory === 'function') loadHistory(true);
+      return;
+    }
+    lbl.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '수정 실패';
+    btn.className = 'summary-action-btn primary err'; console.warn('[blog]', d);
+  } catch (e) { lbl.textContent = '수정 실패'; btn.className = 'summary-action-btn primary err'; }
+  setTimeout(() => _setPubBtnM(_blogUrl, _blogStateM), 2200);
+}
 async function publishToBlog(btn) {
-  if (_blogUrl) { window.open(_blogUrl, '_blank', 'noopener'); return; }
+  // 이미 발행된 글은 '보기 / 수정' 선택 메뉴를 띄운다.
+  if (_blogUrl) {
+    YS.openBlogMenu(btn, {
+      url: _blogUrl, stale: !!_blogStateM.stale, changedAt: _blogStateM.changed_at || '',
+      onUpdate: () => updateBlogPostM(btn),
+    });
+    return;
+  }
   if (!_summaryMd || !_summaryItemId) return;
   if (!confirm('블로그스팟에 바로 발행할까요? (즉시 공개됩니다)')) return;
   const lbl = btn.querySelector('.action-label');
@@ -1867,7 +1903,7 @@ async function publishToBlog(btn) {
   btn.disabled = true; lbl.textContent = '…';
   try {
     const d = await YS.apiPublishBlog(_summaryItemId, _titleKoM || title, html);
-    if (d && (d.status === 'ok' || d.status === 'exists')) { _setPubBtnM(d.url); if (typeof loadHistory === 'function') loadHistory(true); return; }
+    if (d && (d.status === 'ok' || d.status === 'exists')) { _setPubBtnM(d.url, d.blog); if (typeof loadHistory === 'function') loadHistory(true); return; }
     lbl.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패'; btn.className = 'summary-action-btn primary err'; console.warn('[blog]', d);
   } catch (e) { lbl.textContent = '발행 실패'; btn.className = 'summary-action-btn primary err'; }
   setTimeout(() => _setPubBtnM(''), 2200);

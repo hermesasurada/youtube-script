@@ -3062,6 +3062,7 @@ def summary_content():
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         original = _original_video_for_item(item)
         return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
+                      "blog": _blog_state(item),
                       "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),
                       "is_read": bool((item or {}).get("is_read")),
@@ -3072,6 +3073,33 @@ def summary_content():
                       "original_video_uploader": original.get("uploader") or ""})
     except Exception as e:
         return _json({"error": str(e)}, 500)
+
+
+def _blog_state(item: dict | None) -> dict:
+    """발행 버튼이 쓰는 상태 — 발행 여부와 '발행 뒤 내용이 바뀌었는지'.
+
+    비교 대상은 블로그 본문에 실제로 실리는 두 가지다: 요약 파일(mtime)과 섹션 메모
+    (summary_notes.updated_at). 둘 중 더 나중이 발행시각보다 뒤면 수정할 거리가 있다.
+    blog_published_at은 로컬 naive 문자열이라 같은 기준(epoch)으로 맞춘다. 발행시각
+    기록이 없는 옛 글은 판단할 근거가 없으므로 '수정 가능'으로 본다.
+    """
+    if not item or not item.get("blog_url"):
+        return {"published_at": "", "stale": False, "changed_at": ""}
+    published_raw = (item.get("blog_published_at") or "").strip()
+    try:
+        published = datetime.strptime(published_raw, "%Y-%m-%d %H:%M:%S").timestamp()
+    except ValueError:
+        published = 0.0
+    edited = db.summary_notes_mtime(item.get("md_path") or "")
+    path = item.get("summary_path") or ""
+    if path and os.path.isfile(path):
+        edited = max(edited, os.path.getmtime(path))
+    # 1초 여유: 발행 직후 같은 초에 기록된 mtime을 '변경'으로 보지 않는다.
+    return {
+        "published_at": published_raw,
+        "changed_at": datetime.fromtimestamp(edited).strftime("%Y-%m-%d %H:%M:%S") if edited else "",
+        "stale": bool(edited and (not published or edited > published + 1)),
+    }
 
 
 @app.route("/summary/note", methods=["POST"])
@@ -3272,6 +3300,10 @@ def history_publish_blog():
     본문 HTML은 뷰어가 '블로거용 내보내기' 렌더러(mdToBloggerHtml)로 만들어 보낸다 —
     제목은 글 제목 필드로만 가고 본문엔 없다(mdToBloggerHtml이 H1을 뺀다). 이미 발행된
     영상은 다시 올리지 않고 기존 URL을 돌려준다. 라벨은 채널명.
+
+    `mode="update"`면 새 글을 만들지 않고 기존 글(blog_post_id)의 제목·본문을 지금 내용으로
+    덮어쓴다 — 요약을 다시 만들거나 메모를 고친 뒤 쓰는 경로다. URL은 그대로 유지되고
+    blog_published_at만 갱신돼 '발행 뒤 변경' 판정(_blog_state)이 다시 초기화된다.
     """
     import hermes_blogger as bl
     data = request.get_json(force=True) or {}
@@ -3280,8 +3312,14 @@ def history_publish_blog():
         return err
     if not item:
         return _json({"error": "item_id 필요"}, 400)
-    if item.get("blog_url"):
+    # mode="update": 이미 발행된 글을 지금 요약·메모 기준으로 덮어쓴다(발행 버튼의 '수정').
+    # 그 밖에는 기존 동작 그대로 — 이미 발행된 영상을 두 번 올리지 않는다.
+    updating = (data.get("mode") or "").strip() == "update"
+    if item.get("blog_url") and not updating:
         return _json({"status": "exists", "url": item["blog_url"]})
+    if updating and not (item.get("blog_url") and item.get("blog_post_id")):
+        return _json({"status": "error", "code": "not_published",
+                      "message": "아직 발행되지 않은 요약입니다"}, 400)
     html = (data.get("html") or "").strip()
     title = (item.get("title_ko") or data.get("title") or item.get("title") or "").strip()
     if not html or not title:
@@ -3293,14 +3331,24 @@ def history_publish_blog():
                       "message": "블로그 연동 미설정 — 서버에서 hermes-blogger auth 실행 필요"})
     uploader = (item.get("uploader") or "").strip()
     labels = [uploader] if uploader and uploader != "—" else []
+    post_id = str(item.get("blog_post_id") or "")
     try:
-        res = bl.publish(title, html, labels)
+        if updating:
+            # 제목도 함께 맞춘다(번역 제목이 바뀐 경우). URL·발행 상태는 그대로 유지된다.
+            res = bl.update_post(post_id, title=title, content=html)
+        else:
+            res = bl.publish(title, html, labels)
     except bl.BloggerError as e:
-        log.warning("blog publish failed item=%s: %s", item["item_id"], e)
+        log.warning("blog %s failed item=%s: %s",
+                    "update" if updating else "publish", item["item_id"], e)
         return _json({"status": "error", "code": "api", "message": str(e)})
-    db.set_blog_publish(item["item_id"], res.get("url") or "", str(res.get("id") or ""))
-    log.info("blog published item=%s -> %s", item["item_id"], res.get("url"))
-    return _json({"status": "ok", "url": res.get("url"), "id": res.get("id")})
+    url = res.get("url") or item.get("blog_url") or ""
+    db.set_blog_publish(item["item_id"], url, str(res.get("id") or post_id))
+    log.info("blog %s item=%s -> %s", "updated" if updating else "published",
+             item["item_id"], url)
+    fresh = db.get_history_item(item["item_id"]) or dict(item, blog_url=url)
+    return _json({"status": "updated" if updating else "ok", "url": url,
+                  "id": res.get("id") or post_id, "blog": _blog_state(fresh)})
 
 
 @app.route("/thumb/<yt_id>")

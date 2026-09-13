@@ -2360,20 +2360,62 @@ async function refreshItemMeta(btn) {
    HTML을 서버에 보내 hermes_blogger로 바로 공개 발행한다(wm과 토큰 공유). 발행된 영상은
    버튼이 '🔗 블로그에서 보기'가 되고 누르면 글을 연다. */
 let _blogUrl = '';
-function _setPubBtn(url) {
+let _blogState = { stale: false, changed_at: '', published_at: '' };
+
+function _setPubBtn(url, state) {
   _blogUrl = url || '';
+  if (state) _blogState = state;
+  if (!_blogUrl) _blogState = { stale: false, changed_at: '', published_at: '' };
   const b = document.getElementById('sum-publish-btn');
   if (!b) return;
   const l = b.querySelector('.pub-label');
-  if (l) l.textContent = _blogUrl ? '블로그에서 보기' : '블로그 발행';
-  b.title = _blogUrl ? '발행된 글 열기' : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
+  if (l) l.textContent = _blogUrl ? '발행됨' : '블로그 발행';
+  b.title = _blogUrl
+    ? (_blogState.stale ? '발행 이후 내용이 바뀜 — 열기 또는 수정' : '발행된 글 열기')
+    : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.classList.toggle('published', !!_blogUrl);
+  b.classList.toggle('stale', !!(_blogUrl && _blogState.stale));
   b.style.color = '';
   b.disabled = false;
 }
 
+/* 발행된 글을 지금 요약·메모로 덮어쓴다. URL은 그대로고 발행시각만 갱신된다. */
+async function _updateBlogPost(btn) {
+  if (!_summaryMd || !_summaryItemId) return;
+  if (!confirm('블로그 글을 지금 요약 내용으로 수정할까요? (기존 글이 덮어써집니다)')) return;
+  const label = btn && btn.querySelector('.pub-label');
+  const setLbl = (t, color) => { if (label) label.textContent = t; if (btn) btn.style.color = color || ''; };
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKo });
+  if (btn) btn.disabled = true;
+  setLbl('수정 중…');
+  try {
+    const r = await fetch('/history/publish-blog', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: _summaryItemId, mode: 'update', html, title }),
+    });
+    const d = await r.json();
+    if (d && d.status === 'updated') {
+      _setPubBtn(d.url || _blogUrl, d.blog);
+      if (typeof loadHistory === 'function') loadHistory(true);
+      return;
+    }
+    setLbl(d && d.code === 'not_configured' ? '연동 미설정' : '수정 실패', 'var(--error)');
+    console.warn('[blog]', d);
+  } catch (e) {
+    setLbl('수정 실패', 'var(--error)'); console.warn('[blog]', e);
+  }
+  setTimeout(() => _setPubBtn(_blogUrl, _blogState), 2200);
+}
+
 async function publishSummaryToBlog(btn) {
-  if (_blogUrl) { window.open(_blogUrl, '_blank', 'noopener'); return; }
+  // 이미 발행된 글은 바로 열지 않고 '보기 / 수정' 중에서 고르게 한다.
+  if (_blogUrl) {
+    YS.openBlogMenu(btn, {
+      url: _blogUrl, stale: !!_blogState.stale, changedAt: _blogState.changed_at || '',
+      onUpdate: () => _updateBlogPost(btn),
+    });
+    return;
+  }
   if (!_summaryMd || !_summaryItemId) return;
   const label = btn && btn.querySelector('.pub-label');
   const setLbl = (t, color) => { if (label) label.textContent = t; if (btn) btn.style.color = color || ''; };
@@ -2383,7 +2425,7 @@ async function publishSummaryToBlog(btn) {
   try {
     const d = await YS.apiPublishBlog(_summaryItemId, _titleKo || title, html);
     if (d && (d.status === 'ok' || d.status === 'exists')) {
-      _setPubBtn(d.url);
+      _setPubBtn(d.url, d.blog);
       if (typeof loadHistory === 'function') loadHistory(true);
     } else {
       setLbl(d && d.code === 'not_configured' ? '연동 미설정' : '발행 실패', 'var(--error)');
@@ -2511,7 +2553,7 @@ async function openSummaryModal(itemId, title) {
     _summaryMd = data.content || '';
     YS.setSummaryNotes(itemId, data.notes);
     _titleKo   = data.title_ko || '';                      // 외국어 제목의 한국어 번역
-    _setPubBtn(data.blog_url);                               // 발행 여부에 따라 📤 / 🔗
+    _setPubBtn(data.blog_url, data.blog);                               // 발행 여부에 따라 📤 / 🔗
     _setSummaryReadUI(data.is_read);
     _setDistillUI(data.distill);                           // 서버가 함께 준 증류 설정 반영
     _setSummaryVideoLinks(

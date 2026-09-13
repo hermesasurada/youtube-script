@@ -98,6 +98,94 @@ def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
     assert client.post('/summary/note', json={**payload, 'item_id': 99999}).status_code == 404
 
 
+def test_blog_state_flags_edits_made_after_publishing(tmp_path, monkeypatch):
+    """발행 버튼의 '수정' 활성 조건 — 요약 파일이나 메모가 발행 이후 바뀌었을 때만."""
+    db.init()
+    summary = tmp_path / "summary.md"
+    summary.write_text("본문", encoding="utf-8")
+    md_path = str(tmp_path / "video.md")
+    base = {"item_id": 5, "md_path": md_path, "summary_path": str(summary),
+            "blog_url": "https://blog.example/post", "blog_post_id": "77"}
+
+    published = "2026-09-13 12:00:00"
+    old = datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timestamp() - 600
+    os.utime(summary, (old, old))
+    assert app._blog_state(dict(base, blog_published_at=published))["stale"] is False
+
+    newer = datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timestamp() + 60
+    os.utime(summary, (newer, newer))
+    state = app._blog_state(dict(base, blog_published_at=published))
+    assert state["stale"] is True and state["published_at"] == published
+
+    # 메모만 고쳐도 수정 대상이다(메모가 블로그 본문에 실리므로).
+    os.utime(summary, (old, old))
+    db.save_summary_note(md_path, "구간::1", "생각")
+    assert app._blog_state(dict(base, blog_published_at=published))["stale"] is True
+
+    # 미발행 글과 발행시각 미기록 글
+    assert app._blog_state(dict(base, blog_url="", blog_published_at=""))["stale"] is False
+    assert app._blog_state(dict(base, blog_published_at=""))["stale"] is True
+
+
+def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, monkeypatch):
+    db.init()
+    summary = tmp_path / "s.md"
+    summary.write_text("본문", encoding="utf-8")
+    item = {"item_id": 6, "md_path": str(tmp_path / "v.md"), "summary_path": str(summary),
+            "title": "T", "title_ko": "제목", "uploader": "채널",
+            "blog_url": "https://blog.example/p", "blog_post_id": "42",
+            "blog_published_at": "2026-09-13 12:00:00"}
+    monkeypatch.setattr(db, "get_history_item", lambda i: item if int(i) == 6 else None)
+    monkeypatch.setattr(db, "set_blog_publish", lambda *a: True)
+    calls = []
+
+    class FakeBlogger:
+        BloggerError = RuntimeError
+
+        @staticmethod
+        def configured():
+            return True
+
+        @staticmethod
+        def publish(title, html, labels):
+            calls.append(("publish", title))
+            return {"url": "https://blog.example/new", "id": "99"}
+
+        @staticmethod
+        def update_post(post_id, *, title=None, content=None, labels=None):
+            calls.append(("update", post_id, title))
+            return {"url": "https://blog.example/p", "id": post_id}
+
+    monkeypatch.setitem(sys.modules, "hermes_blogger", FakeBlogger)
+    client = app.app.test_client()
+    body = {"item_id": 6, "html": "<div><p>본문</p></div>", "title": "제목"}
+
+    # 기본 호출은 재발행하지 않고 기존 URL만 돌려준다
+    assert client.post("/history/publish-blog", json=body).get_json()["status"] == "exists"
+    assert calls == []
+
+    d = client.post("/history/publish-blog", json={**body, "mode": "update"}).get_json()
+    assert d["status"] == "updated" and d["url"] == "https://blog.example/p"
+    assert calls == [("update", "42", "제목")]
+
+    # 미발행 항목에 update를 걸면 거절한다
+    item2 = dict(item, item_id=7, blog_url="", blog_post_id="")
+    monkeypatch.setattr(db, "get_history_item", lambda i: item2 if int(i) == 7 else None)
+    r = client.post("/history/publish-blog", json={**body, "item_id": 7, "mode": "update"})
+    assert r.status_code == 400 and r.get_json()["code"] == "not_published"
+
+
+def test_publish_button_offers_open_and_update_on_both_surfaces():
+    js = open(os.path.join(os.path.dirname(app.__file__), "static/js/index.js"), encoding="utf-8").read()
+    mobile = open(os.path.join(os.path.dirname(app.__file__), "templates/mobile.html"), encoding="utf-8").read()
+    common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"), encoding="utf-8").read()
+    for src in (js, mobile):
+        assert "'발행됨'" in src
+        assert "YS.openBlogMenu" in src
+        assert "mode: 'update'" in src or "mode:'update'" in src
+    assert "지금 내용으로 수정" in common and "발행 이후 바뀐 내용 없음" in common
+
+
 def test_image_captions_are_excluded_from_term_notes():
     """캡션은 각주 대상이 아니다 — 프롬프트·주입·렌더 세 곳 모두 별표를 남기지 않는다."""
     import keyframe_report

@@ -2483,6 +2483,12 @@ header h1 { font-size: 15px; }
   background: color-mix(in oklab, var(--success) 10%, var(--surface));
   color: var(--success); border-color: transparent;
 }
+/* 발행 이후 요약·메모가 바뀐 상태 — 수정할 거리가 있음을 색으로만 알린다. */
+.sum-primary-action.published.stale,
+.sum-primary-action.published.stale:hover {
+  background: color-mix(in oklab, var(--warn, #b7791f) 12%, var(--surface));
+  color: var(--warn, #b7791f);
+}
 .sum-panel-body { padding-left: 2.5rem; padding-right: 2.5rem; }
 #sum-panel-body > :not(.sum-head-sticky),
 #sum-panel-body > .sum-head-sticky > * {
