@@ -321,7 +321,8 @@
    */
   const _blogStamp = t => (t || '').slice(0, 16);   // 'YYYY-MM-DD HH:MM'
 
-  function openBlogMenu(anchorEl, { url, stale, changedAt, publishedAt, onOpen, onUpdate }) {
+  function openBlogMenu(anchorEl, { url, stale, changedAt, publishedAt, contentChanged,
+                                    outdatedRender, onOpen, onUpdate }) {
     if (typeof document === 'undefined') return;
     document.querySelectorAll('.ys-blog-menu').forEach(m => m.remove());
     const menu = document.createElement('div');
@@ -357,10 +358,12 @@
 
     item('블로그에서 보기', url ? url.replace(/^https?:\/\//, '') : '', false,
          () => (onOpen ? onOpen() : window.open(url, '_blank', 'noopener')));
-    item('지금 내용으로 수정', stale
-           ? (changedAt ? _blogStamp(changedAt) + ' 수정됨' : '변경 사항 반영')
-           : '게시 이후 바뀐 내용 없음',
-         !stale, () => onUpdate && onUpdate());
+    // 왜 수정할 거리가 있는지 알려 준다 — 내용이 바뀐 경우와 표시 형식만 바뀐 경우.
+    let why = '게시 이후 바뀐 내용 없음';
+    if (contentChanged) why = changedAt ? _blogStamp(changedAt) + ' 수정됨' : '변경 사항 반영';
+    else if (outdatedRender) why = '표시 형식이 바뀜 — 지금 모양으로 다시 올리기';
+    else if (stale) why = '변경 사항 반영';
+    item('지금 내용으로 수정', why, !stale, () => onUpdate && onUpdate());
 
     function close() {
       menu.remove();

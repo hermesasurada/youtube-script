@@ -342,6 +342,13 @@ def init() -> None:
                 added_at TEXT NOT NULL
             )""")
             c.execute("PRAGMA user_version = 18")
+        if ver < 20:
+            # 발행 당시의 블로그 본문 생성 방식(렌더 버전). 표시 형식을 바꾸면 이미 발행된
+            # 글은 옛 형식이므로 '수정 필요'로 잡는 근거가 된다.
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(items)")}
+            if "blog_render_ver" not in cols:
+                c.execute("ALTER TABLE items ADD COLUMN blog_render_ver TEXT")
+            c.execute("PRAGMA user_version = 20")
         if ver < 19:
             c.execute("""CREATE TABLE IF NOT EXISTS summary_notes (
                 md_path TEXT NOT NULL,
@@ -407,12 +414,16 @@ def get_title_ko(path: str) -> str | None:
     return v or None
 
 
-def set_blog_publish(item_id: int, url: str, post_id: str) -> bool:
-    """블로그스팟 발행 결과 기록 — 같은 영상을 두 번 올리지 않는 근거."""
+def set_blog_publish(item_id: int, url: str, post_id: str, render_ver: str = "") -> bool:
+    """블로그스팟 발행 결과 기록 — 같은 영상을 두 번 올리지 않는 근거.
+
+    render_ver는 이 본문을 만든 렌더 방식의 버전이다. 나중에 표시 형식을 바꾸면
+    저장된 버전이 달라져 '수정 필요'로 잡힌다."""
     with _lock:
         cur = _conn().execute(
-            "UPDATE items SET blog_url = ?, blog_post_id = ?, blog_published_at = ? WHERE rowid = ?",
-            (url, post_id, _now(), int(item_id)))
+            """UPDATE items SET blog_url = ?, blog_post_id = ?, blog_published_at = ?,
+                                blog_render_ver = ? WHERE rowid = ?""",
+            (url, post_id, _now(), render_ver, int(item_id)))
         return cur.rowcount > 0
 
 
@@ -1582,7 +1593,7 @@ def get_history_item(item_id: int) -> dict | None:
     r = _conn().execute(
         """SELECT rowid AS item_id, md_path, summary_path, title, has_txt, is_read,
                   yt_id, webpage_url, title_ko, uploader, blog_url, blog_post_id,
-                  blog_published_at
+                  blog_published_at, blog_render_ver
              FROM items WHERE rowid = ?""",
         (item_id,),
     ).fetchone()

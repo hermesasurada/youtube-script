@@ -3075,6 +3075,11 @@ def summary_content():
         return _json({"error": str(e)}, 500)
 
 
+# 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
+# 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
+BLOG_RENDER_VERSION = "2026-09-14-memo-bulb"
+
+
 def _blog_state(item: dict | None) -> dict:
     """발행 버튼이 쓰는 상태 — 발행 여부와 '발행 뒤 내용이 바뀌었는지'.
 
@@ -3095,10 +3100,15 @@ def _blog_state(item: dict | None) -> dict:
     if path and os.path.isfile(path):
         edited = max(edited, os.path.getmtime(path))
     # 1초 여유: 발행 직후 같은 초에 기록된 mtime을 '변경'으로 보지 않는다.
+    content_changed = bool(edited and (not published or edited > published + 1))
+    # 내용이 그대로여도 표시 형식이 바뀌었으면 발행본은 옛 모양이다.
+    outdated_render = (item.get("blog_render_ver") or "") != BLOG_RENDER_VERSION
     return {
         "published_at": published_raw,
         "changed_at": datetime.fromtimestamp(edited).strftime("%Y-%m-%d %H:%M:%S") if edited else "",
-        "stale": bool(edited and (not published or edited > published + 1)),
+        "content_changed": content_changed,
+        "outdated_render": outdated_render,
+        "stale": content_changed or outdated_render,
     }
 
 
@@ -3345,7 +3355,8 @@ def history_publish_blog():
                     "update" if updating else "publish", item["item_id"], e)
         return _json({"status": "error", "code": "api", "message": str(e)})
     url = res.get("url") or item.get("blog_url") or ""
-    db.set_blog_publish(item["item_id"], url, str(res.get("id") or post_id))
+    db.set_blog_publish(item["item_id"], url, str(res.get("id") or post_id),
+                        BLOG_RENDER_VERSION)
     log.info("blog %s item=%s -> %s", "updated" if updating else "published",
              item["item_id"], url)
     fresh = db.get_history_item(item["item_id"]) or dict(item, blog_url=url)

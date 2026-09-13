@@ -1900,6 +1900,7 @@ async function publishToBlog(btn) {
     YS.openBlogMenu(btn, {
       url: _blogUrl, stale: !!_blogStateM.stale, changedAt: _blogStateM.changed_at || '',
       publishedAt: _blogStateM.published_at || '',
+      contentChanged: !!_blogStateM.content_changed, outdatedRender: !!_blogStateM.outdated_render,
       onUpdate: () => updateBlogPostM(btn),
     });
     return;

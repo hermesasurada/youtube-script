@@ -2421,6 +2421,7 @@ async function publishSummaryToBlog(btn) {
     YS.openBlogMenu(btn, {
       url: _blogUrl, stale: !!_blogState.stale, changedAt: _blogState.changed_at || '',
       publishedAt: _blogState.published_at || '',
+      contentChanged: !!_blogState.content_changed, outdatedRender: !!_blogState.outdated_render,
       onUpdate: () => _updateBlogPost(btn),
     });
     return;

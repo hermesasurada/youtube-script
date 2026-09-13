@@ -112,6 +112,7 @@ def test_blog_state_flags_edits_made_after_publishing(tmp_path, monkeypatch):
             "blog_url": "https://blog.example/post", "blog_post_id": "77"}
 
     published = "2026-09-13 12:00:00"
+    base["blog_render_ver"] = app.BLOG_RENDER_VERSION      # 현재 형식으로 발행된 글
     old = datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timestamp() - 600
     os.utime(summary, (old, old))
     assert app._blog_state(dict(base, blog_published_at=published))["stale"] is False
@@ -134,6 +135,18 @@ def test_blog_state_flags_edits_made_after_publishing(tmp_path, monkeypatch):
     # 미발행 글과 발행시각 미기록 글
     assert app._blog_state(dict(base, blog_url="", blog_published_at=""))["stale"] is False
     assert app._blog_state(dict(base, blog_published_at=""))["stale"] is True
+
+    # 내용이 그대로여도 표시 형식(렌더 버전)이 바뀌었으면 다시 올릴 거리가 있다
+    db.save_summary_note(md_path, "구간::1", "")
+    conn = db._conn()
+    conn.execute("DELETE FROM summary_notes WHERE md_path = ?", (md_path,))
+    conn.commit()
+    os.utime(summary, (old, old))
+    fresh = dict(base, blog_published_at=published)
+    assert app._blog_state(fresh)["stale"] is False
+    outdated = app._blog_state(dict(fresh, blog_render_ver="옛-형식"))
+    assert outdated["stale"] is True
+    assert outdated["outdated_render"] is True and outdated["content_changed"] is False
 
 
 def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, monkeypatch):
@@ -195,6 +208,7 @@ def test_publish_button_offers_open_and_update_on_both_surfaces():
     assert "지금 내용으로 수정" in common and "게시 이후 바뀐 내용 없음" in common
     # 메뉴 머리에 게시 시각을 보여 주고, 양쪽 화면이 그 값을 넘긴다
     assert "게시됨" in common and "ys-blog-menu-head" in common
+    assert "표시 형식이 바뀜" in common          # 내용은 그대로고 형식만 바뀐 경우의 안내
     for src in (js, mobile):
         assert "publishedAt:" in src
         assert "ys:blog-state" in src      # 메모 저장 즉시 버튼 갱신
@@ -960,11 +974,13 @@ def test_publish_blog_route_publishes_once_and_records(monkeypatch):
             "uploader": "a16z", "blog_url": None}
     monkeypatch.setattr(db, "get_history_item", lambda i: dict(item) if int(i) == 7 else None)
     saved = {}
-    monkeypatch.setattr(db, "set_blog_publish", lambda i, u, p: saved.update({"i": i, "u": u, "p": p}) or True)
+    monkeypatch.setattr(db, "set_blog_publish",
+                lambda i, u, p, v="": saved.update({"i": i, "u": u, "p": p, "v": v}) or True)
     c = app.app.test_client()
     r = c.post("/history/publish-blog", json={"item_id": 7, "html": "<p>x</p>"}).get_json()
     assert r["status"] == "ok" and r["url"].endswith("/p1.html")
-    assert saved == {"i": 7, "u": "https://x.blogspot.com/p1.html", "p": "p1"}
+    assert saved == {"i": 7, "u": "https://x.blogspot.com/p1.html", "p": "p1",
+                     "v": app.BLOG_RENDER_VERSION}   # 발행 시 렌더 버전도 기록한다
     assert published["title"] == "OpenAI와 연구"
     assert 'data-ys-original-title="1"' in published["html"]
     assert "원제 : OpenAI &amp; Research" in published["html"]
