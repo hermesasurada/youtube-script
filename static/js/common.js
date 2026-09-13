@@ -537,11 +537,8 @@
         const body = notes[key] || '';
         box.classList.toggle('empty', !body);
         box.innerHTML = '';
-        const label = document.createElement('div');
-        label.className = 'summary-memo-label';
-        label.textContent = '나의 의견';
         if (body) {
-          box.appendChild(label);
+          // 머리말 없이 본문만 — 첫 글자 앞의 💡(CSS ::before)가 '내 생각'임을 알린다.
           const text = document.createElement('div');
           text.className = 'summary-memo-text';
           text.textContent = body;
@@ -552,7 +549,7 @@
         box.appendChild(edit);
         edit.onclick = () => {
           box.classList.remove('empty');
-          box.replaceChildren(label);
+          box.replaceChildren();
           const input = document.createElement('textarea');
           input.value = notes[key] || ''; input.maxLength = 10000; input.rows = 4;
           input.placeholder = '이 내용에 대한 생각을 기록하세요. 저장한 메모는 블로그 발행에도 포함됩니다.';
@@ -1049,10 +1046,11 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-blog-menu-item[disabled]{opacity:.5;cursor:default;}
 .ys-blog-menu-hint{font-size:.75rem;color:var(--muted,#7a7f87);overflow-wrap:anywhere;}
 .ys-blog-menu-head{padding:7px 11px 8px;margin-bottom:2px;border-bottom:1px solid var(--border,#e4e7e4);font-size:.76rem;color:var(--muted,#7a7f87);}
-.summary-memo{margin:1.2rem 0;padding:12px 16px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
-.summary-memo-label{font-size:.8rem;font-weight:700;color:var(--muted,#67756c);margin-bottom:6px;}
+.summary-memo{margin:.85rem 0;padding:8px 12px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
 .summary-memo.empty{padding:0;border:0;background:none;}
-.summary-memo-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95em;line-height:1.7;margin-bottom:8px;}
+.summary-memo-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95em;line-height:1.65;margin-bottom:5px;}
+/* 본문 첫 글자 앞의 전구 — 텍스트에 섞이지 않아 복사·검색에 걸리지 않는다. */
+.summary-memo-text::before{content:"💡";margin-right:.35em;}
 .summary-memo button{font:inherit;font-size:.8rem;white-space:nowrap;padding:7px 12px;margin-right:6px;border:1px solid var(--border,#d9deda);border-radius:6px;background:var(--surface,#fff);color:var(--text,#34443a);cursor:pointer;}
 .summary-memo textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;font:inherit;line-height:1.6;padding:10px;margin:8px 0;border:1px solid var(--border,#ccd5ce);border-radius:6px;background:var(--surface,#fff);color:var(--text,#242424);}
 /* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */

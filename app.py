@@ -3282,11 +3282,11 @@ def _include_blog_notes(body_html, notes):
         note = notes.get(html_lib.unescape(match[1]))
         if not note:
             continue
-        block = ('<aside style="margin:1.2em 0;padding:14px 16px;border-left:3px solid #728d79;'
+        # 블로거는 인라인 style만 먹어서 ::before를 못 쓴다 — 전구를 본문 앞에 직접 넣는다.
+        block = ('<aside style="margin:.9em 0;padding:9px 13px;border-left:3px solid #728d79;'
                  'background:#f1f5f1;border-radius:6px;color:#34443a;">'
-                 '<div style="font-size:13px;font-weight:700;margin-bottom:7px;">나의 의견</div>'
-                 '<div style="white-space:pre-wrap;font-size:15px;line-height:1.7;">'
-                 + html_lib.escape(note) + '</div></aside>')
+                 '<div style="white-space:pre-wrap;font-size:15px;line-height:1.65;">'
+                 '\U0001F4A1 ' + html_lib.escape(note) + '</div></aside>')
         # 마지막 섹션도 최상위 본문 wrapper 닫힘 앞에 삽입한다.
         end = part.rfind('</div>') if i == len(parts) - 1 else -1
         parts[i] = part[:end] + block + part[end:] if end >= 0 else part + block
