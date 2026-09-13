@@ -68,6 +68,30 @@ def test_summary_popup_sticky_sections_are_wired_for_desktop_and_mobile():
     assert mobile_html.count("YS.setupStickySummarySections") == 1
 
 
+def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
+    db.init()
+    item = {"item_id": 731, "md_path": str(tmp_path / "video.md"),
+            "summary_path": str(tmp_path / "summary.md")}
+    monkeypatch.setattr(db, "get_history_item", lambda i: item if int(i) == 731 else None)
+    client = app.app.test_client()
+    payload = {"item_id": 731, "section_key": "전력 & 투자::1", "body": "첫 의견"}
+    assert client.post('/summary/note', json=payload).status_code == 200
+    assert db.get_summary_notes(item['md_path']) == {"전력 & 투자::1": "첫 의견"}
+    payload['body'] = '<script>alert(1)</script>\n내 생각'
+    assert client.post('/summary/note', json=payload).get_json()['body'] == payload['body']
+    db.init()  # 재시작/초기화로 사용자 메모가 지워지지 않는다.
+    source = '<div><h3 data-summary-section="전력 &amp; 투자::1">전력</h3><p>본문</p><h3 data-summary-section="다음::1">다음</h3><p>내용</p></div>'
+    published = app._include_blog_notes(source, db.get_summary_notes(item['md_path']))
+    assert '<script>' not in published
+    assert '&lt;script&gt;' in published
+    assert published.index('나의 의견') < published.index('>다음</h3>')
+    assert published.count('<aside') == 1
+    assert client.post('/summary/note', json={**payload, 'body': 'x' * 10001}).status_code == 400
+    assert client.post('/summary/note', json={**payload, 'body': '  '}).status_code == 200
+    assert db.get_summary_notes(item['md_path']) == {}
+    assert client.post('/summary/note', json={**payload, 'item_id': 99999}).status_code == 404
+
+
 def test_image_captions_are_excluded_from_term_notes():
     """캡션은 각주 대상이 아니다 — 프롬프트·주입·렌더 세 곳 모두 별표를 남기지 않는다."""
     import keyframe_report

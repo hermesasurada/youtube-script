@@ -342,6 +342,32 @@ def init() -> None:
                 added_at TEXT NOT NULL
             )""")
             c.execute("PRAGMA user_version = 18")
+        if ver < 19:
+            c.execute("""CREATE TABLE IF NOT EXISTS summary_notes (
+                md_path TEXT NOT NULL,
+                section_key TEXT NOT NULL,
+                body TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (md_path, section_key)
+            )""")
+            c.execute("PRAGMA user_version = 19")
+
+
+def get_summary_notes(md_path: str) -> dict:
+    return {r["section_key"]: r["body"] for r in _conn().execute(
+        "SELECT section_key, body FROM summary_notes WHERE md_path = ?", (md_path,))}
+
+
+def save_summary_note(md_path: str, section_key: str, body: str) -> None:
+    with _lock:
+        if not body.strip():
+            _conn().execute("DELETE FROM summary_notes WHERE md_path = ? AND section_key = ?",
+                            (md_path, section_key))
+        else:
+            _conn().execute("""INSERT INTO summary_notes VALUES (?, ?, ?, ?)
+                ON CONFLICT(md_path, section_key) DO UPDATE SET
+                body = excluded.body, updated_at = excluded.updated_at""",
+                (md_path, section_key, body.strip(), datetime.now().isoformat()))
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────

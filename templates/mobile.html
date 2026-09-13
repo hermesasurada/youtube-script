@@ -1719,12 +1719,14 @@ async function openSummary(itemId, title) {
       $('modal-body').textContent = '오류: ' + d.error;
     } else {
       _summaryMd = d.content || '';
+      YS.setSummaryNotes(itemId, d.notes);
       _titleKoM = d.title_ko || '';
       $('modal-body').className = 'modal-body markdown';
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
       YS.setupStickySummarySections($('modal-body'));         // 소제목은 해당 h3 섹션 안에서만 고정
+      YS.attachSummaryNotes($('modal-body'), itemId);
       const originalUrl = d.original_video_url || '';
       $('modal-youtube-link').href = d.webpage_url || '#';
       $('modal-youtube-link').hidden = !d.webpage_url;

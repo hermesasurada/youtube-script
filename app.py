@@ -1358,6 +1358,7 @@ def _bg_reindex():
 _LOOPBACK = {"127.0.0.1", "::1"}
 # 원격에서 허용되는 데이터 엔드포인트(이력 조회/요약/읽음/삭제). 페이지(/, /m)는 별도 처리.
 _REMOTE_DATA_ALLOWED = {
+    "/summary/note",
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
@@ -3060,7 +3061,8 @@ def summary_content():
             content = f.read()
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         original = _original_video_for_item(item)
-        return _json({"content": content, "distill": db.get_item_distill(abs_path),
+        return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
+                      "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),
                       "is_read": bool((item or {}).get("is_read")),
                       "blog_url": (item or {}).get("blog_url") or "",
@@ -3070,6 +3072,23 @@ def summary_content():
                       "original_video_uploader": original.get("uploader") or ""})
     except Exception as e:
         return _json({"error": str(e)}, 500)
+
+
+@app.route("/summary/note", methods=["POST"])
+def summary_note():
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    if not item or not item.get("summary_path"):
+        return _json({"error": "요약 항목이 필요합니다"}, 400)
+    key, body = data.get("section_key"), data.get("body")
+    if not isinstance(key, str) or not key or len(key) > 1000:
+        return _json({"error": "잘못된 소제목입니다"}, 400)
+    if not isinstance(body, str) or len(body) > 10000:
+        return _json({"error": "메모는 10,000자 이내로 입력해주세요"}, 400)
+    db.save_summary_note(item["md_path"], key, body)
+    return _json({"body": body.strip()})
 
 
 @app.route("/history/refresh-meta", methods=["POST"])
@@ -3222,6 +3241,28 @@ def _ensure_blog_original_title(body_html: str, original_title: str | None,
     return block + "\n" + body_html
 
 
+def _include_blog_notes(body_html, notes):
+    """클라이언트의 소제목 식별자를 기준으로 저장된 최신 메모를 삽입한다."""
+    import html as html_lib
+    parts = re.split(r'(?=<h[23]\b|<p\b[^>]*data-summary-footer="1")', body_html, flags=re.I)
+    for i, part in enumerate(parts):
+        match = re.match(r'<h3\b[^>]*data-summary-section="([^"]*)"[^>]*>', part, re.I)
+        if not match:
+            continue
+        note = notes.get(html_lib.unescape(match[1]))
+        if not note:
+            continue
+        block = ('<aside style="margin:1.2em 0;padding:14px 16px;border-left:3px solid #728d79;'
+                 'background:#f1f5f1;border-radius:6px;color:#34443a;">'
+                 '<div style="font-size:13px;font-weight:700;margin-bottom:7px;">나의 의견</div>'
+                 '<div style="white-space:pre-wrap;font-size:15px;line-height:1.7;">'
+                 + html_lib.escape(note) + '</div></aside>')
+        # 마지막 섹션도 최상위 본문 wrapper 닫힘 앞에 삽입한다.
+        end = part.rfind('</div>') if i == len(parts) - 1 else -1
+        parts[i] = part[:end] + block + part[end:] if end >= 0 else part + block
+    return ''.join(parts)
+
+
 @app.route("/history/publish-blog", methods=["POST"])
 def history_publish_blog():
     """요약을 내 블로그스팟에 바로 발행한다 — 공통 라이브러리 hermes_blogger(wm과 토큰 공유).
@@ -3244,6 +3285,7 @@ def history_publish_blog():
     if not html or not title:
         return _json({"status": "error", "code": "bad_request", "message": "title/html 필요"}, 400)
     html = _ensure_blog_original_title(html, item.get("title"), item.get("title_ko"))
+    html = _include_blog_notes(html, db.get_summary_notes(item.get("md_path") or ""))
     if not bl.configured():
         return _json({"status": "error", "code": "not_configured",
                       "message": "블로그 연동 미설정 — 서버에서 hermes-blogger auth 실행 필요"})

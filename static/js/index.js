@@ -2509,6 +2509,7 @@ async function openSummaryModal(itemId, title) {
     ]);
     if (data.error) throw new Error(data.error);
     _summaryMd = data.content || '';
+    YS.setSummaryNotes(itemId, data.notes);
     _titleKo   = data.title_ko || '';                      // 외국어 제목의 한국어 번역
     _setPubBtn(data.blog_url);                               // 발행 여부에 따라 📤 / 🔗
     _setSummaryReadUI(data.is_read);
@@ -2522,6 +2523,7 @@ async function openSummaryModal(itemId, title) {
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
     YS.setupStickySummarySections(bodyEl);                 // 소제목은 해당 h3 섹션 안에서만 고정
+    YS.attachSummaryNotes(bodyEl, itemId);
     bodyEl.scrollTop = 0;
     _updateSumProgress(bodyEl);
     // 캡처 이미지가 있을 때만 몰입형 버튼 노출
@@ -2553,7 +2555,7 @@ function _setImmersive(on) {
   normal.hidden = on;
   imm.hidden    = !on;
   btn.textContent = on ? '⊠ 일반 보기' : '⊟ 몰입형 읽기';
-  if (!on) { _updateSumProgress(normal); return; }
+  if (!on) { YS.attachSummaryNotes(normal, _summaryItemId); _updateSumProgress(normal); return; }
 
   const tmp = document.createElement('div');
   tmp.innerHTML = YS.renderMarkdown(_summaryMd);
@@ -2572,6 +2574,7 @@ function _setImmersive(on) {
     : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
   txt.innerHTML = tmp.innerHTML;
   YS.setupStickySummarySections(txt);                      // 몰입형 본문도 같은 섹션 경계 적용
+  YS.attachSummaryNotes(txt, _summaryItemId);
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작
   _updateSumProgress(txt);
 }

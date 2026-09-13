@@ -226,7 +226,7 @@
 
   const _COMMON_TERM_PATTERN = String.raw`(?:Codex|ASIC|HBM|open[- ]weight|오픈웨이트|FSD|ETF|FDA|AGI|Neocloud|bay|token|토큰|API|LLM|GPU|CPU|SaaS|클라우드|데이터센터|반도체|오픈소스|스타트업|벤치마크|프롬프트|에이전트|강화학습|휴머노이드|피지컬\s*AI|샌드박스|KV\s*캐시|KV\s*cache|MoE|RAG|어텐션|attention|chain\s+of\s+thought|CoT|사고\s*연쇄|컨텍스트\s*창|context\s*window|제품[\s\-–—]*시장\s*적합성|product[\s\-–—]*market\s*fit|언어\s*모델|코딩\s*에이전트|지분\s*희석|통신\s*대역폭|휴머노이드\s*로봇)`;
   const _COMMON_TERM_NOTE = new RegExp(`^${_COMMON_TERM_PATTERN}(?=$|\\s*\\()`, 'i');
-  const _COMMON_TERM_MARK = new RegExp(`(${_COMMON_TERM_PATTERN})\\s*\\*`, 'gi');
+  const _COMMON_TERM_MARK = new RegExp(`(?<![A-Za-z0-9_])(${_COMMON_TERM_PATTERN})\\s*\\*`, 'gi');
 
   // ── 사용자 지정 각주 제외 용어(서버 /terms/excluded) ─────────────────────
   // 요약 뷰어의 각주 행 ✕ 버튼으로 쌓인다. 화면 렌더·블로그 발행에서 해당 각주와
@@ -337,9 +337,8 @@
   }
 
   /**
-   * 용어 해설을 섹션별 단일 묶음으로 정규화한다.
-   * 새 요약은 term-notes 컨테이너를 직접 만들지만, 기존 요약의 흩어진 term-note도
-   * 화면과 블로그에서 같은 구조로 보이도록 각 h3 섹션 끝으로 모은다.
+   * 용어가 처음 등장한 단락 바로 뒤에 해설을 배치한다.
+   * 기존 섹션 말미의 묶음도 본문의 용어/별표를 찾아 단락별로 나눈다.
    */
   function _normalizeTermNotes(root) {
     if (!root || typeof document === 'undefined') return;
@@ -397,10 +396,28 @@
       }
       if (!notes.length) return;
 
-      const box = document.createElement('div');
-      box.className = 'term-notes';
-      notes.forEach(note => box.appendChild(note));
-      heading.parentNode.insertBefore(box, boundary);
+      const blocks = [];
+      for (let n = heading.nextElementSibling; n && n !== boundary; n = n.nextElementSibling) {
+        if (n.matches('p:not(.term-note),ul,ol,blockquote')) blocks.push(n);
+      }
+      const groups = new Map();
+      notes.forEach(note => {
+        const label = (note.querySelector('strong')?.textContent || '').trim();
+        const terms = [label, label.replace(/\s*\([^)]*\)/g, '').trim(),
+          ...(label.match(/\(([^)]+)\)/)?.[1].split('/') || [])].filter(Boolean);
+        const matches = b => terms.some(t => b.textContent.toLowerCase().includes(t.toLowerCase()));
+        let target = blocks.find(b => matches(b) && b.textContent.includes('*')) || blocks.find(matches);
+        // 대응어를 확정할 수 없으면 원래 각주 바로 앞 단락을 유지한다.
+        if (!target) target = blocks.filter(b => b.compareDocumentPosition(note) & 4).pop();
+        if (!target) return;
+        if (!groups.has(target)) {
+          const box = document.createElement('div');
+          box.className = 'term-notes';
+          target.after(box);
+          groups.set(target, box);
+        }
+        groups.get(target).appendChild(note);
+      });
     });
 
     applyTermExclusions(root);      // 사용자 지정 제외 용어(각주 행 + 본문 별표)
@@ -418,6 +435,76 @@
   // 각 h3와 다음 h3 사이를 실제 섹션으로 묶는다. h3에 sticky만 적용하면 문서
   // 끝까지 남지만, 이 래퍼가 있으면 해당 섹션 끝에서 자연스럽게 밀려난다.
   const _stickySectionObservers = new WeakMap();
+  function summarySectionKeys(root) {
+    const counts = new Map();
+    return [...root.querySelectorAll('h3')].map(h => {
+      const copy = h.cloneNode(true);
+      copy.querySelectorAll('.kf-time,.kf-ico,button').forEach(n => n.remove());
+      const title = copy.textContent.replace(/\s*\[\d{1,2}:\d{2}(?::\d{2})?\]\s*$/, '').replace(/\s+/g, ' ').trim();
+      const occurrence = (counts.get(title) || 0) + 1;
+      counts.set(title, occurrence);
+      return [h, `${title}::${occurrence}`];
+    });
+  }
+
+  const _memoState = new Map();
+  function setSummaryNotes(itemId, notes) { _memoState.set(String(itemId), notes || {}); }
+  function attachSummaryNotes(root, itemId) {
+    root.dataset.noteItem = String(itemId);
+    root.querySelectorAll('.summary-memo').forEach(n => n.remove());
+    const notes = _memoState.get(String(itemId)) || {};
+    summarySectionKeys(root).forEach(([heading, key]) => {
+      const section = heading.closest('.sum-topic-section');
+      if (!section) return;
+      const box = document.createElement('aside');
+      box.className = 'summary-memo';
+      box.dataset.sectionKey = key;
+      const show = () => {
+        const body = notes[key] || '';
+        box.classList.toggle('empty', !body);
+        box.innerHTML = '';
+        const label = document.createElement('div');
+        label.className = 'summary-memo-label';
+        label.textContent = '나의 의견';
+        if (body) {
+          box.appendChild(label);
+          const text = document.createElement('div');
+          text.className = 'summary-memo-text';
+          text.textContent = body;
+          box.appendChild(text);
+        }
+        const edit = document.createElement('button');
+        edit.type = 'button'; edit.textContent = body ? '메모 편집' : '+ 내 의견 메모';
+        box.appendChild(edit);
+        edit.onclick = () => {
+          box.classList.remove('empty');
+          box.replaceChildren(label);
+          const input = document.createElement('textarea');
+          input.value = notes[key] || ''; input.maxLength = 10000; input.rows = 4;
+          input.placeholder = '이 내용에 대한 생각을 기록하세요. 저장한 메모는 블로그 발행에도 포함됩니다.';
+          input.setAttribute('aria-label', '나의 의견 메모');
+          const save = document.createElement('button'); save.type = 'button'; save.textContent = '저장';
+          const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '취소';
+          const status = document.createElement('span'); status.setAttribute('role', 'status');
+          box.append(input, save, cancel, status);
+          cancel.onclick = show;
+          save.onclick = async () => {
+            save.disabled = cancel.disabled = true; status.textContent = '저장 중…';
+            try {
+              const r = await fetch('/summary/note', {method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({item_id:itemId, section_key:key, body:input.value})});
+              const d = await r.json();
+              if (!r.ok || d.error) throw new Error(d.error || '저장 실패');
+              notes[key] = d.body; _memoState.set(String(itemId), notes);
+              show();
+            } catch (e) { status.textContent = e.message; save.disabled = cancel.disabled = false; }
+          };
+          input.focus();
+        };
+      };
+      show(); section.appendChild(box);
+    });
+  }
   function setupStickySummarySections(rootEl) {
     if (!rootEl) return;
     const previous = _stickySectionObservers.get(rootEl);
@@ -697,6 +784,7 @@
 
   function mdToBloggerHtml(md, opts = {}) {
     const { root, title, url, brief } = _summaryBodyDom(md);
+    summarySectionKeys(root).forEach(([h, key]) => h.setAttribute('data-summary-section', key));
     root.querySelectorAll('.term-note-x').forEach(b => b.remove());   // 화면 전용 버튼
 
     // 블로거는 외부 CSS/클래스가 안 먹으므로 모든 서식을 인라인 style로 준다.
@@ -746,6 +834,7 @@
     if (url) {                                     // 출처는 원본 영상 링크만 남긴다
       const foot = document.createElement('div');
       foot.setAttribute('style', _BL.foot);
+      foot.setAttribute('data-summary-footer', '1');
       foot.innerHTML = `원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener" style="color:#b0413e;">${attrEscape(url)}</a>`;
       body.appendChild(foot);
     }
@@ -810,6 +899,8 @@
     apiTermExclusion,
     applyTermExclusions,
     setupStickySummarySections,
+    setSummaryNotes,
+    attachSummaryNotes,
     listTermExclusions: () => [..._termExcl],
   };
 
@@ -876,7 +967,13 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .sum-md h3,.md-body h3,.markdown h3{display:flex;align-items:center;gap:.5em;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%);border-left:3px solid var(--highlight,var(--accent,#6366f1));padding:.5rem .8rem;border-radius: 2px;margin:1.7rem 0 .75rem;}
 /* 뷰어에서 JS가 h3별로 만든 경계 안에서만 소제목을 고정한다. */
 .sum-topic-section{display:flow-root;min-width:0;}
-.sum-topic-section>h3{position:sticky;top:var(--sum-topic-sticky-top,0);z-index:5;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%),var(--sum-topic-sticky-bg,var(--surface,#fff));box-shadow:0 8px 10px -12px rgba(0,0,0,.45);}
+.sum-topic-section>h3{position:sticky;top:calc(var(--sum-topic-sticky-top,0px) + 8px);z-index:5;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%),var(--sum-topic-sticky-bg,var(--surface,#fff));box-shadow:0 -8px 0 var(--sum-topic-sticky-bg,var(--surface,#fff)),0 8px 10px -12px rgba(0,0,0,.45);}
+.summary-memo{margin:1.2rem 0;padding:12px 16px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
+.summary-memo-label{font-size:.8rem;font-weight:700;color:var(--muted,#67756c);margin-bottom:6px;}
+.summary-memo.empty{padding:0;border:0;background:none;}
+.summary-memo-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95em;line-height:1.7;margin-bottom:8px;}
+.summary-memo button{font:inherit;font-size:.8rem;white-space:nowrap;padding:7px 12px;margin-right:6px;border:1px solid var(--border,#d9deda);border-radius:6px;background:var(--surface,#fff);color:var(--text,#34443a);cursor:pointer;}
+.summary-memo textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;font:inherit;line-height:1.6;padding:10px;margin:8px 0;border:1px solid var(--border,#ccd5ce);border-radius:6px;background:var(--surface,#fff);color:var(--text,#242424);}
 /* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */
 .sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
 .sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
