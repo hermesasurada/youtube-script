@@ -354,8 +354,10 @@ def init() -> None:
 
 
 def get_summary_notes(md_path: str) -> dict:
+    """내용이 있는 메모만 돌려준다. 빈 body 행은 '지웠다'는 기록(아래)이라 건너뛴다."""
     return {r["section_key"]: r["body"] for r in _conn().execute(
-        "SELECT section_key, body FROM summary_notes WHERE md_path = ?", (md_path,))}
+        "SELECT section_key, body FROM summary_notes WHERE md_path = ? AND body <> ''",
+        (md_path,))}
 
 
 def summary_notes_mtime(md_path: str) -> float:
@@ -373,10 +375,18 @@ def summary_notes_mtime(md_path: str) -> float:
 
 
 def save_summary_note(md_path: str, section_key: str, body: str) -> None:
+    """메모 저장. 빈 내용은 '삭제'지만 행은 body=''로 남긴다.
+
+    행을 지워 버리면 최종 수정시각이 사라져, 메모를 넣고 발행한 뒤 지운 경우를
+    '발행 이후 변경 없음'으로 잘못 판정한다(summary_notes_mtime). 빈 행은
+    get_summary_notes가 걸러 화면·블로그에는 나오지 않는다."""
     with _lock:
         if not body.strip():
-            _conn().execute("DELETE FROM summary_notes WHERE md_path = ? AND section_key = ?",
-                            (md_path, section_key))
+            _conn().execute(
+                """INSERT INTO summary_notes VALUES (?, ?, '', ?)
+                   ON CONFLICT(md_path, section_key) DO UPDATE SET
+                   body = '', updated_at = excluded.updated_at""",
+                (md_path, section_key, datetime.now().isoformat()))
         else:
             _conn().execute("""INSERT INTO summary_notes VALUES (?, ?, ?, ?)
                 ON CONFLICT(md_path, section_key) DO UPDATE SET

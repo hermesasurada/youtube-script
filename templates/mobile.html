@@ -1868,6 +1868,11 @@ function _setPubBtnM(url, state) {
     : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.disabled = false;
 }
+/* 메모 저장/삭제 즉시 발행 버튼 상태를 갱신한다(common.js가 알림). */
+document.addEventListener('ys:blog-state', e => {
+  const { itemId, blog } = e.detail || {};
+  if (_blogUrl && String(itemId) === String(_summaryItemId)) _setPubBtnM(_blogUrl, blog);
+});
 /* 발행된 글을 지금 요약·메모로 덮어쓴다(데스크톱 _updateBlogPost와 같은 엔드포인트). */
 async function updateBlogPostM(btn) {
   if (!_summaryMd || !_summaryItemId) return;

@@ -2381,6 +2381,12 @@ function _setPubBtn(url, state) {
   b.disabled = false;
 }
 
+/* 메모 저장/삭제 즉시 발행 버튼 상태를 갱신한다(common.js가 알림). */
+document.addEventListener('ys:blog-state', e => {
+  const { itemId, blog } = e.detail || {};
+  if (_blogUrl && String(itemId) === String(_summaryItemId)) _setPubBtn(_blogUrl, blog);
+});
+
 /* 발행된 글을 지금 요약·메모로 덮어쓴다. URL은 그대로고 발행시각만 갱신된다. */
 async function _updateBlogPost(btn) {
   if (!_summaryMd || !_summaryItemId) return;

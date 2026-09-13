@@ -78,7 +78,9 @@ def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
     assert client.post('/summary/note', json=payload).status_code == 200
     assert db.get_summary_notes(item['md_path']) == {"전력 & 투자::1": "첫 의견"}
     payload['body'] = '<script>alert(1)</script>\n내 생각'
-    assert client.post('/summary/note', json=payload).get_json()['body'] == payload['body']
+    saved = client.post('/summary/note', json=payload).get_json()
+    assert saved['body'] == payload['body']
+    assert 'blog' in saved          # 뷰어가 발행 버튼을 즉시 갱신할 수 있도록 상태를 함께 준다
     db.init()  # 재시작/초기화로 사용자 메모가 지워지지 않는다.
     source = '<div><h3 data-summary-section="전력 &amp; 투자::1">전력</h3><p>본문</p><h3 data-summary-section="다음::1">다음</h3><p>내용</p></div>'
     published = app._include_blog_notes(source, db.get_summary_notes(item['md_path']))
@@ -122,6 +124,11 @@ def test_blog_state_flags_edits_made_after_publishing(tmp_path, monkeypatch):
     # 메모만 고쳐도 수정 대상이다(메모가 블로그 본문에 실리므로).
     os.utime(summary, (old, old))
     db.save_summary_note(md_path, "구간::1", "생각")
+    assert app._blog_state(dict(base, blog_published_at=published))["stale"] is True
+
+    # 메모를 '지운' 것도 변경이다 — 발행본에는 남아 있으므로 되돌리려면 수정해야 한다.
+    db.save_summary_note(md_path, "구간::1", "")
+    assert db.get_summary_notes(md_path) == {}
     assert app._blog_state(dict(base, blog_published_at=published))["stale"] is True
 
     # 미발행 글과 발행시각 미기록 글
@@ -190,6 +197,8 @@ def test_publish_button_offers_open_and_update_on_both_surfaces():
     assert "게시됨" in common and "ys-blog-menu-head" in common
     for src in (js, mobile):
         assert "publishedAt:" in src
+        assert "ys:blog-state" in src      # 메모 저장 즉시 버튼 갱신
+    assert "ys:blog-state" in common
 
 
 def test_image_captions_are_excluded_from_term_notes():

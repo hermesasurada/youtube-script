@@ -567,6 +567,10 @@
               const d = await r.json();
               if (!r.ok || d.error) throw new Error(d.error || '저장 실패');
               notes[key] = d.body; _memoState.set(String(itemId), notes);
+              // 메모도 블로그 본문에 실린다 — 발행 버튼이 곧바로 '수정 가능'으로 바뀌도록
+              // 서버가 준 최신 상태를 알린다(데스크톱·모바일이 각자 버튼을 갱신).
+              if (d.blog) document.dispatchEvent(
+                new CustomEvent('ys:blog-state', { detail: { itemId, blog: d.blog } }));
               show();
             } catch (e) { status.textContent = e.message; save.disabled = cancel.disabled = false; }
           };

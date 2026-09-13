@@ -3116,7 +3116,9 @@ def summary_note():
     if not isinstance(body, str) or len(body) > 10000:
         return _json({"error": "메모는 10,000자 이내로 입력해주세요"}, 400)
     db.save_summary_note(item["md_path"], key, body)
-    return _json({"body": body.strip()})
+    # 메모도 블로그 본문에 실리므로, 저장 즉시 '발행 이후 변경' 상태를 함께 돌려준다
+    # (뷰어가 발행 버튼을 다시 열지 않고도 갱신할 수 있게).
+    return _json({"body": body.strip(), "blog": _blog_state(item)})
 
 
 @app.route("/history/refresh-meta", methods=["POST"])
