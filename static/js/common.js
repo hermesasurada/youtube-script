@@ -319,12 +319,20 @@
    * 데스크톱·모바일이 버튼 모양만 다르고 동작은 같아 여기서 공유한다. 수정은 발행 이후
    * 요약·메모가 바뀐 경우(stale)에만 활성화하고, 아니면 이유를 함께 보여 준다.
    */
-  function openBlogMenu(anchorEl, { url, stale, changedAt, onOpen, onUpdate }) {
+  const _blogStamp = t => (t || '').slice(0, 16);   // 'YYYY-MM-DD HH:MM'
+
+  function openBlogMenu(anchorEl, { url, stale, changedAt, publishedAt, onOpen, onUpdate }) {
     if (typeof document === 'undefined') return;
     document.querySelectorAll('.ys-blog-menu').forEach(m => m.remove());
     const menu = document.createElement('div');
     menu.className = 'ys-blog-menu';
     menu.setAttribute('role', 'menu');
+
+    // 게시 시각을 머리에 둬서 아래 '수정됨' 시각과 바로 견줄 수 있게 한다.
+    const head = document.createElement('div');
+    head.className = 'ys-blog-menu-head';
+    head.textContent = publishedAt ? `${_blogStamp(publishedAt)} 게시됨` : '게시 시각 기록 없음';
+    menu.appendChild(head);
 
     const item = (label, hint, disabled, fn) => {
       const b = document.createElement('button');
@@ -350,8 +358,8 @@
     item('블로그에서 보기', url ? url.replace(/^https?:\/\//, '') : '', false,
          () => (onOpen ? onOpen() : window.open(url, '_blank', 'noopener')));
     item('지금 내용으로 수정', stale
-           ? (changedAt ? changedAt.slice(0, 16) + ' 수정됨' : '변경 사항 반영')
-           : '발행 이후 바뀐 내용 없음',
+           ? (changedAt ? _blogStamp(changedAt) + ' 수정됨' : '변경 사항 반영')
+           : '게시 이후 바뀐 내용 없음',
          !stale, () => onUpdate && onUpdate());
 
     function close() {
@@ -1040,6 +1048,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-blog-menu-item:hover:not([disabled]){background:var(--surface2,#f3f5f3);}
 .ys-blog-menu-item[disabled]{opacity:.5;cursor:default;}
 .ys-blog-menu-hint{font-size:.75rem;color:var(--muted,#7a7f87);overflow-wrap:anywhere;}
+.ys-blog-menu-head{padding:7px 11px 8px;margin-bottom:2px;border-bottom:1px solid var(--border,#e4e7e4);font-size:.76rem;color:var(--muted,#7a7f87);}
 .summary-memo{margin:1.2rem 0;padding:12px 16px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
 .summary-memo-label{font-size:.8rem;font-weight:700;color:var(--muted,#67756c);margin-bottom:6px;}
 .summary-memo.empty{padding:0;border:0;background:none;}

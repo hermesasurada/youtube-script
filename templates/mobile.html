@@ -1861,8 +1861,10 @@ function _setPubBtnM(url, state) {
   b.className = _blogUrl
     ? 'summary-action-btn primary done' + (_blogStateM.stale ? ' stale' : '')
     : 'summary-action-btn primary';
+  const stampM = (_blogStateM.published_at || '').slice(0, 16);
   b.title = _blogUrl
-    ? (_blogStateM.stale ? '발행 이후 내용이 바뀜 — 열기 또는 수정' : '발행된 글 열기')
+    ? (stampM ? `${stampM} 게시됨` : '게시 시각 기록 없음')
+      + (_blogStateM.stale ? ' — 이후 내용이 바뀜, 열기 또는 수정' : ' — 열기 또는 수정')
     : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.disabled = false;
 }
@@ -1892,6 +1894,7 @@ async function publishToBlog(btn) {
   if (_blogUrl) {
     YS.openBlogMenu(btn, {
       url: _blogUrl, stale: !!_blogStateM.stale, changedAt: _blogStateM.changed_at || '',
+      publishedAt: _blogStateM.published_at || '',
       onUpdate: () => updateBlogPostM(btn),
     });
     return;

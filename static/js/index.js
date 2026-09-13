@@ -2370,8 +2370,10 @@ function _setPubBtn(url, state) {
   if (!b) return;
   const l = b.querySelector('.pub-label');
   if (l) l.textContent = _blogUrl ? '발행됨' : '블로그 발행';
+  const stamp = (_blogState.published_at || '').slice(0, 16);
   b.title = _blogUrl
-    ? (_blogState.stale ? '발행 이후 내용이 바뀜 — 열기 또는 수정' : '발행된 글 열기')
+    ? (stamp ? `${stamp} 게시됨` : '게시 시각 기록 없음')
+      + (_blogState.stale ? ' — 이후 내용이 바뀜, 열기 또는 수정' : ' — 열기 또는 수정')
     : '요약을 내 블로그스팟에 바로 발행 (즉시 공개)';
   b.classList.toggle('published', !!_blogUrl);
   b.classList.toggle('stale', !!(_blogUrl && _blogState.stale));
@@ -2412,6 +2414,7 @@ async function publishSummaryToBlog(btn) {
   if (_blogUrl) {
     YS.openBlogMenu(btn, {
       url: _blogUrl, stale: !!_blogState.stale, changedAt: _blogState.changed_at || '',
+      publishedAt: _blogState.published_at || '',
       onUpdate: () => _updateBlogPost(btn),
     });
     return;
