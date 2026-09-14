@@ -200,6 +200,36 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
     assert r.status_code == 400 and r.get_json()["code"] == "not_published"
 
 
+def test_transcript_only_history_is_reprocessed_not_marked_done(tmp_path, monkeypatch):
+    """요약이 타임아웃으로 끊겨 전사만 남은 이력은 '이미 처리됨'이 아니다.
+
+    2026-09-13 Qualcomm(47분) — 요약 SSE가 900초를 넘겨 전사 파일만 남았는데, 다음 틱의
+    중복 정리가 done으로 닫아 요약이 영영 생기지 않았다."""
+    monkeypatch.setenv("INDEX_DB", str(tmp_path / "t.db"))
+    import importlib
+    fresh = importlib.reload(db)
+    fresh.init()
+    conn = fresh._conn()
+    ins = ("INSERT INTO items (md_path, yt_id, title, date, stem, has_txt, transcript, summary, "
+           "mtime_md, indexed_at) VALUES (?,?,?,?,?,1,?,?,0,0)")
+    conn.execute(ins, (str(tmp_path / "a.md"), "ONLYTXT", "전사만", "20260913", "a", "본문", None))
+    conn.execute(ins, (str(tmp_path / "b.md"), "FULL", "완료", "20260913", "b", "본문", "요약 있음"))
+    conn.commit()
+    try:
+        assert fresh.find_by_yt_id("ONLYTXT") and fresh.has_summary_for_yt_id("ONLYTXT") is False
+        assert fresh.has_summary_for_yt_id("FULL") is True
+        assert fresh.has_summary_for_yt_id("NONE") is False
+    finally:
+        monkeypatch.delenv("INDEX_DB", raising=False)
+        importlib.reload(db)
+
+    monitor = open(os.path.join(os.path.dirname(app.__file__), "channel_monitor.py"), encoding="utf-8").read()
+    # 중복 정리는 '요약까지 있는' 이력에만 적용한다
+    code = "\n".join(l for l in monitor.splitlines() if not l.lstrip().startswith("#"))
+    idx = code.index("이미 처리된 이력 확인")
+    assert "has_summary_for_yt_id" in code[idx - 300:idx], "중복 정리 앞에 요약 유무 확인이 없다"
+
+
 def test_summary_section_edit_replaces_only_that_block(tmp_path, monkeypatch):
     """소제목 구간 직접 편집 — 원본 구간이 정확히 한 번 나올 때만 갈아 끼운다."""
     summary = tmp_path / "s.md"

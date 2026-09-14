@@ -373,10 +373,17 @@ def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
         # 수동 등록분은 이력이 있어도 취소하지 않는다 — 재처리(손실 복구·모델 교체)를
         # 노리고 넣은 것이라 '이미 있음'이 곧 스킵 사유가 될 수 없다. 자동 감지분만
         # 중복으로 정리한다(2026-08-27: 재처리 802초 손실 건이 이 경로로 취소됨).
+        #
+        # 단, 이력이 '전사만 있고 요약이 빈' 반쪽이면 중복이 아니라 미완성이다 —
+        # 요약 SSE가 타임아웃(SUMM_TIMEOUT)으로 끊기면 전사 파일만 남는데, 이때
+        # 중복으로 정리해 버리면 요약이 영영 생기지 않는다(2026-09-13 Qualcomm
+        # 47분 영상: read timeout 900s → 다음 틱에서 '이미 처리된 이력 확인'으로 done).
         if item.get("channel_id") != "manual" and db.find_by_yt_id(item["yt_id"]):
-            if not dry:
-                db.queue_set_status(item["id"], "done", "이미 처리된 이력 확인")
-            continue
+            if db.has_summary_for_yt_id(item["yt_id"]):
+                if not dry:
+                    db.queue_set_status(item["id"], "done", "이미 처리된 이력 확인")
+                continue
+            log(f"[deferred] 이력에 요약이 없음(전사만) → 재처리: {item['title'][:50]}")
 
         # 파이프라인 일시 실패는 메타가 정상인지 다시 확인한 뒤 pending으로 복귀한다.
         min_duration = (

@@ -685,6 +685,20 @@ def delete(md_path: str) -> None:
         _conn().execute("DELETE FROM items WHERE md_path = ?", (md_path,))
 
 
+def has_summary_for_yt_id(yt_id: str) -> bool:
+    """그 영상의 '요약까지' 끝난 이력이 있는지.
+
+    find_by_yt_id는 전사 이력만 봐서, 요약이 타임아웃으로 끊겨 전사 파일만 남은
+    반쪽 상태도 '이미 처리됨'으로 보인다. 자동 모니터가 그 둘을 구분하는 데 쓴다."""
+    yt_id = (yt_id or "").strip()
+    if not yt_id:
+        return False
+    r = _conn().execute(
+        "SELECT 1 FROM items WHERE yt_id = ? AND summary IS NOT NULL "
+        "AND trim(summary) <> '' LIMIT 1", (yt_id,)).fetchone()
+    return bool(r)
+
+
 def find_by_yt_id(yt_id: str) -> dict | None:
     """같은 영상(yt_id)을 이미 처리한 이력이 있으면 최신 1건 반환(중복 추가 경고용)."""
     yt_id = (yt_id or "").strip()
