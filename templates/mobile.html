@@ -1183,9 +1183,26 @@ async function mqPreview() {
     }
     _mqPv = d;
     const seg = d.start_sec ? `<span class="mq-pv-seg">${attrEsc(d.start_label)}부터 전사</span>` : '';
-    pv.innerHTML = `<div class="mq-pv-ok"><b>${attrEsc(d.title)}</b><span>${attrEsc(d.channel || '')}</span>${seg}</div>`;
+    // 같은 채널을 지난번에 넣은 설정으로 캡처·증류 칩을 맞춘다(데스크톱과 같은 규칙).
+    const applied = _mqApplyChannelPrefs(d.prefs);
+    const note = applied ? `<span class="mq-pv-seg">${attrEsc(applied)}</span>` : '';
+    pv.innerHTML = `<div class="mq-pv-ok"><b>${attrEsc(d.title)}</b><span>${attrEsc(d.channel || '')}</span>${seg}${note}</div>`;
     btn.disabled = false;
   } catch (e) { pv.innerHTML = `<span class="mq-pv-err">조회 실패</span>`; }
+}
+function _mqApplyChannelPrefs(prefs) {
+  const set = (id, on) => {
+    const b = $(id); if (!b) return;
+    b.classList.toggle('on', !!on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  };
+  set('mq-add-capture-btn', true);
+  set('mq-add-distill-btn', true);
+  if (!prefs || (prefs.capture === undefined && prefs.distill === undefined)) return '';
+  const parts = [];
+  if (prefs.capture !== undefined) { set('mq-add-capture-btn', prefs.capture); parts.push('캡처 ' + (prefs.capture ? 'ON' : 'OFF')); }
+  if (prefs.distill !== undefined) { set('mq-add-distill-btn', prefs.distill); parts.push('증류 ' + (prefs.distill ? 'ON' : 'OFF')); }
+  return `${prefs.source === 'channel' ? '채널 설정' : '지난 처리'} 따름 — ${parts.join(' · ')}`;
 }
 async function mqPaste() {
   const inp = $('mq-add-url');

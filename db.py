@@ -1031,6 +1031,55 @@ def in_queue(yt_id: str) -> bool:
     return r is not None
 
 
+def last_queue_prefs_for_channel(channel: str) -> dict:
+    """같은 채널에서 마지막으로 쓴 캡처·증류 지정값(수동 큐 등록의 기본값).
+
+    watch_queue에는 채널명이 없어 items(uploader/channel)로 이어 찾는다. 캡처와 증류는
+    한쪽만 지정한 경우가 있어 각각 따로 가장 최근의 '명시값'을 고른다. 증류는 요약 화면에서
+    나중에 바꿀 수 있으므로 items.distill(최종 상태)을 큐 값보다 앞에 둔다. 둘 다 없으면
+    모니터 채널 기본 설정(channels)으로 내려간다. 값이 없으면 키를 넣지 않는다.
+    """
+    channel = (channel or "").strip()
+    out: dict = {}
+    if not channel:
+        return out
+    conn = _conn()
+
+    def latest(sql: str, *params):
+        r = conn.execute(sql, params).fetchone()
+        return None if r is None or r[0] is None else bool(r[0])
+
+    cap = latest(
+        """SELECT q.capture FROM watch_queue q JOIN items i ON i.yt_id = q.yt_id
+           WHERE (i.uploader = ? OR i.channel = ?) AND q.capture IS NOT NULL
+           ORDER BY q.id DESC LIMIT 1""", channel, channel)
+    dis = latest(
+        """SELECT i.distill FROM items i
+           WHERE (i.uploader = ? OR i.channel = ?) AND i.distill IS NOT NULL
+           ORDER BY i.date DESC, i.stem DESC LIMIT 1""", channel, channel)
+    if dis is None:
+        dis = latest(
+            """SELECT q.distill FROM watch_queue q JOIN items i ON i.yt_id = q.yt_id
+               WHERE (i.uploader = ? OR i.channel = ?) AND q.distill IS NOT NULL
+               ORDER BY q.id DESC LIMIT 1""", channel, channel)
+    source = "history"
+    if cap is None or dis is None:                      # 모니터 채널이면 그 기본 설정으로
+        row = conn.execute(
+            "SELECT capture, distill FROM channels WHERE title = ? LIMIT 1", (channel,)).fetchone()
+        if row:
+            if cap is None and row["capture"] is not None:
+                cap, source = bool(row["capture"]), "channel"
+            if dis is None and row["distill"] is not None:
+                dis, source = bool(row["distill"]), "channel"
+    if cap is not None:
+        out["capture"] = cap
+    if dis is not None:
+        out["distill"] = dis
+    if out:
+        out["source"] = source
+    return out
+
+
 def enqueue_video(yt_id: str, url: str, title: str, channel_id: str,
                   status: str = "pending", reason: str = "", *,
                   retry_after_seconds: int | float | None = None,

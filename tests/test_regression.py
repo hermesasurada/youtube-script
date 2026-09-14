@@ -200,6 +200,42 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
     assert r.status_code == 400 and r.get_json()["code"] == "not_published"
 
 
+def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkeypatch):
+    """수동 큐 등록은 같은 채널을 지난번에 넣은 캡처·증류 설정을 따른다."""
+    monkeypatch.setenv("INDEX_DB", str(tmp_path / "q.db"))
+    import importlib
+    fresh = importlib.reload(db)
+    fresh.init()
+    conn = fresh._conn()
+    ins = ("INSERT INTO items (md_path, yt_id, title, uploader, date, stem, has_txt, "
+           "mtime_md, indexed_at, distill) VALUES (?,?,?,?,?,?,1,0,0,?)")
+    conn.execute(ins, (str(tmp_path / "p.md"), "PREV", "지난 영상", "어떤채널", "20260910", "p", 0))
+    conn.execute("INSERT INTO watch_queue (yt_id, url, title, channel_id, status, added_at, "
+                 "updated_at, capture, distill) VALUES (?,?,?,?,?,?,?,?,?)",
+                 ("PREV", "u", "지난 영상", "manual", "done", "t", "t", 0, 1))
+    conn.commit()
+    try:
+        prefs = fresh.last_queue_prefs_for_channel("어떤채널")
+        # 캡처는 큐 기록에서, 증류는 items의 최종 상태에서 가져온다
+        assert prefs["capture"] is False and prefs["distill"] is False
+        assert prefs["source"] == "history"
+        assert fresh.last_queue_prefs_for_channel("모르는채널") == {}
+        assert fresh.last_queue_prefs_for_channel("") == {}
+    finally:
+        monkeypatch.delenv("INDEX_DB", raising=False)
+        importlib.reload(db)
+
+    root = os.path.dirname(app.__file__)
+    app_src = open(os.path.join(root, "app.py"), encoding="utf-8").read()
+    assert "last_queue_prefs_for_channel" in app_src
+    # 폼을 거치지 않는 호출도 서버가 채운다
+    idx = app_src.index("def queue_add()")
+    assert "last_queue_prefs_for_channel" in app_src[idx:idx + 2000]
+    for name in ("static/js/index.js", "templates/mobile.html"):
+        src = open(os.path.join(root, name), encoding="utf-8").read()
+        assert "ApplyChannelPrefs" in src and "d.prefs" in src
+
+
 def test_transcript_only_history_is_reprocessed_not_marked_done(tmp_path, monkeypatch):
     """요약이 타임아웃으로 끊겨 전사만 남은 이력은 '이미 처리됨'이 아니다.
 

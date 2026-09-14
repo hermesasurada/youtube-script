@@ -1150,8 +1150,12 @@ async function qPreview() {
     _qPreview = d;
     const seg = d.start_sec
       ? `<span class="q-pv-seg">${_attrEsc(d.start_label)}부터 전사</span>` : '';
+    // 같은 채널을 지난번에 넣은 설정으로 캡처·증류 칩을 맞춰 둔다(그대로 바꿔도 됨).
+    const applied = _qApplyChannelPrefs(d.prefs);
+    const note = applied
+      ? `<span class="q-pv-seg">${_attrEsc(applied)}</span>` : '';
     pv.innerHTML = `<div class="q-pv-ok"><b>${_attrEsc(d.title)}</b>`
-                 + `<span>${_attrEsc(d.channel || '')}</span>${seg}</div>`;
+                 + `<span>${_attrEsc(d.channel || '')}</span>${seg}${note}</div>`;
     btn.disabled = false;
   } catch (e) {
     pv.innerHTML = `<span class="q-pv-err">조회 실패: ${_attrEsc(e.message)}</span>`;
@@ -1176,6 +1180,25 @@ async function qPasteUrl() {
     document.getElementById('q-add-preview').innerHTML =
       '<span class="q-pv-wait">이 환경에선 자동 붙여넣기가 막혀 있습니다 — 입력창에 직접 붙여넣어 주세요.</span>';
   }
+}
+
+/* 미리보기로 받은 채널 기본값을 캡처·증류 칩에 반영한다. 반환: 안내 문구('' = 없음) */
+function _qApplyChannelPrefs(prefs) {
+  const set = (id, on) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.classList.toggle('on', !!on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  };
+  // 기본은 둘 다 켜짐 — 채널 이력이 없으면 종전과 같다.
+  set('q-add-capture-btn', true);
+  set('q-add-distill-btn', true);
+  if (!prefs || (prefs.capture === undefined && prefs.distill === undefined)) return '';
+  const parts = [];
+  if (prefs.capture !== undefined) { set('q-add-capture-btn', prefs.capture); parts.push('캡처 ' + (prefs.capture ? 'ON' : 'OFF')); }
+  if (prefs.distill !== undefined) { set('q-add-distill-btn', prefs.distill); parts.push('증류 ' + (prefs.distill ? 'ON' : 'OFF')); }
+  const from = prefs.source === 'channel' ? '채널 설정' : '지난 처리';
+  return `${from} 따름 — ${parts.join(' · ')}`;
 }
 
 async function qAddToQueue() {

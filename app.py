@@ -2474,9 +2474,11 @@ def queue_preview():
         st = db.queue_status_of(yt_id)
         if st in ("pending", "processing", "kf_retry", "deferred"):
             dup = "queue"
+    # 같은 채널을 지난번에 어떻게 넣었는지(캡처·증류)를 함께 줘서 폼이 그대로 맞춰 뜬다.
+    prefs = db.last_queue_prefs_for_channel(meta.get("channel") or "")
     return _json({"ok": True, "yt_id": yt_id, "title": meta["title"],
                   "channel": meta.get("channel") or "", "duplicate": dup,
-                  "start_sec": start_sec,
+                  "start_sec": start_sec, "prefs": prefs,
                   "start_label": _format_duration(start_sec) if start_sec else ""})
 
 
@@ -2605,9 +2607,18 @@ def queue_add():
         start_sec = _extract_start_sec(url)
     if db.get_item_by_yt_id(yt_id):
         return _json({"error": "이미 전사된 영상입니다.", "duplicate": "history"}, 409)
-    title = (data.get("title") or "").strip() or _oembed_meta(url).get("title") or url
+    meta = _oembed_meta(url)
+    title = (data.get("title") or "").strip() or meta.get("title") or url
     capture = data.get("capture")            # 영상 단위 캡처 지정(None=기본 포함)
     distill = data.get("distill")            # 증류 지정(None=채널/기본 설정 따름)
+    # 지정이 없으면 같은 채널을 지난번에 넣은 설정을 그대로 따른다(폼을 거치지 않는
+    # 원격·API 호출도 같은 결과가 되도록 서버에서 한 번 더 채운다).
+    if capture is None or distill is None:
+        prefs = db.last_queue_prefs_for_channel(meta.get("channel") or "")
+        if capture is None:
+            capture = prefs.get("capture")
+        if distill is None:
+            distill = prefs.get("distill")
     canonical = f"https://www.youtube.com/watch?v={yt_id}"
     if start_sec:
         canonical += f"&t={start_sec}"
