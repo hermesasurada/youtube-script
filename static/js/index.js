@@ -2248,36 +2248,20 @@ let _titleKo = '';        // 현재 열린 요약의 번역 제목(외국어 제
 let _summaryItemId = 0;   // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
 let _summaryRead = false;
 
-/* 영상 링크 두 개. 세 가지 경우가 있다.
-   - 보통 영상: 'YouTube에서 보기' 하나.
-   - 원본으로 갈아타 전사한 항목(sourceUrl): 주 링크는 원본, 둘째 칩은 수집본 '번역본'.
-   - 옛 방식(originalUrl, 번역본을 전사): 주 링크가 '번역본', 둘째 칩이 '원본'. */
-function _setSummaryVideoLinks(url, originalUrl = '', originalTitle = '', sourceUrl = '', sourceTitle = '') {
+function _setSummaryVideoLinks(url, originalUrl = '', originalTitle = '') {
   const link = document.getElementById('sum-youtube-link');
-  const second = document.getElementById('sum-original-link');
-  if (!link || !second) return;
+  const original = document.getElementById('sum-original-link');
+  if (!link || !original) return;
   const href = String(url || '').trim();
   const originalHref = String(originalUrl || '').trim();
-  const sourceHref = String(sourceUrl || '').trim();
   link.hidden = !href;
   link.href = href || '#';
   const label = link.querySelector('.sum-youtube-label');
-  const secondLabel = second.querySelector('span:last-child');
-  if (sourceHref) {
-    if (label) label.textContent = 'YouTube에서 보기';
-    link.title = '원본 영상 보기(이 요약은 원본을 전사한 것)';
-    second.hidden = false;
-    second.href = sourceHref;
-    if (secondLabel) secondLabel.textContent = '번역본';
-    second.title = sourceTitle ? `번역·재게시 영상: ${sourceTitle}` : '번역·재게시 영상 보기';
-    return;
-  }
   if (label) label.textContent = originalHref ? '번역본' : 'YouTube에서 보기';
   link.title = originalHref ? '번역·재게시 영상 보기' : 'YouTube에서 보기';
-  second.hidden = !originalHref;
-  second.href = originalHref || '#';
-  if (secondLabel) secondLabel.textContent = '원본';
-  second.title = originalTitle ? `원본 영상: ${originalTitle}` : '원본 영상 보기';
+  original.hidden = !originalHref;
+  original.href = originalHref || '#';
+  original.title = originalTitle ? `원본 영상: ${originalTitle}` : '원본 영상 보기';
 }
 
 let _distill = null;      // 현재 영상의 증류 상태 {override, channel, effective}
@@ -2635,8 +2619,6 @@ async function openSummaryModal(itemId, title) {
       data.webpage_url,
       data.original_video_url,
       data.original_video_title,
-      data.source_video_url,
-      data.source_video_title,
     );
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기

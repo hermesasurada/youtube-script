@@ -220,100 +220,11 @@ def test_excluded_term_mark_regex_allows_a_closing_paren():
     assert "createTreeWalker" in common[common.index("function _stripExcludedMarks"):][:1800]
 
 
-def test_translated_video_is_swapped_to_its_original_before_download(monkeypatch):
-    """비즈카페처럼 번역·재게시한 영상은 원본을 찾으면 원본을 전사하고 수집본 링크를 남긴다."""
-    import queue as _queue
-    job_id = "swap-test"
-    app.jobs[job_id] = {"meta": {}, "queue": _queue.Queue()}
-    collected = {"id": "REPOST00001", "title": "Doug Leone 전체번역", "uploader": "BZCF | 비즈까페",
-                 "duration": 3925, "webpage_url": "https://www.youtube.com/watch?v=REPOST00001",
-                 "description": "원본 영상: https://youtu.be/NR9NI51D7ek", "language": "ko"}
-    original = {"id": "NR9NI51D7ek", "title": "How to Dominate for Decades | Doug Leone",
-                "uploader": "David Senra", "duration": 4938,
-                "webpage_url": "https://www.youtube.com/watch?v=NR9NI51D7ek", "language": "en"}
-    fetched = []
-    monkeypatch.setattr(app, "_fetch_video_info", lambda u: fetched.append(u) or original)
-    try:
-        q = app.jobs[job_id]["queue"]
-        url, info, start_sec, source = app._maybe_swap_to_original(
-            job_id, q, "https://www.youtube.com/watch?v=REPOST00001&t=120", collected, 120)
-        assert url == "https://www.youtube.com/watch?v=NR9NI51D7ek"
-        assert info is original and start_sec == 0              # 구간 지정은 원본에 적용하지 않는다
-        assert source["id"] == "REPOST00001" and source["start_sec"] == 120
-        assert source["url"] == "https://www.youtube.com/watch?v=REPOST00001"
-        assert fetched == ["https://www.youtube.com/watch?v=NR9NI51D7ek"]
-
-        title, uploader, total, clip = app._apply_video_info(job_id, info, start_sec)
-        app._attach_source_video(job_id, source)
-        meta = app.jobs[job_id]["meta"]
-        assert (title, uploader, total) == (original["title"], "David Senra", 4938.0)
-        assert meta["id"] == "NR9NI51D7ek" and meta["source_video_id"] == "REPOST00001"
-        assert meta["source_video_url"] == "https://www.youtube.com/watch?v=REPOST00001"
-        assert meta["source_video_uploader"] == "BZCF | 비즈까페"
-        assert app.jobs[job_id]["declared_language"] == "en"
-        msgs = []
-        while not q.empty():
-            msgs.append(q.get_nowait())
-        assert any(isinstance(m, str) and m.startswith("원본 영상으로 전사") for m in msgs)
-
-        # 원본 메타 조회가 실패하면 갈아타지 않고 그대로 간다(종전 동작)
-        def boom(u):
-            raise RuntimeError("Private video")
-        monkeypatch.setattr(app, "_fetch_video_info", boom)
-        url2, info2, start2, source2 = app._maybe_swap_to_original(job_id, q, "u", collected, 120)
-        assert (url2, info2, start2, source2) == ("u", collected, 120, None)
-
-        # 번역 영상이 아니면 아무 조회도 하지 않는다
-        plain = {"id": "PLAIN000001", "title": "국내 기업 인터뷰", "uploader": "채널", "description": "설명"}
-        assert app._maybe_swap_to_original(job_id, q, "p", plain, 0) == ("p", plain, 0, None)
-
-        # 확신이 낮은 검색 후보는 갈아타지 않는다(링크만) — 사후 탐색이 종전처럼 처리
-        monkeypatch.setattr(app, "_resolve_original_video",
-                            lambda m, d: {"id": "WEAK0000001", "url": "https://www.youtube.com/watch?v=WEAK0000001",
-                                          "method": "search", "confident": False, "score": 6.7})
-        assert app._maybe_swap_to_original(job_id, q, "w", collected, 0) == ("w", collected, 0, None)
-    finally:
-        app.jobs.pop(job_id, None)
-
-
-def test_swapped_item_is_found_by_its_collected_video_id(tmp_path, monkeypatch):
-    """원본으로 전사한 항목은 yt_id가 원본이지만, 수집본 id로도 이력·중복이 잡혀야 한다."""
-    monkeypatch.setenv("INDEX_DB", str(tmp_path / "s.db"))
-    monkeypatch.setattr(db, "RES_DIR", str(tmp_path))
-    monkeypatch.setattr(db, "SUMMARY_DIR", str(tmp_path / "summary"))
-    import importlib
-    fresh = importlib.reload(db)
-    monkeypatch.setattr(fresh, "RES_DIR", str(tmp_path))
-    monkeypatch.setattr(fresh, "SUMMARY_DIR", str(tmp_path / "summary"))
-    fresh.init()
-    try:
-        d = tmp_path / "20260915"; d.mkdir()
-        md = d / "202609150100_1m00s_orig.md"
-        md.write_text("---\ntitle: Original Talk\nuploader: David Senra\nduration: 60\n"
-                      "id: NR9NI51D7ek\nwebpage_url: https://www.youtube.com/watch?v=NR9NI51D7ek\n"
-                      "source_video_url: https://www.youtube.com/watch?v=REPOST00001\n"
-                      "source_video_title: 전체번역\nsource_video_uploader: BZCF | 비즈까페\n"
-                      "source_video_id: REPOST00001\n---\n\n본문", encoding="utf-8")
-        assert fresh.upsert(str(md))
-        row = fresh._conn().execute("SELECT yt_id, source_yt_id FROM items").fetchone()
-        assert (row["yt_id"], row["source_yt_id"]) == ("NR9NI51D7ek", "REPOST00001")
-        assert fresh.get_item_by_yt_id("REPOST00001")["title"] == "Original Talk"
-        assert fresh.find_by_yt_id("REPOST00001")["title"] == "Original Talk"
-        assert fresh.get_item_by_yt_id("NR9NI51D7ek")["title"] == "Original Talk"
-        assert fresh.has_summary_for_yt_id("REPOST00001") is False   # 요약은 아직 없음
-        # source_video_id 없이 URL만 있어도 id를 뽑는다
-        assert fresh._source_yt_id({"source_video_url": "https://youtu.be/ABCDEFGHIJK"}) == "ABCDEFGHIJK"
-    finally:
-        monkeypatch.delenv("INDEX_DB", raising=False)
-        importlib.reload(db)
-
-
 def test_keyframes_capture_the_transcribed_video_not_the_queue_url(tmp_path):
-    """원본으로 갈아탄 항목은 큐 url(수집본)이 아니라 md의 webpage_url(원본)에서 캡처한다."""
+    """캡처는 큐가 넘긴 url이 아니라 md의 webpage_url(실제 전사한 영상)에서 뜬다."""
     md = tmp_path / "v.md"
     md.write_text("---\ntitle: T\nwebpage_url: https://www.youtube.com/watch?v=NR9NI51D7ek\n"
-                  "source_video_url: https://www.youtube.com/watch?v=REPOST00001\n---\n\n본문",
-                  encoding="utf-8")
+                  "---\n\n본문", encoding="utf-8")
     assert app._keyframe_source_url(str(md), "https://www.youtube.com/watch?v=REPOST00001") \
         == "https://www.youtube.com/watch?v=NR9NI51D7ek"
     plain = tmp_path / "f.md"
@@ -343,15 +254,6 @@ def test_collapse_detector_counts_time_not_only_segment_count(tmp_path):
     j3 = tmp_path / "chat.json"
     j3.write_text(__import__("json").dumps({"transcription": chatter}), encoding="utf-8")
     assert app._looks_collapsed(str(j3)) == (False, "")
-
-
-def test_source_video_link_is_wired_on_both_surfaces():
-    root = os.path.dirname(app.__file__)
-    js = open(os.path.join(root, "static/js/index.js"), encoding="utf-8").read()
-    mobile = open(os.path.join(root, "templates/mobile.html"), encoding="utf-8").read()
-    for src in (js, mobile):
-        assert "source_video_url" in src and "번역본" in src
-    assert "source_video_url" in app._MD_META_ORDER and "source_video_id" in app._MD_META_ORDER
 
 
 def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkeypatch):
@@ -803,7 +705,6 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     assert summary_payload["original_video_url"] == "https://www.youtube.com/watch?v=ORIGINAL01"
     assert summary_payload["original_video_title"] == "Original Interview"
     assert summary_payload["original_video_uploader"] == "Source Channel"
-    assert summary_payload["source_video_url"] == ""      # 옛 방식(번역본 전사)엔 수집본 링크 없음
 
     marked = client.patch(
         "/history/mark_read", json={"item_id": item["item_id"], "is_read": True}

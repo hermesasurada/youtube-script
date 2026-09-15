@@ -220,7 +220,6 @@ _MD_META_ORDER = [
     "title", "uploader", "channel", "channel_url",
     "duration", "clip_start", "upload_date", "webpage_url", "id",
     "original_video_url", "original_video_title", "original_video_uploader",
-    "source_video_url", "source_video_title", "source_video_uploader", "source_video_id",
     "categories", "tags", "source_file",
 ]
 
@@ -993,9 +992,8 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                 return
         if transcript is not None:
             meta = jobs[job_id].get("meta", {})
-            # 원본으로 갈아타 전사한 경우(source_video_url) 이 항목이 곧 원본이라 탐색하지 않는다.
             try:
-                original = {} if meta.get("source_video_url") else _resolve_original_video(
+                original = _resolve_original_video(
                     meta,
                     jobs[job_id].get("source_description") or "",
                 )
@@ -1178,73 +1176,6 @@ def _apply_video_info(job_id: str, info: dict, start_sec: int) -> tuple[str, str
     return title, uploader, total, clip
 
 
-def _maybe_swap_to_original(job_id: str, q: "queue.Queue", url: str, info: dict,
-                            start_sec: int) -> tuple[str, dict, int, dict | None]:
-    """번역·재게시 영상(비즈카페 등)이면 원본을 찾아 그쪽으로 갈아탄다.
-
-    반환 (url, info, start_sec, source). source가 None이면 그대로 진행. 갈아탔으면 source에
-    수집본(원래 받은 영상)의 url·title·uploader·id·info·start_sec을 담아 돌려준다 — 프론트매터의
-    `source_video_*`로 남기고, 원본 다운로드가 막히면 되돌리는 데 쓴다.
-
-    2026-09-15 사용자 지시: 원본을 찾았으면 수집본이 아니라 원본을 전사하고 수집본 링크를
-    단다. 원본 메타 조회가 실패하면(비공개·삭제·지역 차단) 종전처럼 수집본을 전사하고
-    원본 링크만 기록한다(_finish_transcription의 사후 탐색이 그대로 처리).
-    구간 지정(start_sec)은 수집본 기준이라 원본에는 적용하지 않는다.
-    """
-    meta = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
-    description = _nfc(info.get("description") or "")
-    try:
-        original = _resolve_original_video(meta, description)
-    except Exception as exc:
-        log.info("original-video lookup skipped: %s", exc)
-        return url, info, start_sec, None
-    if not original.get("url"):
-        return url, info, start_sec, None
-    if not original.get("confident"):
-        # 검색 기반 추정이 약하면 갈아타지 않는다 — 종전처럼 수집본을 전사하고 사후 탐색이
-        # 원본 링크만 단다. 엉뚱한 영상을 전사하는 것보다 링크 하나 틀리는 쪽이 싸다.
-        log.info("original candidate not confident (%s score=%s overlap=%s ratio=%s) — 링크만: %s",
-                 original.get("method"), original.get("score"), original.get("overlap"),
-                 original.get("duration_ratio"), original.get("id") or original["url"])
-        q.put("원본 후보의 확신이 낮아 이 영상을 그대로 전사합니다(원본은 링크만)")
-        return url, info, start_sec, None
-    try:
-        original_info = _fetch_video_info(original["url"])
-    except Exception as exc:
-        log.info("original video unavailable, keep collected: %s — %s", original["url"], exc)
-        q.put("원본 영상을 열 수 없어 이 영상을 그대로 전사합니다")
-        return url, info, start_sec, None
-    source = {
-        "url": original_video.canonical_url(str(meta.get("id") or meta.get("webpage_url") or "")) or url,
-        "title": str(meta.get("title") or ""),
-        "uploader": str(meta.get("uploader") or meta.get("channel") or ""),
-        "id": str(meta.get("id") or ""),
-        "info": info,
-        "start_sec": start_sec,
-    }
-    log.info("original video resolved (%s): %s -> %s — 원본으로 전사",
-             original.get("method") or "unknown", source["id"] or "?",
-             original.get("id") or original["url"])
-    q.put(f"원본 영상으로 전사: {_nfc(original_info.get('title') or original['url'])}")
-    if start_sec:
-        q.put(f"시작 시각({_format_duration(start_sec)})은 번역본 기준이라 원본에는 적용하지 않습니다")
-    return original["url"], original_info, 0, source
-
-
-def _attach_source_video(job_id: str, source: dict | None) -> None:
-    """갈아탄 뒤 프론트매터에 수집본(번역·재게시 영상) 정보를 남긴다."""
-    if not source:
-        return
-    meta = jobs[job_id]["meta"]
-    meta["source_video_url"] = source["url"]
-    if source.get("title"):
-        meta["source_video_title"] = source["title"]
-    if source.get("uploader"):
-        meta["source_video_uploader"] = source["uploader"]
-    if source.get("id"):
-        meta["source_video_id"] = source["id"]
-
-
 def run_job(job_id: str, params: dict) -> None:
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
@@ -1266,11 +1197,10 @@ def run_job(job_id: str, params: dict) -> None:
         q.put(None)
         return
 
-    # 번역·재게시 영상(비즈카페 등)이면 원본을 찾아 원본으로 전사한다. 수집본 정보는
-    # source로 받아 프론트매터에 남기고, 원본 다운로드가 막히면 되돌리는 데 쓴다.
-    url, info, start_sec, source = _maybe_swap_to_original(job_id, q, url, info, start_sec)
+    # 번역·재게시 영상(비즈카페 등)도 그 영상을 그대로 전사한다. 원본은 전사 뒤
+    # _finish_transcription이 찾아 링크만 남긴다(2026-09-15 원본으로 갈아타는 방식을
+    # 시도했으나 검색 후보가 불안정해 사용자 지시로 원복).
     title, uploader, total, clip = _apply_video_info(job_id, info, start_sec)
-    _attach_source_video(job_id, source)
 
     if start_sec and total and start_sec >= total - 5:
         detail = _set_job_error(
@@ -1374,17 +1304,6 @@ def run_job(job_id: str, params: dict) -> None:
         return None
 
     dl_err = _download_once(url, title, total, audio_path)
-    if dl_err and source and not stop.is_set():
-        # 원본을 못 받으면 수집본(번역본)으로 되돌려 종전처럼 전사한다. 원본 링크는
-        # 사후 탐색(_finish_transcription)이 다시 찾아 기록한다.
-        log.warning("원본 다운로드 실패 → 수집본으로 전사: %s (%s)", title, dl_err)
-        q.put(f"원본 다운로드 실패({dl_err[:80]}) — 번역본으로 전사합니다")
-        url, info, start_sec = source["url"], source["info"], source["start_sec"]
-        source = None
-        title, uploader, total, clip = _apply_video_info(job_id, info, start_sec)
-        _announce(title, total, clip, start_sec)
-        audio_path, stem_final = _plan_paths(title, clip, start_sec)
-        dl_err = _download_once(url, title, total, audio_path)
     if dl_err:
         if stop.is_set():
             jobs[job_id]["status"] = "cancelled"
@@ -3157,24 +3076,6 @@ def _parse_summary_title(md_path: str) -> str:
     return os.path.basename(md_path)[:-3]
 
 
-def _source_video_for_item(item: dict | None) -> dict[str, str]:
-    """원본으로 갈아타 전사한 항목의 수집본(번역·재게시 영상) 링크 — 뷰어의 '번역본' 칩."""
-    if not item or not item.get("md_path"):
-        return {}
-    try:
-        meta, _body = _parse_md(item["md_path"])
-    except Exception:
-        return {}
-    url = str(meta.get("source_video_url") or "").strip()
-    if not original_video.youtube_id(url):
-        return {}
-    return {
-        "url": original_video.canonical_url(url),
-        "title": str(meta.get("source_video_title") or "").strip(),
-        "uploader": str(meta.get("source_video_uploader") or "").strip(),
-    }
-
-
 def _original_video_for_item(item: dict | None) -> dict[str, str]:
     """Read original-video metadata from the transcript, the durable source of truth."""
     path = (item or {}).get("md_path") or ""
@@ -3214,11 +3115,7 @@ def summary_content():
             content = f.read()
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         original = _original_video_for_item(item)
-        source = _source_video_for_item(item)
         return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
-                      "source_video_url": source.get("url") or "",
-                      "source_video_title": source.get("title") or "",
-                      "source_video_uploader": source.get("uploader") or "",
                       "blog": _blog_state(item),
                       "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),
