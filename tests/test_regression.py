@@ -266,6 +266,12 @@ def test_translated_video_is_swapped_to_its_original_before_download(monkeypatch
         # 번역 영상이 아니면 아무 조회도 하지 않는다
         plain = {"id": "PLAIN000001", "title": "국내 기업 인터뷰", "uploader": "채널", "description": "설명"}
         assert app._maybe_swap_to_original(job_id, q, "p", plain, 0) == ("p", plain, 0, None)
+
+        # 확신이 낮은 검색 후보는 갈아타지 않는다(링크만) — 사후 탐색이 종전처럼 처리
+        monkeypatch.setattr(app, "_resolve_original_video",
+                            lambda m, d: {"id": "WEAK0000001", "url": "https://www.youtube.com/watch?v=WEAK0000001",
+                                          "method": "search", "confident": False, "score": 6.7})
+        assert app._maybe_swap_to_original(job_id, q, "w", collected, 0) == ("w", collected, 0, None)
     finally:
         app.jobs.pop(job_id, None)
 

@@ -1181,6 +1181,14 @@ def _maybe_swap_to_original(job_id: str, q: "queue.Queue", url: str, info: dict,
         return url, info, start_sec, None
     if not original.get("url"):
         return url, info, start_sec, None
+    if not original.get("confident"):
+        # 검색 기반 추정이 약하면 갈아타지 않는다 — 종전처럼 수집본을 전사하고 사후 탐색이
+        # 원본 링크만 단다. 엉뚱한 영상을 전사하는 것보다 링크 하나 틀리는 쪽이 싸다.
+        log.info("original candidate not confident (%s score=%s overlap=%s ratio=%s) — 링크만: %s",
+                 original.get("method"), original.get("score"), original.get("overlap"),
+                 original.get("duration_ratio"), original.get("id") or original["url"])
+        q.put("원본 후보의 확신이 낮아 이 영상을 그대로 전사합니다(원본은 링크만)")
+        return url, info, start_sec, None
     try:
         original_info = _fetch_video_info(original["url"])
     except Exception as exc:

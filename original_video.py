@@ -73,7 +73,8 @@ def explicit_original(description: str, current_video_id: str = "") -> dict[str,
     if not pool:
         return None
     vid, url = pool[0]
-    return {"id": vid, "url": url, "title": "", "uploader": "", "method": "explicit"}
+    return {"id": vid, "url": url, "title": "", "uploader": "", "method": "explicit",
+            "confident": True}
 
 
 def _tokens(value: str) -> set[str]:
@@ -97,7 +98,7 @@ def select_candidate(
         return None
     current_id = youtube_id(current_video_id)
     current_channel = (current_uploader or "").strip().casefold()
-    ranked: list[tuple[float, int, dict]] = []
+    ranked: list[tuple[float, int, dict, int, float]] = []
     for rank, candidate in enumerate(candidates or []):
         vid = youtube_id(str(candidate.get("id") or candidate.get("url") or ""))
         if not vid or vid == current_id:
@@ -111,6 +112,7 @@ def select_candidate(
             continue
         score = min(overlap, 5) * 1.6 + max(0.0, 2.0 - rank * 0.25)
         duration = float(candidate.get("duration") or 0)
+        ratio = 0.0
         if current_duration > 0 and duration > 0:
             ratio = duration / current_duration
             if 0.9 <= ratio <= 4.0:
@@ -121,10 +123,11 @@ def select_candidate(
                 score -= 2.0
         if uploader:
             score += 0.5
-        ranked.append((score, rank, candidate | {"id": vid, "title": title, "uploader": uploader}))
+        ranked.append((score, rank, candidate | {"id": vid, "title": title, "uploader": uploader},
+                       overlap, ratio))
     if not ranked:
         return None
-    score, _, best = max(ranked, key=lambda row: (row[0], -row[1]))
+    score, _, best, overlap, ratio = max(ranked, key=lambda row: (row[0], -row[1]))
     if score < 6.0:
         return None
     return {
@@ -133,4 +136,12 @@ def select_candidate(
         "title": best["title"],
         "uploader": best["uploader"],
         "method": "search",
+        "score": round(score, 2),
+        "overlap": overlap,
+        "duration_ratio": round(ratio, 2),
+        # 갈아타기(원본을 전사)는 링크 달기보다 훨씬 비싼 실수라 더 높은 확신을 요구한다:
+        # 제목 토큰 3개 이상 겹치고, 원본이 번역본보다 짧지 않으며(0.9배 이상), 총점 9 이상.
+        # (2026-09-15: '하버드 교수' 12분 번역본에 9분짜리 다른 하버드 영상이 6.7점으로 붙었다)
+        "confident": bool(overlap >= 3 and 0.9 <= ratio <= 4.0 and score >= 9.0
+                          and not re.search(r"[가-힣]", title)),
     }
