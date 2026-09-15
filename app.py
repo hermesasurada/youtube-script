@@ -220,6 +220,7 @@ _MD_META_ORDER = [
     "title", "uploader", "channel", "channel_url",
     "duration", "clip_start", "upload_date", "webpage_url", "id",
     "original_video_url", "original_video_title", "original_video_uploader",
+    "source_video_url", "source_video_title", "source_video_uploader", "source_video_id",
     "categories", "tags", "source_file",
 ]
 
@@ -973,8 +974,9 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                 return
         if transcript is not None:
             meta = jobs[job_id].get("meta", {})
+            # 원본으로 갈아타 전사한 경우(source_video_url) 이 항목이 곧 원본이라 탐색하지 않는다.
             try:
-                original = _resolve_original_video(
+                original = {} if meta.get("source_video_url") else _resolve_original_video(
                     meta,
                     jobs[job_id].get("source_description") or "",
                 )
@@ -1127,6 +1129,95 @@ def _job_guard(fn, job_id: str, *a) -> None:
             pass
 
 
+def _fetch_video_info(url: str) -> dict:
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        return ydl.extract_info(url, download=False)
+
+
+def _apply_video_info(job_id: str, info: dict, start_sec: int) -> tuple[str, str, float, float]:
+    """yt-dlp 메타를 잡 상태에 싣고 (title, uploader, total, clip)을 돌려준다.
+
+    run_job이 처음 받은 영상과, 원본으로 갈아탄 뒤의 영상 양쪽에 같은 방식으로 쓴다."""
+    title    = _nfc(info.get("title", "audio"))
+    uploader = _nfc(info.get("uploader") or info.get("channel") or "—")
+    total    = float(info.get("duration") or 0)
+    clip = max(0.0, total - start_sec) if (start_sec and total) else total
+    jobs[job_id]["total_duration"] = clip
+    jobs[job_id]["start_offset"]   = start_sec
+    jobs[job_id]["clip_duration"]  = clip
+    jobs[job_id]["meta"] = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
+    # 설명문은 원본 링크 탐색에만 쓰며 전사 md에는 통째로 저장하지 않는다.
+    jobs[job_id]["source_description"] = _nfc(info.get("description") or "")
+    # 제작자가 선언한 언어(yt-dlp `language`, 예: ko / en-US). whisper 표본 감지가 음악
+    # 인트로에 걸려 빗나갈 때 이걸 우선한다 — _choose_language 참조.
+    jobs[job_id]["declared_language"] = _norm_lang(info.get("language"))
+    if start_sec:
+        # md 프론트매터에는 구간 정보를 남기고 duration은 실제 전사 길이로 맞춘다.
+        jobs[job_id]["meta"]["clip_start"] = start_sec
+        if clip:
+            jobs[job_id]["meta"]["duration"] = clip
+    return title, uploader, total, clip
+
+
+def _maybe_swap_to_original(job_id: str, q: "queue.Queue", url: str, info: dict,
+                            start_sec: int) -> tuple[str, dict, int, dict | None]:
+    """번역·재게시 영상(비즈카페 등)이면 원본을 찾아 그쪽으로 갈아탄다.
+
+    반환 (url, info, start_sec, source). source가 None이면 그대로 진행. 갈아탔으면 source에
+    수집본(원래 받은 영상)의 url·title·uploader·id·info·start_sec을 담아 돌려준다 — 프론트매터의
+    `source_video_*`로 남기고, 원본 다운로드가 막히면 되돌리는 데 쓴다.
+
+    2026-09-15 사용자 지시: 원본을 찾았으면 수집본이 아니라 원본을 전사하고 수집본 링크를
+    단다. 원본 메타 조회가 실패하면(비공개·삭제·지역 차단) 종전처럼 수집본을 전사하고
+    원본 링크만 기록한다(_finish_transcription의 사후 탐색이 그대로 처리).
+    구간 지정(start_sec)은 수집본 기준이라 원본에는 적용하지 않는다.
+    """
+    meta = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
+    description = _nfc(info.get("description") or "")
+    try:
+        original = _resolve_original_video(meta, description)
+    except Exception as exc:
+        log.info("original-video lookup skipped: %s", exc)
+        return url, info, start_sec, None
+    if not original.get("url"):
+        return url, info, start_sec, None
+    try:
+        original_info = _fetch_video_info(original["url"])
+    except Exception as exc:
+        log.info("original video unavailable, keep collected: %s — %s", original["url"], exc)
+        q.put("원본 영상을 열 수 없어 이 영상을 그대로 전사합니다")
+        return url, info, start_sec, None
+    source = {
+        "url": original_video.canonical_url(str(meta.get("id") or meta.get("webpage_url") or "")) or url,
+        "title": str(meta.get("title") or ""),
+        "uploader": str(meta.get("uploader") or meta.get("channel") or ""),
+        "id": str(meta.get("id") or ""),
+        "info": info,
+        "start_sec": start_sec,
+    }
+    log.info("original video resolved (%s): %s -> %s — 원본으로 전사",
+             original.get("method") or "unknown", source["id"] or "?",
+             original.get("id") or original["url"])
+    q.put(f"원본 영상으로 전사: {_nfc(original_info.get('title') or original['url'])}")
+    if start_sec:
+        q.put(f"시작 시각({_format_duration(start_sec)})은 번역본 기준이라 원본에는 적용하지 않습니다")
+    return original["url"], original_info, 0, source
+
+
+def _attach_source_video(job_id: str, source: dict | None) -> None:
+    """갈아탄 뒤 프론트매터에 수집본(번역·재게시 영상) 정보를 남긴다."""
+    if not source:
+        return
+    meta = jobs[job_id]["meta"]
+    meta["source_video_url"] = source["url"]
+    if source.get("title"):
+        meta["source_video_title"] = source["title"]
+    if source.get("uploader"):
+        meta["source_video_uploader"] = source["uploader"]
+    if source.get("id"):
+        meta["source_video_id"] = source["id"]
+
+
 def run_job(job_id: str, params: dict) -> None:
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
@@ -1140,17 +1231,19 @@ def run_job(job_id: str, params: dict) -> None:
 
     q.put("영상 정보 가져오는 중...")
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-        title    = _nfc(info.get("title", "audio"))
-        uploader = _nfc(info.get("uploader") or info.get("channel") or "—")
-        total    = float(info.get("duration") or 0)
+        info = _fetch_video_info(url)
     except Exception as e:
         log.warning("video info fetch failed: %s — %s", url, e)
         detail = _set_job_error(job_id, "metadata", f"영상 정보 조회 실패: {e}")
         q.put(f"오류: {detail}")
         q.put(None)
         return
+
+    # 번역·재게시 영상(비즈카페 등)이면 원본을 찾아 원본으로 전사한다. 수집본 정보는
+    # source로 받아 프론트매터에 남기고, 원본 다운로드가 막히면 되돌리는 데 쓴다.
+    url, info, start_sec, source = _maybe_swap_to_original(job_id, q, url, info, start_sec)
+    title, uploader, total, clip = _apply_video_info(job_id, info, start_sec)
+    _attach_source_video(job_id, source)
 
     if start_sec and total and start_sec >= total - 5:
         detail = _set_job_error(
@@ -1161,41 +1254,29 @@ def run_job(job_id: str, params: dict) -> None:
         q.put(None)
         return
 
-    # 구간 전사에서는 진행률·길이 검증·비어있음 판정 모두 '잘라낸 뒤 길이' 기준이어야 한다.
-    clip = max(0.0, total - start_sec) if (start_sec and total) else total
-    jobs[job_id]["total_duration"] = clip
-    jobs[job_id]["start_offset"]   = start_sec
-    jobs[job_id]["clip_duration"]  = clip
-    jobs[job_id]["meta"] = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
-    # 설명문은 원본 링크 탐색에만 쓰며 전사 md에는 통째로 저장하지 않는다.
-    jobs[job_id]["source_description"] = _nfc(info.get("description") or "")
-    # 제작자가 선언한 언어(yt-dlp `language`, 예: ko / en-US). whisper 표본 감지가 음악
-    # 인트로에 걸려 빗나갈 때 이걸 우선한다 — 아래 _choose_language 참조.
-    jobs[job_id]["declared_language"] = _norm_lang(info.get("language"))
-    if start_sec:
-        # md 프론트매터에는 구간 정보를 남기고 duration은 실제 전사 길이로 맞춘다.
-        jobs[job_id]["meta"]["clip_start"] = start_sec
-        if clip:
-            jobs[job_id]["meta"]["duration"] = clip
-    if total > 0:
-        if start_sec:
-            q.put(f"영상 길이: {_format_duration(total)} — "
-                  f"{_format_duration(start_sec)}부터 전사({_format_duration(clip)})")
-        else:
-            q.put(f"영상 길이: {_format_duration(total)}")
-        q.put({"type": "duration", "seconds": clip})
-    q.put({"type": "videoinfo", "title": title, "uploader": uploader})
+    def _announce(title_: str, total_: float, clip_: float, start_: int) -> None:
+        if total_ > 0:
+            if start_:
+                q.put(f"영상 길이: {_format_duration(total_)} — "
+                      f"{_format_duration(start_)}부터 전사({_format_duration(clip_)})")
+            else:
+                q.put(f"영상 길이: {_format_duration(total_)}")
+            q.put({"type": "duration", "seconds": clip_})
+        q.put({"type": "videoinfo", "title": title_, "uploader": uploader})
 
-    out_dir    = _dated_dir()
-    ts         = datetime.now().strftime("%Y%m%d%H%M")
-    stem       = f"{ts}_{_dur_tag(clip)}_{_safe_stem(title)}"
-    if start_sec:
-        stem += f"_from{int(start_sec)}s"
-    audio_path = unique_path(out_dir, stem, ".mp3")
-    stem_final = os.path.splitext(os.path.basename(audio_path))[0]
+    _announce(title, total, clip, start_sec)
 
-    _stage(q, "download")
-    q.put(f"다운로드 중: {title}")
+    out_dir = _dated_dir()
+
+    def _plan_paths(title_: str, clip_: float, start_: int) -> tuple[str, str]:
+        ts   = datetime.now().strftime("%Y%m%d%H%M")
+        stem = f"{ts}_{_dur_tag(clip_)}_{_safe_stem(title_)}"
+        if start_:
+            stem += f"_from{int(start_)}s"
+        path = unique_path(out_dir, stem, ".mp3")
+        return path, os.path.splitext(os.path.basename(path))[0]
+
+    audio_path, stem_final = _plan_paths(title, clip, start_sec)
 
     def _progress_hook(d):
         if stop.is_set():
@@ -1205,69 +1286,85 @@ def run_job(job_id: str, params: dict) -> None:
         elif d["status"] == "finished":
             q.put("다운로드 완료")
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.splitext(audio_path)[0],
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
-        "ffmpeg_location": FFMPEG_LOCATION,
-        "quiet": True,
-        "progress_hooks": [_progress_hook],
-        "socket_timeout": 60,
-        "retries": 10,
-        "fragment_retries": 10,
-        "concurrent_fragment_downloads": 1,
-    }
-    try:
-        # 403 재시도: 1차 즉시(다른 실험 버킷 기대) → 2차 75초 뒤(새 세션·새 토큰) →
-        # 3차는 대체 클라이언트(tv_simply·web_embedded)로 전환. IP 단위 차단으로
-        # 웹 계열이 전부 막혀도 이 둘은 통과하는 것이 실측으로 확인됐다(2026-08-18).
-        _dl_retry_wait = {1: 0, 2: 75}
-        for dl_attempt in (1, 2, 3):
-            try:
-                opts = dict(ydl_opts)
-                if dl_attempt == 3:
-                    opts["extractor_args"] = {
-                        "youtube": {"player_client": ["tv_simply", "web_embedded"]}}
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([url])
-                # 스트림을 중간에 끊는 차단 변형은 yt-dlp가 예외 없이 끝난다
-                # (실례: 68분 영상이 6회 연속 5~7분에서 잘림). 길이가 크게 모자라면
-                # 잘린 파일을 지우고 403과 동일하게 다음 단계로 넘긴다.
-                if total > 0 and os.path.exists(audio_path):
-                    actual = get_file_duration(audio_path)
-                    if actual > 0 and actual < total * MIN_AUDIO_RATIO:
-                        os.remove(audio_path)
-                        raise Exception(
-                            f"HTTP Error 403(스트림 잘림): {actual:.0f}/{total:.0f}s")
-                break
-            except Exception as e:
-                wait = _dl_retry_wait.get(dl_attempt)
-                if wait is None or "403" not in str(e) or stop.is_set():
-                    raise
-                nxt = "대체 클라이언트" if dl_attempt == 2 else "새 세션"
-                log.info("download 403 — %s 후 %s으로 재시도(%d/2): %s (%s)",
-                         f"{wait}초" if wait else "즉시", nxt, dl_attempt, title, e)
-                q.put(f"403 차단 감지 — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도")
-                if wait:
-                    for _ in range(wait):
-                        if stop.is_set():
-                            raise
-                        time.sleep(1)
-    except Exception as e:
+    def _download_once(url_: str, title_: str, total_: float, audio_path_: str) -> str | None:
+        """오디오를 받는다. 성공하면 None, 실패하면 오류 문자열. 취소는 예외 대신 문자열."""
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": os.path.splitext(audio_path_)[0],
+            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+            "ffmpeg_location": FFMPEG_LOCATION,
+            "quiet": True,
+            "progress_hooks": [_progress_hook],
+            "socket_timeout": 60,
+            "retries": 10,
+            "fragment_retries": 10,
+            "concurrent_fragment_downloads": 1,
+        }
+        _stage(q, "download")
+        q.put(f"다운로드 중: {title_}")
+        try:
+            # 403 재시도: 1차 즉시(다른 실험 버킷 기대) → 2차 75초 뒤(새 세션·새 토큰) →
+            # 3차는 대체 클라이언트(tv_simply·web_embedded)로 전환. IP 단위 차단으로
+            # 웹 계열이 전부 막혀도 이 둘은 통과하는 것이 실측으로 확인됐다(2026-08-18).
+            _dl_retry_wait = {1: 0, 2: 75}
+            for dl_attempt in (1, 2, 3):
+                try:
+                    opts = dict(ydl_opts)
+                    if dl_attempt == 3:
+                        opts["extractor_args"] = {
+                            "youtube": {"player_client": ["tv_simply", "web_embedded"]}}
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        ydl.download([url_])
+                    # 스트림을 중간에 끊는 차단 변형은 yt-dlp가 예외 없이 끝난다
+                    # (실례: 68분 영상이 6회 연속 5~7분에서 잘림). 길이가 크게 모자라면
+                    # 잘린 파일을 지우고 403과 동일하게 다음 단계로 넘긴다.
+                    if total_ > 0 and os.path.exists(audio_path_):
+                        actual = get_file_duration(audio_path_)
+                        if actual > 0 and actual < total_ * MIN_AUDIO_RATIO:
+                            os.remove(audio_path_)
+                            raise Exception(
+                                f"HTTP Error 403(스트림 잘림): {actual:.0f}/{total_:.0f}s")
+                    break
+                except Exception as e:
+                    wait = _dl_retry_wait.get(dl_attempt)
+                    if wait is None or "403" not in str(e) or stop.is_set():
+                        raise
+                    nxt = "대체 클라이언트" if dl_attempt == 2 else "새 세션"
+                    log.info("download 403 — %s 후 %s으로 재시도(%d/2): %s (%s)",
+                             f"{wait}초" if wait else "즉시", nxt, dl_attempt, title_, e)
+                    q.put(f"403 차단 감지 — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도")
+                    if wait:
+                        for _ in range(wait):
+                            if stop.is_set():
+                                raise
+                            time.sleep(1)
+        except Exception as e:
+            return "사용자가 취소함" if stop.is_set() else str(e)
         if stop.is_set():
-            jobs[job_id]["status"] = "cancelled"
-        else:
-            log.warning("download failed: %s — %s", title, e)
-            detail = _set_job_error(job_id, "download", f"영상 다운로드 실패: {e}")
-            q.put(f"다운로드 오류: {detail}")
-        q.put(None)
-        return
+            return "사용자가 취소함"
+        if not os.path.exists(audio_path_):
+            return "다운로드 결과 오디오 파일을 찾을 수 없습니다."
+        return None
 
-    if stop.is_set() or not os.path.exists(audio_path):
+    dl_err = _download_once(url, title, total, audio_path)
+    if dl_err and source and not stop.is_set():
+        # 원본을 못 받으면 수집본(번역본)으로 되돌려 종전처럼 전사한다. 원본 링크는
+        # 사후 탐색(_finish_transcription)이 다시 찾아 기록한다.
+        log.warning("원본 다운로드 실패 → 수집본으로 전사: %s (%s)", title, dl_err)
+        q.put(f"원본 다운로드 실패({dl_err[:80]}) — 번역본으로 전사합니다")
+        url, info, start_sec = source["url"], source["info"], source["start_sec"]
+        source = None
+        title, uploader, total, clip = _apply_video_info(job_id, info, start_sec)
+        _announce(title, total, clip, start_sec)
+        audio_path, stem_final = _plan_paths(title, clip, start_sec)
+        dl_err = _download_once(url, title, total, audio_path)
+    if dl_err:
         if stop.is_set():
             jobs[job_id]["status"] = "cancelled"
         else:
-            _set_job_error(job_id, "download", "다운로드 결과 오디오 파일을 찾을 수 없습니다.")
+            log.warning("download failed: %s — %s", title, dl_err)
+            detail = _set_job_error(job_id, "download", f"영상 다운로드 실패: {dl_err}")
+            q.put(f"다운로드 오류: {detail}")
         q.put(None)
         return
 
@@ -3033,6 +3130,24 @@ def _parse_summary_title(md_path: str) -> str:
     return os.path.basename(md_path)[:-3]
 
 
+def _source_video_for_item(item: dict | None) -> dict[str, str]:
+    """원본으로 갈아타 전사한 항목의 수집본(번역·재게시 영상) 링크 — 뷰어의 '번역본' 칩."""
+    if not item or not item.get("md_path"):
+        return {}
+    try:
+        meta, _body = _parse_md(item["md_path"])
+    except Exception:
+        return {}
+    url = str(meta.get("source_video_url") or "").strip()
+    if not original_video.youtube_id(url):
+        return {}
+    return {
+        "url": original_video.canonical_url(url),
+        "title": str(meta.get("source_video_title") or "").strip(),
+        "uploader": str(meta.get("source_video_uploader") or "").strip(),
+    }
+
+
 def _original_video_for_item(item: dict | None) -> dict[str, str]:
     """Read original-video metadata from the transcript, the durable source of truth."""
     path = (item or {}).get("md_path") or ""
@@ -3072,7 +3187,11 @@ def summary_content():
             content = f.read()
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         original = _original_video_for_item(item)
+        source = _source_video_for_item(item)
         return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
+                      "source_video_url": source.get("url") or "",
+                      "source_video_title": source.get("title") or "",
+                      "source_video_uploader": source.get("uploader") or "",
                       "blog": _blog_state(item),
                       "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),
@@ -3452,6 +3571,24 @@ def serve_summary_frame(rel: str):
     return send_file(p)
 
 
+def _keyframe_source_url(md_path: str, requested: str) -> str:
+    """캡처에 쓸 영상 URL. 전사 md의 webpage_url이 있으면 그것이 진실이다.
+
+    번역·재게시 영상을 원본으로 갈아타 전사하면 큐가 넘겨주는 url은 여전히 수집본
+    (비즈카페)이라, 그대로 받으면 원본 타임스탬프에 수집본 화면이 붙는다. 로컬 파일
+    전사처럼 webpage_url이 없으면 요청값을 쓴다."""
+    try:
+        meta, _ = _parse_md(md_path)
+    except Exception:
+        return requested
+    actual = str(meta.get("webpage_url") or "").strip()
+    if actual and original_video.youtube_id(actual) and actual != requested:
+        if requested:
+            log.info("keyframes: url %s → md webpage_url %s", requested, actual)
+        return actual
+    return requested
+
+
 @app.route("/keyframes", methods=["POST"])
 def keyframes():
     """전사 md(txt_path) 기반으로 영상 키프레임을 추출·정렬해 요약에 합친다.
@@ -3485,7 +3622,8 @@ def keyframes():
             model_order = (llm_gateway.normalize_model_order(requested_order)
                            if requested_order is not None else None)
             res = keyframe_report.generate_keyframes(
-                summary_path, (data.get("url") or "").strip(), frames_dir, url_base,
+                summary_path, _keyframe_source_url(abs_path, (data.get("url") or "").strip()),
+                frames_dir, url_base,
                 skip_claude=skip_claude,
                 model_order=model_order,
             )

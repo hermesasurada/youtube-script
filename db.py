@@ -342,6 +342,14 @@ def init() -> None:
                 added_at TEXT NOT NULL
             )""")
             c.execute("PRAGMA user_version = 18")
+        if ver < 21:
+            # 원본으로 갈아타 전사한 항목의 '수집본'(비즈카페 등 번역·재게시 영상) id.
+            # yt_id는 원본이 되므로, 수집본 id로도 중복·이력을 찾을 수 있어야 한다.
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(items)")}
+            if "source_yt_id" not in cols:
+                c.execute("ALTER TABLE items ADD COLUMN source_yt_id TEXT")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_items_source_yt ON items(source_yt_id)")
+            c.execute("PRAGMA user_version = 21")
         if ver < 20:
             # 발행 당시의 블로그 본문 생성 방식(렌더 버전). 표시 형식을 바꾸면 이미 발행된
             # 글은 옛 형식이므로 '수정 필요'로 잡는 근거가 된다.
@@ -569,6 +577,18 @@ def _summary_path_for(md_path: str) -> str | None:
     return sp if os.path.isfile(sp) else None
 
 
+_YT_ID_IN_URL = re.compile(r"(?:v=|youtu\.be/|/shorts/|/live/)([\w-]{6,20})")
+
+
+def _source_yt_id(meta: dict) -> str:
+    """수집본(번역·재게시 영상) id — 프론트매터의 source_video_id, 없으면 source_video_url에서."""
+    sid = str(meta.get("source_video_id") or "").strip()
+    if sid:
+        return sid
+    m = _YT_ID_IN_URL.search(str(meta.get("source_video_url") or ""))
+    return m.group(1) if m else ""
+
+
 def upsert(md_path: str) -> bool:
     """전사 md 1건을 인덱싱. summary md가 있으면 함께. 파일 없으면 False."""
     md_path = os.path.realpath(md_path)
@@ -608,10 +628,10 @@ def upsert(md_path: str) -> bool:
             """
             INSERT INTO items (
                 md_path, summary_path, date, stem, title, uploader, channel, channel_url,
-                duration, upload_date, webpage_url, yt_id,
+                duration, upload_date, webpage_url, yt_id, source_yt_id,
                 categories_json, tags_json, source_file,
                 has_txt, transcript, summary, mtime_md, mtime_summary, indexed_at
-            ) VALUES (?,?,?,?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?,?,?,?)
             ON CONFLICT(md_path) DO UPDATE SET
                 summary_path=excluded.summary_path,
                 date=excluded.date, stem=excluded.stem,
@@ -619,6 +639,7 @@ def upsert(md_path: str) -> bool:
                 channel=excluded.channel, channel_url=excluded.channel_url,
                 duration=excluded.duration, upload_date=excluded.upload_date,
                 webpage_url=excluded.webpage_url, yt_id=excluded.yt_id,
+                source_yt_id=excluded.source_yt_id,
                 categories_json=excluded.categories_json,
                 tags_json=excluded.tags_json,
                 source_file=excluded.source_file,
@@ -643,6 +664,7 @@ def upsert(md_path: str) -> bool:
                 meta.get("upload_date") or "",
                 meta.get("webpage_url") or "",
                 meta.get("id") or "",
+                _source_yt_id(meta),
                 json.dumps(meta.get("categories") or [], ensure_ascii=False),
                 json.dumps(meta.get("tags") or [], ensure_ascii=False),
                 meta.get("source_file") or "",
@@ -694,8 +716,8 @@ def has_summary_for_yt_id(yt_id: str) -> bool:
     if not yt_id:
         return False
     r = _conn().execute(
-        "SELECT 1 FROM items WHERE yt_id = ? AND summary IS NOT NULL "
-        "AND trim(summary) <> '' LIMIT 1", (yt_id,)).fetchone()
+        "SELECT 1 FROM items WHERE (yt_id = ? OR source_yt_id = ?) AND summary IS NOT NULL "
+        "AND trim(summary) <> '' LIMIT 1", (yt_id, yt_id)).fetchone()
     return bool(r)
 
 
@@ -704,10 +726,11 @@ def find_by_yt_id(yt_id: str) -> dict | None:
     yt_id = (yt_id or "").strip()
     if not yt_id:
         return None
+    # 원본으로 갈아타 전사한 항목은 yt_id가 원본이라, 수집본 id(source_yt_id)로도 찾는다.
     r = _conn().execute(
         f"SELECT {_ITEM_COLUMNS} FROM items "
-        "WHERE yt_id = ? ORDER BY date DESC, stem DESC LIMIT 1",
-        (yt_id,),
+        "WHERE yt_id = ? OR source_yt_id = ? ORDER BY date DESC, stem DESC LIMIT 1",
+        (yt_id, yt_id),
     ).fetchone()
     return _row_to_item(r) if r else None
 
@@ -1184,8 +1207,9 @@ def queue_claim_kf_retry() -> dict | None:
 
 def get_item_by_yt_id(yt_id: str) -> dict | None:
     r = _conn().execute(
-        "SELECT md_path, summary_path, title FROM items WHERE yt_id = ? LIMIT 1",
-        (yt_id,),
+        "SELECT md_path, summary_path, title FROM items "
+        "WHERE yt_id = ? OR source_yt_id = ? LIMIT 1",
+        (yt_id, yt_id),
     ).fetchone()
     return dict(r) if r else None
 

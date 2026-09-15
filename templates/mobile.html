@@ -1747,15 +1747,28 @@ async function openSummary(itemId, title) {
       YS.attachSummaryNotes($('modal-body'), itemId);
       _attachSectionEditorsM($('modal-body'));
       const originalUrl = d.original_video_url || '';
+      const sourceUrl = d.source_video_url || '';          // 원본으로 갈아타 전사한 항목의 수집본
       $('modal-youtube-link').href = d.webpage_url || '#';
       $('modal-youtube-link').hidden = !d.webpage_url;
-      $('modal-youtube-link').title = originalUrl ? '번역·재게시 영상 보기' : 'YouTube에서 보기';
       const ytLabel = $('modal-youtube-link').querySelector('.mobile-youtube-label');
-      if (ytLabel) ytLabel.textContent = originalUrl ? '번역본' : 'YouTube';
-      $('modal-original-link').href = originalUrl || '#';
-      $('modal-original-link').hidden = !originalUrl;
-      $('modal-original-link').title = d.original_video_title
-        ? `원본 영상: ${d.original_video_title}` : '원본 영상 보기';
+      const secondLabel = $('modal-original-link').querySelector('span:last-child');
+      if (sourceUrl) {
+        $('modal-youtube-link').title = '원본 영상 보기(이 요약은 원본을 전사한 것)';
+        if (ytLabel) ytLabel.textContent = 'YouTube';
+        $('modal-original-link').href = sourceUrl;
+        $('modal-original-link').hidden = false;
+        if (secondLabel) secondLabel.textContent = '번역본';
+        $('modal-original-link').title = d.source_video_title
+          ? `번역·재게시 영상: ${d.source_video_title}` : '번역·재게시 영상 보기';
+      } else {
+        $('modal-youtube-link').title = originalUrl ? '번역·재게시 영상 보기' : 'YouTube에서 보기';
+        if (ytLabel) ytLabel.textContent = originalUrl ? '번역본' : 'YouTube';
+        $('modal-original-link').href = originalUrl || '#';
+        $('modal-original-link').hidden = !originalUrl;
+        if (secondLabel) secondLabel.textContent = '원본';
+        $('modal-original-link').title = d.original_video_title
+          ? `원본 영상: ${d.original_video_title}` : '원본 영상 보기';
+      }
       _setSummaryReadUIM(d.is_read);
       _setPubBtnM(d.blog_url, d.blog);
       _setDistillUI(d.distill);
