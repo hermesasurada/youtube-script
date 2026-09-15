@@ -1206,9 +1206,11 @@ def queue_claim_kf_retry() -> dict | None:
 
 
 def get_item_by_yt_id(yt_id: str) -> dict | None:
+    # 같은 영상이 번역본 전사(yt_id 일치)와 원본 전사(source_yt_id 일치) 둘 다 있을 수
+    # 있다 — 최신 항목을 우선한다(큐 재개가 옛 전사본을 잡지 않도록).
     r = _conn().execute(
         "SELECT md_path, summary_path, title FROM items "
-        "WHERE yt_id = ? OR source_yt_id = ? LIMIT 1",
+        "WHERE yt_id = ? OR source_yt_id = ? ORDER BY date DESC, stem DESC LIMIT 1",
         (yt_id, yt_id),
     ).fetchone()
     return dict(r) if r else None
