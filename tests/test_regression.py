@@ -321,6 +321,30 @@ def test_keyframes_capture_the_transcribed_video_not_the_queue_url(tmp_path):
     assert app._keyframe_source_url(str(plain), "https://x/y") == "https://x/y"
 
 
+def test_collapse_detector_counts_time_not_only_segment_count(tmp_path):
+    """긴 세그먼트로 붕괴하면 횟수는 적어도 시간은 길다 — 2026-09-15 CNBC 12분 영상에서
+    같은 문장이 30초 세그먼트 27회(10분)로 이어졌는데 횟수 기준(50)에 안 걸려 저장됐다."""
+    def seg(text, a, b):
+        return {"text": text, "offsets": {"from": int(a * 1000), "to": int(b * 1000)}}
+    normal = [seg(f"sentence {i}", i * 5, i * 5 + 5) for i in range(30)]
+    j = tmp_path / "ok.json"
+    j.write_text(__import__("json").dumps({"transcription": normal}), encoding="utf-8")
+    assert app._looks_collapsed(str(j)) == (False, "")
+
+    collapsed = normal[:5] + [seg("AND HE WROTE A FAMOUS ENCYCLICAL", 25 + i * 30, 55 + i * 30)
+                              for i in range(25)]      # 25회 × 30초 = 12.5분
+    j2 = tmp_path / "bad.json"
+    j2.write_text(__import__("json").dumps({"transcription": collapsed}), encoding="utf-8")
+    flag, detail = app._looks_collapsed(str(j2))
+    assert flag is True and "초 연속" in detail
+
+    # 짧은 맞장구 반복(시간이 짧고 횟수도 적음)은 붕괴가 아니다
+    chatter = normal[:22] + [seg("Yeah.", 110 + i, 111 + i) for i in range(8)]
+    j3 = tmp_path / "chat.json"
+    j3.write_text(__import__("json").dumps({"transcription": chatter}), encoding="utf-8")
+    assert app._looks_collapsed(str(j3)) == (False, "")
+
+
 def test_source_video_link_is_wired_on_both_surfaces():
     root = os.path.dirname(app.__file__)
     js = open(os.path.join(root, "static/js/index.js"), encoding="utf-8").read()

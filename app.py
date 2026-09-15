@@ -498,6 +498,7 @@ def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, 
 
 
 _COLLAPSE_MIN_RUN    = 50     # 같은 문장이 이만큼 연달아 나오면 붕괴로 본다
+_COLLAPSE_MIN_SECS   = 120    # 같은 문장이 이만큼의 시간을 덮어도 붕괴다(세그먼트가 길 때)
 _COLLAPSE_CONTEXT    = 64     # 붕괴 시 재전사에 쓸 컨텍스트 상한(토큰)
 # 붕괴 재전사 뒤 '반복이 사라졌는가'만 보면 부족하다 — 2026-09-10 Tom Brown G20(24분)은
 # 컨텍스트 제한 재전사가 반복 없이 끝났지만 3분 15초 이후가 통째로 비어 2,983자만 남았다.
@@ -518,21 +519,39 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
             segs = json.load(f).get("transcription", [])
     except Exception:
         return False, ""
-    texts = [s.get("text", "").strip() for s in segs]
-    texts = [t for t in texts if t]
+    items = []
+    for seg in segs:
+        t = (seg.get("text") or "").strip()
+        if not t:
+            continue
+        off = seg.get("offsets") or {}
+        try:
+            a, b = int(off.get("from", 0)) / 1000, int(off.get("to", 0)) / 1000
+        except (TypeError, ValueError):
+            a, b = 0.0, 0.0
+        items.append((t, a, b))
+    texts = [t for t, _, _ in items]
     if len(texts) < 20:
         return False, ""
     prev, run, worst, worst_txt, dropped = "", 0, 0, "", 0
-    for t in texts:
+    run_start, worst_secs, worst_secs_txt = 0.0, 0.0, ""
+    for t, a, b in items:
         if t == prev:
             run += 1
             dropped += 1
             if run > worst:
                 worst, worst_txt = run, t
+            # 횟수와 별개로 '같은 문장이 덮는 시간'도 잰다 — whisper가 30초짜리 긴 세그먼트로
+            # 붕괴하면 10분이 27회밖에 안 돼 횟수 기준(50)을 통과한다(2026-09-15 CNBC 12분).
+            if b - run_start > worst_secs:
+                worst_secs, worst_secs_txt = b - run_start, t
         else:
             run = 0
+            run_start = a
         prev = t
     ratio = dropped / len(texts)
+    if worst_secs >= _COLLAPSE_MIN_SECS:
+        return True, f"같은 문장이 {worst_secs:.0f}초 연속, 중복 {ratio:.0%} ({worst_secs_txt[:40]})"
     # 판정은 '같은 문장이 길게 이어지는가'만 본다. 중복 비율 단독 조건은 오탐이 잦았다
     # — 5시간 대담에서 "Yeah." 같은 맞장구가 연달아 나오면 정상 전사도 비율이 쉽게
     # 올라간다(2026-08-28: 29만자 정상 전사가 '여전히 붕괴'로 찍혔다). 실제 붕괴는
