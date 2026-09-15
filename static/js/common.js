@@ -270,7 +270,73 @@
     const alts = [..._termExcl].map(t => t
       .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       .replace(/[ -]/g, '[\\s\\-\\u2010-\\u2015]*'));
-    return new RegExp('(' + alts.join('|') + ')\\s*\\\\?\\*', 'gi');
+    // 본문 표기는 `증류(distillation)*`처럼 원어를 괄호로 병기하는 경우가 많아, 용어와
+    // 별표 사이의 닫는 괄호·따옴표를 함께 허용한다(2026-09-15 사용자 지적).
+    return new RegExp('(?:' + alts.join('|') + ')[)\\]』」’”]*\\s*\\*', 'gi');
+  }
+
+  /**
+   * 제외 용어 뒤의 각주 별표를 지운다. 볼드·링크가 섞이면 용어와 별표가 서로 다른
+   * 텍스트 노드에 놓이므로(`**증류(distillation)**\*`), 블록의 전체 텍스트에서 위치를
+   * 찾은 뒤 그 별표가 실제로 들어 있는 노드에서만 한 글자를 지운다.
+   */
+  function _stripExcludedMarks(root) {
+    const rx = _excludedMarkRegex();
+    if (!rx || typeof document === 'undefined') return;
+    const blocks = root.querySelectorAll(
+      'p:not(.term-note), li, h1, h2, h3, h4, h5, blockquote, td, th, figcaption, summary');
+    blocks.forEach(block => {
+      const nodes = [];
+      const walker = document.createTreeWalker(block, 4);
+      while (walker.nextNode()) {
+        const n = walker.currentNode;
+        if (n.parentElement && n.parentElement.closest('.term-note')) continue;
+        nodes.push(n);
+      }
+      if (!nodes.length) return;
+      let text = '';
+      const map = [];                       // 전체 텍스트 위치 → [노드, 노드 내 오프셋]
+      nodes.forEach(n => {
+        for (let i = 0; i < n.data.length; i++) map.push([n, i]);
+        text += n.data;
+      });
+      const cuts = [];
+      rx.lastIndex = 0;
+      let m;
+      while ((m = rx.exec(text))) {
+        cuts.push(m.index + m[0].length - 1);   // 매칭의 마지막 글자 = 별표
+        rx.lastIndex = m.index + m[0].length;
+      }
+      cuts.reverse().forEach(pos => {           // 뒤에서부터 지워야 위치가 안 밀린다
+        const hit = map[pos];
+        if (!hit) return;
+        const [node, off] = hit;
+        if (node.data[off] !== '*') return;
+        node.data = node.data.slice(0, off) + node.data.slice(off + 1);
+      });
+    });
+  }
+
+  /**
+   * `## 2. 한눈 요약`은 각주 대상이 아니다 — 본문에서 이미 설명하는 용어를 앞머리에서
+   * 또 표시하면 읽기만 번거롭다(2026-09-15 사용자 지시). 카드 안의 각주 묶음을 없애고
+   * 남은 별표도 지운다. 프롬프트에도 같은 규칙을 두지만 화면에서 한 번 더 보장한다.
+   */
+  function _stripBriefMarks(root) {
+    if (!root || typeof document === 'undefined') return;
+    const cards = [...root.querySelectorAll('.ys-tldr')];
+    [...root.querySelectorAll('h2')].forEach(h => {
+      if (!/한눈\s*요약/.test(h.textContent)) return;
+      for (let n = h.nextElementSibling; n && n.tagName !== 'H2'; n = n.nextElementSibling) cards.push(n);
+    });
+    cards.forEach(card => {
+      card.querySelectorAll('.term-notes, p.term-note').forEach(n => n.remove());
+      const walker = document.createTreeWalker(card, 4);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      // 낱말 뒤에 홀로 붙은 각주 별표만 지운다(*강조* 쌍은 마크다운이 이미 태그로 바꿨다).
+      nodes.forEach(n => { n.data = n.data.replace(/([^\s*])\s*\*(?!\*)/g, '$1'); });
+    });
   }
   /** 현재 DOM에서 제외 용어의 각주 행과 본문 별표를 지운다(렌더 직후·✕ 클릭 직후 공용). */
   function applyTermExclusions(root) {
@@ -279,15 +345,7 @@
       if (_termExcl.has(_normTerm(_noteLabel(note)))) note.remove();
     });
     root.querySelectorAll('.term-notes').forEach(box => { if (!box.querySelector('p.term-note')) box.remove(); });
-    const rx = _excludedMarkRegex();
-    if (!rx) return;
-    const walker = document.createTreeWalker(root, 4);
-    const nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
-    nodes.forEach(node => {
-      if (!node.parentElement || node.parentElement.closest('.term-note')) return;
-      node.data = node.data.replace(rx, '$1');
-    });
+    _stripExcludedMarks(root);
   }
   /** 각주 행마다 ✕(이 용어를 제외 목록에 추가) 버튼을 단다. 블로그 HTML에서는 뗀다. */
   function _decorateTermNotes(root) {
@@ -498,6 +556,7 @@
     });
 
     applyTermExclusions(root);      // 사용자 지정 제외 용어(각주 행 + 본문 별표)
+    _stripBriefMarks(root);         // 한눈 요약은 각주 대상이 아니다
     _decorateTermNotes(root);       // 남은 각주에 ✕ 버튼
   }
 
@@ -1070,6 +1129,7 @@
     ensureTermExclusions,
     apiTermExclusion,
     applyTermExclusions,
+    stripBriefMarks: _stripBriefMarks,
     setupStickySummarySections,
     setSummaryNotes,
     attachSummaryNotes,

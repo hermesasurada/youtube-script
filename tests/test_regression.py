@@ -200,6 +200,26 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
     assert r.status_code == 400 and r.get_json()["code"] == "not_published"
 
 
+def test_brief_summary_is_excluded_from_term_notes():
+    """`## 2. 한눈 요약`에는 각주를 달지 않는다 — 프롬프트와 렌더 양쪽에서 보장."""
+    root = os.path.dirname(app.__file__)
+    for name in ("prompt.txt", "prompt_default.txt"):
+        text = open(os.path.join(root, name), encoding="utf-8").read()
+        assert "여기에는 용어 각주를 달지 않는다" in text, name
+    common = open(os.path.join(root, "static/js/common.js"), encoding="utf-8").read()
+    assert "_stripBriefMarks" in common and "한눈 요약은 각주 대상이 아니다" in common
+
+
+def test_excluded_term_mark_regex_allows_a_closing_paren():
+    """본문은 `증류(distillation)*`처럼 원어를 병기한다 — 닫는 괄호 뒤 별표도 지운다."""
+    common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"),
+                  encoding="utf-8").read()
+    body = common[common.index("function _excludedMarkRegex"):common.index("function _stripExcludedMarks")]
+    assert "[)" in body and "\\*" in body
+    # 노드가 갈리는 볼드 표기도 처리한다
+    assert "createTreeWalker" in common[common.index("function _stripExcludedMarks"):][:1800]
+
+
 def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkeypatch):
     """수동 큐 등록은 같은 채널을 지난번에 넣은 캡처·증류 설정을 따른다."""
     monkeypatch.setenv("INDEX_DB", str(tmp_path / "q.db"))
