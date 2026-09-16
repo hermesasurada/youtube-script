@@ -1696,8 +1696,80 @@ _CJK_INLINE_RE = re.compile(r"(?<=[가-힣])[一-鿿぀-ゟ゠-ヿ]+(?=[가-힣]
 _HAN_RUN_RE = re.compile(r"[一-鿿]+")
 
 
-def _script_leaks(text: str) -> list[str]:
-    """한국어 요약에 섞인 이질 문자(아랍·키릴 등)와 '누출' 한자를 찾는다.
+# 한국어 문장 속 소문자 영어 단어(4자 이상). 고유명사는 대문자로 시작하고 약어는 전부 대문자라
+# 여기 걸리지 않는다. 괄호 병기(증류(distillation))·HTML·각주·별표 각주어(harness\*)는 제외한다.
+# 경계에 라틴 확장 문자(À-ɏ)를 넣어 Wärtsilä·Córdoba·Schrödinger가 'rtsil'·'rdoba'로 쪼개지지 않게 한다.
+_LATIN_WORD_RE = re.compile(r"(?<![A-Za-z\u00C0-\u024F0-9/.@_-])([a-z][a-z]{3,})(?![A-Za-z\u00C0-\u024F0-9/._-]|\\\*|\*)")
+_LATIN_ALLOW = frozenset("""
+open weight token bay attention chain thought context window harness root prompt agent
+agents world model reward hacking peer review shell cold latent space rollout rollouts
+auto hack diff demux full next with into
+""".split())
+
+
+def _stem(word: str) -> str:
+    """crude English stem — 원문 대조에서 sycophantic/sycophant, democratized/democratize를 같게 본다."""
+    w = word.lower()
+    for suf in ("ically", "ization", "isation", "ations", "ation", "ingly", "ities", "ness", "ment",
+                "ing", "ies", "ers", "ed", "es", "er", "ly", "al", "ic", "ize", "ise", "s"):
+        if w.endswith(suf) and len(w) - len(suf) >= 4:
+            return w[: -len(suf)]
+    return w
+
+
+def _latin_fragments(text: str, source: str = "") -> list[str]:
+    """한글 문장에 남은 영어 조각(twoweeks 전, concuss된, parad 수, automat으로)을 찾는다.
+
+    기준은 둘이다 — 소문자로 시작하는 4자 이상 영어 단어가 한글 본문 안에 있고, 그 단어(어간)가
+    원문(source: 전사가 든 프롬프트)에도 제목에도 없다. 원문에 있는 단어(obesus, harness,
+    sycophantic→sycophant)는 인용·병기일 수 있어 두고, 원문에 없는 단어는 모델이 옮기다 흘린
+    조각이다. 영문 제목·메타 표·캡처 캡션·각주·괄호 병기·코드는 검사에서 뺀다.
+    2026-09-16 Grok 요약 5건 검토: SemiAnalysis 편 한 건에 세 조각(twoweeks·Milestones·parad).
+    기존 요약 1,112건 보정 결과는 _script_leaks 아래 테스트 참조.
+    """
+    body = text or ""
+    body = re.sub(r"^# [^\n]*$", " ", body, flags=re.M)                                  # H1(영문 제목)
+    body = re.sub(r"^## 1\. 메타정보.*?(?=^## )", " ", body, flags=re.S | re.M)          # 메타 표
+    body = re.sub(r"<figure>.*?</figure>", " ", body, flags=re.S)                        # 캡처 캡션
+    body = re.sub(r"<div class=\"term-notes\">.*?</div>", " ", body, flags=re.S)       # 각주 묶음
+    body = re.sub(r"<p class=\"term-note\">.*?</p>", " ", body, flags=re.S)           # 낱개 각주
+    body = re.sub(r"^\*\s+\*\*[^\n]*$", " ", body, flags=re.M)                       # 마크다운형 각주
+    body = re.sub(r"<[^>]+>", " ", body)                                                 # 그 밖의 HTML
+    body = re.sub(r"&[#a-zA-Z0-9]+;", " ", body)                                          # HTML 엔티티
+    body = re.sub(r"`[^`\n]*`", " ", body)                                              # 코드 스팬
+    body = re.sub(r"\([^()]*\)", " ", body)                                             # 괄호 병기
+    body = re.sub(r"https?://\S+", " ", body)                                            # URL
+    body = re.sub(r"\\\(.*?\\\)|\$[^$\n]+\$", " ", body)                                  # 수식
+    src = (source or "") + " " + (re.search(r"^# ([^\n]*)$", text or "", re.M) or [None, ""])[1]
+    src_stems = {_stem(w) for w in re.findall(r"[A-Za-z]{4,}", src)}
+    # 요약 안에서 세 번 이상 쓰인 낱말은 흘린 조각이 아니라 의도한 표기다(sofic 군, tsserver).
+    counts = collections.Counter(w.lower() for w in re.findall(r"[A-Za-z]{4,}", body))
+    found: list[str] = []
+    for m in _LATIN_WORD_RE.finditer(body):
+        w = m.group(1)
+        if w in _LATIN_ALLOW or _stem(w) in src_stems or counts[w] >= 3:
+            continue
+        before = body[max(0, m.start() - 2):m.start()]
+        after = body[m.end():m.end() + 1]
+        # 누출의 세 가지 모양: ① 앞에 공백 두 칸(단어를 흘린 자리: ' eventual 수주'), ② 한글 낱말 안에
+        # 박힘(에피soode), ③ 한글 조사가 바로 붙음(concuss된·automat으로). 띄어 쓴 일반 영어 낱말
+        # (dense attention, Mac mini)은 두어, 기술 용어를 억지로 옮기게 하지 않는다.
+        dropped = before.endswith("  ")
+        embedded = bool(re.match(r"[가-힣]", body[m.start() - 1:m.start()] or " "))
+        attached = bool(re.match(r"[가-힣]", after or " ")) and len(w) >= 5
+        if not (dropped or embedded or attached):
+            continue
+        window = body[max(0, m.start() - 40):m.end() + 40]
+        if not re.search(r"[가-힣]", window):               # 영문 인용 블록은 제외
+            continue
+        found.append(f"{w!r} … {body[max(0, m.start() - 30):m.end() + 20].strip()!r}")
+    return found
+
+
+def _script_leaks(text: str, source: str = "") -> list[str]:
+    """한국어 요약에 섞인 이질 문자(아랍·키릴 등)·'누출' 한자·영어 조각을 찾는다.
+
+    source(전사가 든 프롬프트)를 주면 영어 조각 판정에 원문 대조를 쓴다(_latin_fragments).
 
     정상 한자 표기는 두 가지로 본다 — 한글 뒤 괄호 병기(반(反), 톈궁(天工, Tiangong),
     킨츠기(金継ぎ))와 한 글자 단독 사용(前 CEO, 對중국, 전년比, 마이크로범프 有). 두 글자
@@ -1724,6 +1796,7 @@ def _script_leaks(text: str) -> list[str]:
         if len(run) == 1 and not (hangul_before and hangul_after):
             continue
         found.append(f"{run!r} … {text[max(0, a - 30):b + 20]!r}")
+    found.extend(_latin_fragments(text, source))
     return found
 
 
@@ -1737,9 +1810,10 @@ def _warn_script_mix(save_path: str, text: str) -> list[str]:
 
 
 _SCRIPT_RETRY_NOTE = (
-    "\n\n[재출력 요청] 직전 응답에 한자·중국어 단어나 다른 문자체계가 섞여 있었다"
-    "({leaks}). 한글로만 쓰고(영문 고유명사·약어는 그대로), 한자는 '반(反)'처럼 한글 뒤 "
-    "괄호 병기 외에는 쓰지 말 것. 예: 主张 → 주장. 같은 형식·같은 분량으로 다시 출력한다."
+    "\n\n[재출력 요청] 직전 응답에 한자·중국어 단어, 다른 문자체계, 또는 한국어 문장 속 영어 조각이 "
+    "섞여 있었다({leaks}). 한글로만 쓰고(영문 고유명사·약어는 그대로), 한자는 '반(反)'처럼 한글 뒤 "
+    "괄호 병기 외에는 쓰지 말 것. 영어 단어를 조사에 붙여 남기지 말 것(twoweeks 전 → 2주 전, "
+    "concuss된 → 와닿은, Milestones로 → 이정표로). 예: 主张 → 주장. 같은 형식·같은 분량으로 다시 출력한다."
 )
 
 
@@ -2007,6 +2081,22 @@ def _summarize_with_gpt(prompt: str, *, reasoning_effort: str = "default") -> tu
     return out, ""
 
 
+# Grok 전용 문체 보정. 2026-09-16 Opus·Grok 각 5건 비교에서 Grok만 반복한 결함을 겨냥한다 —
+# 사전형 종결(보다·숏하다), 명사 나열 전보체, 주어 생략, 영어 조각(twoweeks 전), 표기 흔들림
+# (harness/하니스, Coxon/Coxson). 정확도는 같았으므로 사실 규칙은 건드리지 않고 문장 마감만 잡는다.
+# 본 프롬프트 앞에 붙여 먼저 읽히게 한다(전사가 뒤에 오므로 끝에 붙이면 묻힌다).
+_GROK_STYLE_NOTE = """[문체 보정 — 아래 규칙은 본 지시문보다 우선한다]
+- 모든 문장은 한국어 종결어미로 끝낸다(~다·~했다·~본다·~라고 한다). '보다', '숏하다', '추적하다'처럼 사전형 동사나 명사로 문장을 끝내지 않는다.
+- 한 문장에는 주어 하나와 동작 하나만 둔다. 명사구를 쉼표로 네 개 이상 나열해 한 문장에 몰아넣지 않는다 — 나열이 필요하면 불릿으로 푼다.
+- 주어를 생략하지 않는다. 화자가 바뀌면 그 문장 첫머리에서 밝힌다("Nadella는", "진행자는").
+- 영어 단어를 한국어 문장 안에 조각으로 남기지 않는다(twoweeks 전 ✗ → 2주 전 ✓, Milestones로 ✗ → 이정표로 ✓, concuss된 ✗ → 와닿은 ✓). 영문 고유명사·약어만 원문 표기로 두고, 일반 영어 단어는 반드시 한국어로 옮긴다.
+- 같은 인명·용어는 요약 전체에서 한 가지 표기만 쓴다. harness면 끝까지 harness, 하니스면 끝까지 하니스. 인명 철자는 전사에 나온 대로 한 번 정하고 바꾸지 않는다.
+- 한눈 요약의 불릿 하나는 한두 문장으로 끝낸다. 네 문장이 필요하면 불릿을 나눈다.
+- 이 보정은 표현에만 해당한다. 사실·수치·화자 귀속 규칙은 본 지시문을 그대로 따른다.
+
+"""
+
+
 def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default") -> tuple[str, str]:
     """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
 
@@ -2016,7 +2106,7 @@ def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default") -> t
         return "", "grok 실행파일 없음"
     tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
     try:
-        tf.write(prompt)
+        tf.write(_GROK_STYLE_NOTE + prompt)
         tf.close()
         cmd = [GROK_BIN, "--prompt-file", tf.name]
         if GROK_MODEL:
@@ -2179,13 +2269,13 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
         # 한자·이질 문자 누출 게이트: 같은 모델에 한 번만 재요청하고, 그래도 섞이면 실패로
         # 보고 다음 모델로 넘긴다(2026-09-12 사용자 지적: All-In 요약의 主张).
         if body:
-            leaks = _script_leaks(body)
+            leaks = _script_leaks(body, prompt)
             if leaks:
                 log.warning("summarize %s: 문자 누출 %d건 — 같은 모델로 1회 재요청: %s",
                             key, len(leaks), leaks[0][:80])
                 retry, rerr = _call(prompt + _SCRIPT_RETRY_NOTE.format(
                     leaks=", ".join(l.split(" … ")[0] for l in leaks[:3])))
-                if retry and not _script_leaks(retry):
+                if retry and not _script_leaks(retry, prompt):
                     body = retry
                 else:
                     body, err = "", f"한자·이질 문자 누출({len(leaks)}건) — 재요청 후에도 남음"

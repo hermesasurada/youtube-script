@@ -1919,6 +1919,57 @@ def test_script_mix_allows_normal_hanja_annotation():
 
 # ── 한자·이질 문자 누출 게이트 (2026-09-12 All-In 요약 "主张하는") ──────────────
 
+def test_latin_fragments_in_korean_sentences_are_caught_but_not_proper_nouns():
+    """Grok이 흘리는 영어 조각(twoweeks 전, concuss된)은 잡고, 고유명사·약어·병기·각주는 둔다."""
+    src = ("you guys saw two weeks ago that an attacker stole an api key … dr venner in 1620 "
+           "obesus … harness and the agent loop … it took years for that to really hit elon")
+    leaks = {
+        "키가  twoweeks 전에는 METR API 키가 도난돼",     # 흘린 자리의 공백 두 칸
+        "그 말이 실제로 concuss된 것은 2024년이다",        # 조사가 바로 붙음
+        "스스로 발을  parad 수 있다",
+        "64가지 진보도 automat으로 열린다",
+        "개발을 수년에서 수개월,  eventual 수주로 줄여",   # 2026-09 실제 요약에서 나온 유형
+        "이 에피soode는 캘리포니아",                       # 한글 낱말 안에 박힘
+        "대테러전에  capt혀 전장 기술 전환을 놓친",
+    }
+    fine = {
+        "증류(distillation)는 큰 모델의 출력을 옮긴다",             # 괄호 병기
+        "harness\\* 는 별개다. root를 잡았다. Anthropic은 GPU를 쓴다",  # 각주어·허용어·고유명사·약어
+        "1620년 Venner 박사가 라틴어 obesus를 끌어와",              # 원문에 있는 단어
+        '<div class="term-notes"><p class="term-note">* <strong>seasteading</strong> — 구상</p></div>',
+        "The quick brown fox jumps over the lazy dog",              # 영문 블록
+        "연속 보안 개발을 Milestones로 두고",                        # 대문자 시작은 고유명사로 본다(의도)
+        "압축 블록 전체에 dense attention 수행",                       # 띄어 쓴 일반 영어 용어는 둔다
+        "Wärtsilä는 크루즈선 엔진을, Córdoba와 Schrödinger는",      # 악센트 이름이 쪼개지지 않는다
+        "국소 중력은 \\(\\sqrt{1-2GM/r}\\) 보정이 붙어",              # 수식
+    }
+    for t in leaks:
+        assert app._latin_fragments(t, src), t
+        assert app._script_leaks(t, src), t          # 게이트 경로로도 잡힌다
+    for t in fine:
+        assert not app._latin_fragments(t, src), t
+
+
+def test_grok_gets_the_style_note_and_retry_note_mentions_english_fragments(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+
+    def run_command(args, **kwargs):
+        seen["prompt"] = open(args[args.index("--prompt-file") + 1], encoding="utf-8").read()
+        return llm_gateway.ProcessResult(0, "# 결과\n\n- 항목", "")
+
+    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
+    body, err = app._summarize_with_grok("본 지시문 {transcript}")
+    assert body and not err
+    assert seen["prompt"].startswith("[문체 보정") and seen["prompt"].endswith("본 지시문 {transcript}")
+    assert "사전형 동사" in seen["prompt"] and "영어 단어를 한국어 문장 안에 조각으로" in seen["prompt"]
+    # 다른 모델 경로에는 붙지 않는다(Grok 전용)
+    import inspect
+    assert "_GROK_STYLE_NOTE" not in inspect.getsource(app._summarize_with_gpt)
+    assert "_GROK_STYLE_NOTE" in inspect.getsource(app._summarize_with_grok)
+    assert "영어 조각" in app._SCRIPT_RETRY_NOTE
+
+
 def test_script_leaks_detects_chinese_words_but_allows_korean_hanja_usage():
     leaks = {
         "AI 부처를 主张하는 AI Policy Network",   # 중국어 단어 + 한글 조사
