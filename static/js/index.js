@@ -485,7 +485,8 @@ let _historyRevision = '';
 let _histUnreadOnly  = false;
 let _histBookmarkOnly = false;
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
-let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일
+let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일, 'duration'=영상 길이
+const HIST_SORT_KEYS = ['date', 'upload', 'duration'];   // 기준 버튼이 순환하는 순서
 const HIST_PAGE_SIZE = 20;
 
 /* ── 검색조건 유지: 날짜·업로더·제목·미읽음·페이지를 localStorage에 기억해 새로고침 후 복원 ──
@@ -601,6 +602,8 @@ function applyHistoryFilter(keepPage = false) {
 /* 정렬 기준값: 전사 처리일은 date+stem(같은 날 안에서도 시간순), 게시일은 upload_date.
    게시일이 없는 항목(파일 업로드 등)은 처리일로 대체해 순서가 뒤엉키지 않게 한다. */
 function _histSortValue(item) {
+  // 길이는 숫자로 비교한다(문자열로 두면 '9:59'가 '1:02:00'보다 뒤로 간다).
+  if (_histSortKey === 'duration') return Number(item.duration) || 0;
   if (_histSortKey === 'upload') return (item.upload_date || item.date || '') + (item.stem || '');
   return (item.date || '') + (item.stem || '');
 }
@@ -610,16 +613,25 @@ function histDisplayDate(item) {
   return _histSortKey === 'upload' ? (item.upload_date || item.date || '') : (item.date || '');
 }
 
+/* 정렬 기준별 버튼 문구 — 방향 버튼은 기준에 맞는 말로 바뀐다(날짜는 최신/과거, 길이는 긴/짧은). */
+const HIST_SORT_LABELS = {
+  date:     { key: '전사처리일', keyTitle: '전사 처리일 기준 (클릭하면 영상 게시일로)', asc: '과거순 ↑',  desc: '최신순 ↓' },
+  upload:   { key: '영상게시일', keyTitle: '영상 게시일 기준 (클릭하면 영상 길이로)',   asc: '과거순 ↑',  desc: '최신순 ↓' },
+  duration: { key: '영상길이',   keyTitle: '영상 길이 기준 (클릭하면 전사 처리일로)',   asc: '짧은순 ↑', desc: '긴순 ↓' },
+};
+
 function _updateSortBtn() {
+  const L = HIST_SORT_LABELS[_histSortKey] || HIST_SORT_LABELS.date;
   const dir = document.getElementById('hf-sort-btn');
-  if (dir) dir.textContent = _histSort === 'asc' ? '과거순 ↑' : '최신순 ↓';
+  if (dir) {
+    dir.textContent = _histSort === 'asc' ? L.asc : L.desc;
+    dir.title = `정렬 순서 전환(${L.desc.replace(/\s.*$/, '')} ↔ ${L.asc.replace(/\s.*$/, '')})`;
+  }
   const key = document.getElementById('hf-sortkey-btn');
   if (key) {
-    key.textContent = _histSortKey === 'upload' ? '영상게시일' : '전사처리일';
-    key.title = _histSortKey === 'upload'
-      ? '영상 게시일 기준 (클릭하면 전사 처리일로)'
-      : '전사 처리일 기준 (클릭하면 영상 게시일로)';
-    key.classList.toggle('on', _histSortKey === 'upload');   // 기본값이 아닐 때 강조
+    key.textContent = L.key;
+    key.title = L.keyTitle;
+    key.classList.toggle('on', _histSortKey !== 'date');   // 기본값이 아닐 때 강조
   }
 }
 function toggleHistorySort() {
@@ -630,10 +642,24 @@ function toggleHistorySort() {
 }
 /* 정렬 기준 전환 — 카드에 찍히는 날짜도 이 기준을 따라 바뀐다. */
 function toggleHistorySortKey() {
-  _histSortKey = (_histSortKey === 'upload') ? 'date' : 'upload';
+  const i = HIST_SORT_KEYS.indexOf(_histSortKey);
+  _histSortKey = HIST_SORT_KEYS[(i + 1) % HIST_SORT_KEYS.length];
   localStorage.setItem('histSortKey', _histSortKey);
   _updateSortBtn();
   applyHistoryFilter();
+}
+
+/* 카드의 채널명 클릭 → 그 채널로 좁힌다. 제목·미읽음·북마크 등 나머지 조건은 그대로 둔다.
+   이미 그 채널로 좁혀져 있으면 해제해 전체로 돌아간다(같은 버튼을 다시 누른 경우). */
+function filterByUploader(uploader, ev) {
+  if (ev) ev.stopPropagation();          // 카드 클릭(요약 열기)과 분리
+  const sel = document.getElementById('hf-uploader');
+  if (!sel || !uploader) return;
+  const next = (sel.value === uploader) ? '' : uploader;
+  if (next && ![...sel.options].some(o => o.value === next)) return;   // 목록에 없는 채널은 무시
+  sel.value = next;
+  applyHistoryFilter();
+  document.getElementById('history-grid')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function toggleBookmarkFilter() {
@@ -849,9 +875,13 @@ function _renderHistoryList() {
       title="${item.bookmark ? '북마크 해제' : '북마크'}">${ICON_BOOKMARK}</button>`;
     const thumbBlock = `<div class="hist-thumb-wrap">${thumbInner}${durBadge}${bmBtn}</div>`;
 
-    const uploaderHtml = item.channel_url
-      ? `<a class="hist-card-uploader" href="${_attrEsc(item.channel_url)}" target="_blank" rel="noopener" title="${_attrEsc(item.uploader)}">${esc(item.uploader)}</a>`
-      : `<span class="hist-card-uploader" title="${_attrEsc(item.uploader)}">${esc(item.uploader)}</span>`;
+    // 채널명 클릭 = 같은 채널로 좁히기(다른 검색조건은 그대로). 유튜브 채널로 나가는
+    // 링크는 상세 화면의 '업로더' 행에 그대로 있다.
+    const uploaderHtml = (item.uploader && item.uploader !== '—')
+      ? `<button type="button" class="hist-card-uploader is-filter" data-uploader="${_attrEsc(item.uploader)}"
+           onclick="filterByUploader(this.dataset.uploader, event)"
+           title="${_attrEsc(item.uploader)} 영상만 보기">${esc(item.uploader)}</button>`
+      : `<span class="hist-card-uploader" title="${_attrEsc(item.uploader || '')}">${esc(item.uploader || '')}</span>`;
 
     const titleAttr = _attrEsc(item.title);
     const titleHtml = `<h3 class="hist-card-title" title="${titleAttr}">${esc(item.title)}</h3>`;

@@ -1584,6 +1584,16 @@ select option { background: var(--surface); color: var(--text); }
   transition: color .15s;
 }
 a.hist-card-uploader:hover { color: var(--highlight); }
+/* 채널명은 이제 같은 채널로 좁히는 버튼 — 기본 버튼 모양을 지우고 글자만 남긴다 */
+button.hist-card-uploader {
+  border: none;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+button.hist-card-uploader:hover { color: var(--highlight); text-decoration: underline; }
 .hist-card-meta-sep { color: var(--border-strong); }
 .hist-card-footer {
   display: flex;

@@ -179,6 +179,7 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .hist-card-meta { display: flex; align-items: center; gap: .5rem; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+    button.hist-card-uploader { border: none; padding: 0; background: none; font: inherit; cursor: pointer; }
     .hist-card-uploader {
       color: var(--text); text-decoration: none; font-weight: 500;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
@@ -817,7 +818,11 @@ let _bookmarkOnly = !!_savedFilter().bookmark;
 let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
 let _sortKey = localStorage.getItem('histSortKey') || 'date';  // 'date'=전사 처리일, 'upload'=영상 게시일 (데스크톱과 공유)
 /* 정렬 기준값 — 게시일이 없으면 처리일로 대체(순서 뒤엉킴 방지) */
-const _sortValue = i => (_sortKey === 'upload' ? (i.upload_date || i.date || '') : (i.date || '')) + ' ' + (i.stem || '');
+const SORT_KEYS = ['date', 'upload', 'duration'];   // 기준 버튼이 순환하는 순서(데스크톱과 동일)
+// 길이는 숫자로 비교한다(문자열로 두면 '9:59'가 '1:02:00'보다 뒤로 간다).
+const _sortValue = i => (_sortKey === 'duration')
+  ? (Number(i.duration) || 0)
+  : (_sortKey === 'upload' ? (i.upload_date || i.date || '') : (i.date || '')) + ' ' + (i.stem || '');
 /* 카드에 찍을 날짜 — 선택한 정렬 기준을 따른다 */
 const histDisplayDate = i => (_sortKey === 'upload' ? (i.upload_date || i.date || '') : (i.date || ''));
 
@@ -893,18 +898,26 @@ const SORT_ICON = {
   asc:  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4-4 4 4"/><path d="M7 4v16"/><path d="M13 14h8"/><path d="M13 9h6"/><path d="M13 4h4"/></svg>',
 };
 
+const SORT_LABELS = {
+  date:     { key: '전사처리일', asc: '과거순',  desc: '최신순' },
+  upload:   { key: '영상게시일', asc: '과거순',  desc: '최신순' },
+  duration: { key: '영상길이',   asc: '짧은순', desc: '긴순' },
+};
+
 function _updateSortBtn() {
+  const L = SORT_LABELS[_sortKey] || SORT_LABELS.date;
   const b = $('m-sort-btn');
   if (b) {
     const asc = _sort === 'asc';
     b.innerHTML = asc ? SORT_ICON.asc : SORT_ICON.desc;
-    b.title = asc ? '과거순' : '최신순';
-    b.setAttribute('aria-label', asc ? '과거순 정렬 (누르면 최신순)' : '최신순 정렬 (누르면 과거순)');
+    b.title = asc ? L.asc : L.desc;
+    b.setAttribute('aria-label', asc
+      ? `${L.asc} 정렬 (누르면 ${L.desc})` : `${L.desc} 정렬 (누르면 ${L.asc})`);
   }
   const k = $('m-sortkey-btn');
   if (k) {
-    k.textContent = _sortKey === 'upload' ? '영상게시일' : '전사처리일';
-    k.classList.toggle('active', _sortKey === 'upload');
+    k.textContent = L.key;
+    k.classList.toggle('active', _sortKey !== 'date');
   }
 }
 function toggleSort() {
@@ -914,8 +927,18 @@ function toggleSort() {
   applyFilter();
 }
 /* 정렬 기준 전환 — 카드 날짜 표기도 이 기준을 따른다 */
+/* 카드의 채널명 → 그 채널로 좁힌다. 같은 채널이 이미 걸려 있으면 해제한다. */
+function filterByUploader(uploader, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const box = $('q');
+  if (!box || !uploader) return;
+  box.value = (box.value.trim() === uploader) ? '' : uploader;
+  applyFilter();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function toggleSortKey() {
-  _sortKey = (_sortKey === 'upload') ? 'date' : 'upload';
+  _sortKey = SORT_KEYS[(SORT_KEYS.indexOf(_sortKey) + 1) % SORT_KEYS.length];
   localStorage.setItem('histSortKey', _sortKey);
   _updateSortBtn();
   applyFilter();
@@ -981,10 +1004,11 @@ function renderCard(item) {
     : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
   const dur = item.duration
     ? `<span class="hist-thumb-dur">${fmtDurBadge(item.duration)}</span>` : '';
+  // 채널명 클릭 = 같은 채널로 좁히기. 모바일은 검색창이 하나뿐이라 거기에 채널명을 넣는다
+  // (미읽음·북마크 필터는 그대로 유지된다).
   const uploader = item.uploader && item.uploader !== '—'
-    ? (item.channel_url
-        ? `<a class="hist-card-uploader" href="${attrEsc(item.channel_url)}" target="_blank" rel="noopener">${esc(item.uploader)}</a>`
-        : `<span class="hist-card-uploader">${esc(item.uploader)}</span>`)
+    ? `<button type="button" class="hist-card-uploader is-filter" data-uploader="${attrEsc(item.uploader)}"
+         onclick="filterByUploader(this.dataset.uploader, event)">${esc(item.uploader)}</button>`
     : '';
   // 요약 보기는 카드 자체가 링크라 버튼이 중복이었다 — 그 자리에 북마크를 둔다
   // (2026-09-04 사용자 지시). 썸네일 우상단의 북마크 버튼은 없앤다.
