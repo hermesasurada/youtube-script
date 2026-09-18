@@ -44,42 +44,47 @@ document.addEventListener('click', async (e) => {
   catch (err) { alert('제거 실패: ' + err.message); }
 });
 
+/* 프롬프트 팝업: 요약 프롬프트 / Grok 문체 보정 / 각주 제외 용어 3탭.
+   앞의 두 탭은 조회 전용이다 — 프롬프트는 prompt.txt를, Grok 노트는 app.py를 고친다. */
+function switchPromptTab(name) {
+  document.querySelectorAll('#prompt-panel .prompt-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('#prompt-panel .prompt-tabpane').forEach(sec => {
+    const on = sec.dataset.pane === name;
+    sec.classList.toggle('active', on);
+    sec.hidden = !on;
+  });
+  if (name === 'terms') renderTermExclusions();
+  if (name === 'grok') loadGrokNote();
+}
+
+let _grokNoteLoaded = false;
+async function loadGrokNote() {
+  const ta = document.getElementById('grok-note-text');
+  if (!ta || _grokNoteLoaded) return;
+  try {
+    const d = await (await fetch('/prompt')).json();
+    if (d.grok_note) {
+      ta.value = d.grok_note;
+      _grokNoteLoaded = true;
+    } else {
+      // 서버가 아직 이 필드를 내려주지 않는 경우(구버전 기동 중)
+      ta.value = '이 서버에서는 Grok 문체 보정 노트를 불러올 수 없습니다.';
+    }
+  } catch (e) {
+    ta.value = '불러오기 실패: ' + e.message;
+  }
+}
+
 function openPromptModal() {
-  if (IS_REMOTE && !document.getElementById('prompt-text').value) loadSavedPrompt();
-  _applyPromptReadonly();
+  if (!document.getElementById('prompt-text').value) loadSavedPrompt();
   document.getElementById('prompt-warn').hidden = true;
   document.getElementById('save-status').textContent = '';
   document.getElementById('prompt-overlay').hidden = false;
   document.body.style.overflow = 'hidden';
-  renderTermExclusions();                                  // 패널 하단 각주 제외 용어 칩
-  const ta = document.getElementById('prompt-text');
-  ta.focus();
-  // 커서를 끝으로
-  ta.selectionStart = ta.selectionEnd = ta.value.length;
+  switchPromptTab('prompt');
 }
 
-function _applyPromptReadonly() {
-  // 원격에서는 조회만 허용 — 편집·저장·기본값 버튼을 감춘다
-  if (!IS_REMOTE) return;
-  const ta = document.getElementById('prompt-text');
-  ta.readOnly = true;
-  document.querySelectorAll('#prompt-panel .prompt-modal-actions button').forEach(b => {
-    if (!b.textContent.includes('닫기')) b.style.display = 'none';
-  });
-  document.querySelector('#prompt-panel .prompt-hint').textContent =
-    '원격 접속에서는 읽기 전용입니다 — 편집은 로컬에서.';
-}
-
-async function restoreDefaultPrompt() {
-  const st = document.getElementById('save-status');
-  try {
-    const d = await (await fetch('/prompt/default')).json();
-    document.getElementById('prompt-text').value = d.prompt || '';
-    st.textContent = '기본값을 불러왔습니다 — 저장을 눌러야 반영됩니다.';
-  } catch (e) {
-    st.textContent = '기본값 로드 실패: ' + e.message;
-  }
-}
 
 function closePromptModal() {
   document.getElementById('prompt-overlay').hidden = true;
@@ -410,38 +415,6 @@ async function toggleChannelDistill(id, enable, btn) {
 }
 
 /* {transcript} 자리표시자 검증 후 저장. 누락 시 차단(요약 시 전사 본문이 안 들어감). */
-async function savePromptFromModal() {
-  const text = document.getElementById('prompt-text').value;
-  const warn = document.getElementById('prompt-warn');
-  if (!text.includes('{transcript}')) {
-    warn.hidden = false;
-    warn.textContent = '⚠ {transcript} 자리표시자가 없습니다. 이 위치에 전사 본문이 삽입되므로 반드시 포함해야 합니다.';
-    return;
-  }
-  warn.hidden = true;
-  const status = document.getElementById('save-status');
-  status.textContent = '저장 중...';
-  try {
-    const r = await fetch('/prompt', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({prompt: text}),
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      status.textContent = '';
-      warn.hidden = false;
-      warn.textContent = '⚠ ' + (d.error || '저장 실패');
-      return;
-    }
-    status.textContent = '저장됨 ✓';
-    setTimeout(closePromptModal, 500);
-  } catch {
-    status.textContent = '';
-    warn.hidden = false;
-    warn.textContent = '⚠ 저장 실패 (네트워크 오류)';
-  }
-}
 
 const IS_REMOTE = document.body.classList.contains('remote-mode');
 if (!IS_REMOTE) loadSavedPrompt();   // /prompt 는 원격 비허용

@@ -763,7 +763,8 @@ select option { background: var(--surface); color: var(--text); }
   padding: .05em .3em;
   color: var(--highlight);
 }
-#prompt-text {
+#prompt-text,
+#grok-note-text {
   width: 100%;
   height: 320px;
   background: var(--surface);
@@ -779,7 +780,8 @@ select option { background: var(--surface); color: var(--text); }
   box-sizing: border-box;
   transition: border-color .15s, box-shadow .15s;
 }
-#prompt-text:focus { border-color: var(--text); box-shadow: 0 0 0 3px var(--highlight-soft); }
+#prompt-text:focus,
+#grok-note-text:focus { border-color: var(--text); box-shadow: 0 0 0 3px var(--highlight-soft); }
 .prompt-warn {
   font-size: 12px;
   color: #dc2626;
@@ -2640,7 +2642,8 @@ header h1 { font-size: 15px; }
 /* Prompt */
 #prompt-panel { max-width: 900px; height: min(84vh, 760px); }
 .prompt-modal-body.utility-panel-body { gap: .85rem; padding: 1rem 1.2rem 1.15rem; }
-#prompt-text {
+#prompt-text,
+#grok-note-text {
   flex: 1 1 auto; min-height: 300px; height: auto;
   padding: 1rem; background: var(--surface); border-radius: 10px;
   font-size: 13px; line-height: 1.7;
@@ -2700,8 +2703,45 @@ header h1 { font-size: 15px; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+/* ── 프롬프트 패널 탭 (요약 프롬프트 / Grok 문체 보정 / 각주 제외 용어) ── */
+.prompt-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+.prompt-tab {
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  background: none;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: .87rem;
+  color: var(--muted, #9aa0ac);
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.prompt-tab:hover { color: var(--text); background: var(--surface2, #f5f5f4); }
+.prompt-tab.active {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--surface, #fff);
+  border-color: var(--border, #e5e7eb);
+  border-bottom: 1px solid var(--surface, #fff);
+}
+.prompt-tabpane { display: none; min-height: 0; }
+/* 본문이 세로 flex라 활성 패널도 flex item으로 늘어나야 textarea가 높이를 받는다 */
+.prompt-tabpane.active { display: flex; flex-direction: column; flex: 1 1 auto; gap: 10px; }
+/* 조회 전용 두 탭 — 편집 못 한다는 것이 보이게 바탕을 살짝 죽인다 */
+.prompt-tabpane textarea[readonly] {
+  background: var(--surface2, #f8f8f7);
+  cursor: default;
+}
+
 /* ── 프롬프트 패널: 각주 제외 용어 칩 (2026-09-10) ── */
-.term-excl { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border, #e5e7eb); }
+.term-excl { margin-top: 0; padding-top: 0; border-top: none; }
 .term-excl-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .term-excl-title { font-weight: 700; font-size: .9rem; }
 .term-excl-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; margin-bottom: 8px; }

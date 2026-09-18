@@ -2500,10 +2500,16 @@ def summarize():
 
 @app.route("/prompt", methods=["GET"])
 def get_prompt():
+    """요약 프롬프트 + Grok 문체 보정 노트.
+
+    grok_note는 Grok이 요약을 맡을 때 본 프롬프트 앞에 붙는 고정 지시문이다.
+    코드 상수라 화면에서 고칠 수 없고, 무엇이 실제로 들어가는지 보여 주기만 한다.
+    """
+    prompt = DEFAULT_PROMPT
     if os.path.exists(PROMPT_FILE):
         with open(PROMPT_FILE, encoding="utf-8") as f:
-            return _json({"prompt": f.read()})
-    return _json({"prompt": DEFAULT_PROMPT})
+            prompt = f.read()
+    return _json({"prompt": prompt, "grok_note": _GROK_STYLE_NOTE})
 
 
 def _inject_term_exclusions(prompt: str, terms: list[str]) -> str:
