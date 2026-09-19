@@ -1085,6 +1085,9 @@
     const orig = h1.textContent.trim();
     if (!orig || orig === ko) return false;
     h1.textContent = ko;
+    // 원제가 이미 한국어면 병기할 '원문'이 없다 — 제작자가 한국어 제목을 고친
+    // 경우라 옛 제목이 원문인 양 밑에 붙는다(2026-09-19). 제목만 바꾸고 끝낸다.
+    if (/[가-힣]/.test(orig)) return true;
     const sub = document.createElement('div');
     sub.className = 'sum-title-orig';
     sub.textContent = orig;

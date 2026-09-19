@@ -3380,6 +3380,21 @@ def history_refresh_meta():
         notes.append(f"제목 조회 실패: {str(e)[:120]}")
 
     old_title = (item.get("title") or "").strip()
+
+    # 현지화 제목은 원제가 외국어일 때만 의미가 있다. 원제가 이미 한국어인 영상에
+    # 현지화 제목을 번역 슬롯(title_ko)으로 넣으면, 화면이 그것을 제목으로 올리고
+    # 원제를 '원문'인 양 밑에 병기해 한국어 제목 두 개가 겹쳐 보인다
+    # (2026-09-19 A41EXYozypg). 게다가 그 영상은 제작자가 유튜브 제목 A/B 테스트를
+    # 돌리는 중이라 조회할 때마다 다른 변형이 와서, 제목 자리에 반영하면 갱신할 때마다
+    # 파일명·front matter·요약 H1이 흔들린다. 그래서 한국어 원제 영상에서는
+    # 현지화 제목을 아예 쓰지 않고 원제 하나만 유지한다.
+    korean_source = bool(db._HANGUL_RE.search(new_title or old_title))
+    try:
+        localized = "" if korean_source else fetch_localized_title(yt_id)
+    except Exception as e:
+        localized = ""
+        notes.append(f"현지화 제목 조회 실패: {str(e)[:120]}")
+
     if new_title and new_title != old_title:
         md_path = item.get("md_path") or ""
         try:
@@ -3434,12 +3449,13 @@ def history_refresh_meta():
     cur_ko = db.get_title_ko(item.get("summary_path") or item.get("md_path") or "") or ""
     title_ko = cur_ko
     final_title = new_title or old_title
-    try:
-        localized = fetch_localized_title(yt_id)
-    except Exception as e:
-        localized = ""
-        notes.append(f"현지화 제목 조회 실패: {str(e)[:120]}")
-    if localized and localized != final_title:
+    if korean_source:
+        # 한국어 원제에는 번역이 없어야 한다. 예전 갱신이 남긴 값이 있으면 지운다.
+        if cur_ko:
+            db.set_title_ko(yt_id, "")
+            title_ko = ""
+            changed.append("title_ko")
+    elif localized and localized != final_title:
         if localized != cur_ko:
             db.set_title_ko(yt_id, localized)
             title_ko = localized
