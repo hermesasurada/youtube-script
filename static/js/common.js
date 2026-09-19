@@ -66,7 +66,7 @@
       if (!_secondaryAssetsStarted) {
         _secondaryAssetsStarted = true;
         setTimeout(() => {
-          void _loadStyle('/static/fonts/google.css' + fontVersion, 'ys-reader-fonts');
+          void _loadStyle('/reader-fonts/google.css' + fontVersion, 'ys-reader-fonts');
           void _loadStyle('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css', 'ys-katex-css');
           void _loadScript('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js',
                            'ys-katex-js', () => !!global.katex);

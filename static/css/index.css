@@ -1,12 +1,3 @@
-/* 조선일보명조(self-host) — 요약 리더 본문용. 조선일보 무료배포 명조, 완성형(드문 음절은 폴백) */
-@font-face {
-  font-family: "Chosunilbo_myungjo";
-  src: url("/static/fonts/ChosunilboNM.woff") format("woff");
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {

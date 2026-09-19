@@ -19,7 +19,7 @@ import urllib.request
 import uuid
 from datetime import datetime
 
-from flask import Flask, Response, redirect, render_template, request, send_file
+from flask import Flask, Response, redirect, render_template, request, send_file, send_from_directory
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -70,6 +70,12 @@ except ImportError:
 app      = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+READER_FONT_DIR = os.path.expanduser("~/projects/hermes-reader-fonts")
+
+
+@app.get("/reader-fonts/<path:filename>")
+def reader_font_asset(filename):
+    return send_from_directory(READER_FONT_DIR, filename, max_age=86400)
 
 
 def _static_version(rel_path: str) -> str:
@@ -81,6 +87,16 @@ def _static_version(rel_path: str) -> str:
 
 
 app.jinja_env.globals["static_v"] = _static_version
+
+
+def _reader_font_version(rel_path: str) -> str:
+    try:
+        return format(os.stat(os.path.join(READER_FONT_DIR, rel_path)).st_mtime_ns, "x")
+    except OSError:
+        return "0"
+
+
+app.jinja_env.globals["reader_font_v"] = _reader_font_version
 
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
