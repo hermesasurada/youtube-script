@@ -1864,6 +1864,9 @@ def _reindex_summary(save_path: str) -> None:
 TITLE_TR_MODEL   = os.environ.get("TITLE_TR_MODEL", "claude-sonnet-5")
 TITLE_TR_BATCH   = 40            # 한 번 호출에 묶는 제목 수
 TITLE_TR_TIMEOUT = 240
+# 추론 수준은 모델과 무관하게 medium 고정(2026-09-21 사용자 지시). 모델 순번은
+# 요약과 같이 돌지만 추론까지 따라가면 grok(high)이 제목 한 묶음에 49초를 쓴다.
+TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "medium")
 
 _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역한다.
 
@@ -1919,16 +1922,8 @@ def _title_tr_order(first_id: int = 0) -> tuple[str, ...]:
     return tuple(keys[offset:] + keys[:offset])
 
 
-def _title_tr_reasoning() -> dict[str, str]:
-    """제목 번역에 쓸 추론 수준 — 요약과 같은 값(운영 설정, 없으면 코드 기본값)."""
-    try:
-        return dict(db.get_monitor_summary_config()["reasoning"])
-    except Exception:
-        return dict(llm_gateway.DEFAULT_SUMMARY_REASONING)
-
-
 def _title_tr_with_claude(prompt: str, label: str) -> tuple[str, str]:
-    effort = _title_tr_reasoning().get("opus", "default")
+    effort = TITLE_TR_REASONING
     command = [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
                "--output-format", "json"]
     if effort != "default":
@@ -1951,7 +1946,7 @@ def _title_tr_with_claude(prompt: str, label: str) -> tuple[str, str]:
 def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
-    effort = _title_tr_reasoning().get("grok", "default")
+    effort = TITLE_TR_REASONING
     with llm_gateway.llm_track("grok", GROK_MODEL or None, purpose="title",
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
@@ -1984,7 +1979,7 @@ def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
 
 
 def _title_tr_with_gpt(prompt: str, label: str) -> tuple[str, str]:
-    effort = _title_tr_reasoning().get("gpt", "default")
+    effort = TITLE_TR_REASONING
     with llm_gateway.llm_track("codex", GPT_MODEL, purpose="title",
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
