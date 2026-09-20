@@ -2521,6 +2521,9 @@ async function toggleSummaryRead(btn) {
     if (item) item.is_read = next;
     _setSummaryReadUI(next);
     applyHistoryFilter(true);
+    // 다 읽었다는 표시이므로 목록으로 돌려보낸다. 안읽음으로 되돌리는 경우는
+    // 계속 보려는 것이라 닫지 않는다(2026-09-20 사용자 지시).
+    if (next) closeSummaryModal();
   } catch (e) {
     console.warn('[read] 상태 변경 실패', e);
   } finally {

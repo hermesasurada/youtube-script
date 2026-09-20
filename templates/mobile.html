@@ -1715,6 +1715,8 @@ async function toggleSummaryReadM(btn) {
     if (item) item.is_read = next;
     _setSummaryReadUIM(next);
     applyFilter();
+    // 읽음 표시 = 다 봤다는 뜻이므로 목록으로 돌아간다. 안읽음 되돌리기는 닫지 않는다.
+    if (next) closeModal();
   } catch (e) {
     console.warn('[read] 상태 변경 실패', e);
   } finally {
