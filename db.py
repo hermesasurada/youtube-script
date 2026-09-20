@@ -438,7 +438,7 @@ def set_title_ko(yt_id: str, value: str) -> bool:
 def titles_needing_translation(limit: int = 500) -> list[dict]:
     """번역이 아직 없는 항목(제목에 한글이 없는 것만) → [{yt_id, title}]."""
     rows = _conn().execute(
-        """SELECT yt_id, title FROM items
+        """SELECT rowid, yt_id, title FROM items
             WHERE title_ko IS NULL AND yt_id IS NOT NULL AND yt_id <> ''
               AND title IS NOT NULL AND title <> ''
             ORDER BY indexed_at DESC LIMIT ?""", (limit,)).fetchall()
@@ -446,7 +446,8 @@ def titles_needing_translation(limit: int = 500) -> list[dict]:
     for r in rows:
         if _HANGUL_RE.search(r["title"] or ""):
             continue                       # 한국어 제목은 번역 대상이 아니다
-        out.append({"yt_id": r["yt_id"], "title": r["title"]})
+        # rowid는 번역 모델 라운드로빈 배정에만 쓴다(요약과 같은 규칙).
+        out.append({"rowid": r["rowid"], "yt_id": r["yt_id"], "title": r["title"]})
     return out
 
 

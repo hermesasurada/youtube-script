@@ -1908,29 +1908,119 @@ def _parse_title_json(out: str, n: int) -> list[str] | None:
     return [str(x).strip() for x in arr]
 
 
-def _translate_titles(titles: list[str]) -> list[str] | None:
-    """제목 묶음을 번역. 실패하면 None(다음 기회에 다시 시도)."""
-    if not titles:
-        return []
-    body = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(titles))
+def _title_tr_order(first_id: int = 0) -> tuple[str, ...]:
+    """제목 번역 모델 순번 — 요약과 같은 라운드로빈(기사 id 기준).
+
+    요약은 항목마다 1차를 정하지만 번역은 묶음으로 부르므로, 묶음 첫 항목의
+    rowid로 순서를 돌린다. 같은 묶음을 다시 시도해도 순서가 같다.
+    """
+    keys = llm_gateway.MODEL_KEYS
+    offset = (max(1, int(first_id or 1)) - 1) % len(keys)
+    return tuple(keys[offset:] + keys[:offset])
+
+
+def _title_tr_with_claude(prompt: str, label: str) -> tuple[str, str]:
     with llm_gateway.llm_track("claude", TITLE_TR_MODEL, purpose="title",
-                               title=f"제목 {len(titles)}건 번역", backend="cli") as call:
+                               title=label, backend="cli") as call:
         r = llm_gateway.run_command(
             [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
-             "--output-format", "json", _TITLE_TR_PROMPT + body],
+             "--output-format", "json", prompt],
             timeout=TITLE_TR_TIMEOUT)
         stdout, usage = llm_gateway.unwrap_claude_json(r.stdout or "")
         llm_gateway.llm_fill(call, usage=usage)
         if r.returncode != 0:
-            llm_gateway.llm_fill(call, fail=(r.stderr or stdout or f"rc={r.returncode}")[:200],
+            err = (r.stderr or stdout or f"rc={r.returncode}")[:200]
+            llm_gateway.llm_fill(call, fail=err,
                                  status="timeout" if r.timed_out else "error")
-            log.warning("title translate failed: rc=%s %s", r.returncode, (r.stderr or "")[:160])
-            return None
-    parsed = _parse_title_json(stdout, len(titles))
-    if parsed is None:
-        return None
-    return [_preserve_title_terms(source, translated)
-            for source, translated in zip(titles, parsed)]
+            return "", err
+    return stdout, ""
+
+
+def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
+    if not (GROK_BIN and os.path.exists(GROK_BIN)):
+        return "", "grok 실행파일 없음"
+    with llm_gateway.llm_track("grok", GROK_MODEL or None, purpose="title",
+                               title=label, backend="cli") as call:
+        tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+        try:
+            tf.write(prompt)
+            tf.close()
+            cmd = [GROK_BIN, "--prompt-file", tf.name, "--output-format", "json"]
+            if GROK_MODEL:
+                cmd += ["-m", GROK_MODEL]
+            r = llm_gateway.run_command(cmd, timeout=TITLE_TR_TIMEOUT)
+        except Exception as e:
+            llm_gateway.llm_fill(call, fail=e)
+            return "", f"grok 실행 오류: {e}"
+        finally:
+            try:
+                os.remove(tf.name)
+            except OSError:
+                pass
+        stdout, usage = llm_gateway.unwrap_grok_json(r.stdout or "")
+        llm_gateway.llm_fill(call, usage=usage)
+        if r.returncode != 0:
+            err = (r.stderr or f"grok rc={r.returncode}").strip()[:200]
+            llm_gateway.llm_fill(call, fail=err,
+                                 status="timeout" if r.timed_out else "error")
+            return "", err
+    return stdout, ""
+
+
+def _title_tr_with_gpt(prompt: str, label: str) -> tuple[str, str]:
+    # 제목 번역은 짧은 변환이라 추론 단계를 올리지 않는다(요약의 high와 다름).
+    with llm_gateway.llm_track("codex", GPT_MODEL, purpose="title",
+                               title=label, backend="cli") as call:
+        try:
+            r = llm_gateway.run_codex_prompt(prompt, model=GPT_MODEL,
+                                             timeout=TITLE_TR_TIMEOUT,
+                                             reasoning_effort="default")
+        except Exception as e:
+            llm_gateway.llm_fill(call, fail=e)
+            return "", f"gpt 실행 오류: {e}"
+        llm_gateway.llm_fill(call, usage=llm_gateway.codex_usage(getattr(r, "events", "")))
+        if r.timed_out:
+            llm_gateway.llm_fill(call, fail=f"타임아웃({TITLE_TR_TIMEOUT}s)", status="timeout")
+            return "", f"gpt 타임아웃({TITLE_TR_TIMEOUT}s)"
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or f"gpt rc={r.returncode}").strip()[:200]
+            llm_gateway.llm_fill(call, fail=err)
+            return "", err
+    return (r.stdout or ""), ""
+
+
+_TITLE_TR_PROVIDERS = {
+    "opus": _title_tr_with_claude,   # TITLE_TR_MODEL이 실제 모델을 정한다
+    "grok": _title_tr_with_grok,
+    "gpt": _title_tr_with_gpt,
+}
+
+
+def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | None:
+    """제목 묶음을 번역. 실패하면 None(다음 기회에 다시 시도).
+
+    요약과 같은 모델 순번을 쓴다 — 예전에는 제목만 늘 sonnet이 옮겨서, 같은
+    영상을 요약은 Opus·GPT·Grok이 하고 제목만 다른 모델이 맡는 상태였다.
+    """
+    if not titles:
+        return []
+    body = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(titles))
+    prompt = _TITLE_TR_PROMPT + body
+    label = f"제목 {len(titles)}건 번역"
+    stdout = ""
+    for name in _title_tr_order(first_id):
+        call = _TITLE_TR_PROVIDERS.get(name)
+        if not call:
+            continue
+        stdout, err = call(prompt, label)
+        if not err and stdout.strip():
+            parsed = _parse_title_json(stdout, len(titles))
+            if parsed is not None:
+                return [_preserve_title_terms(source, translated)
+                        for source, translated in zip(titles, parsed)]
+            err = "형식 불일치"
+        log.warning("title translate via %s failed: %s", name, err or "빈 응답")
+    return None
 
 
 def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
@@ -1939,7 +2029,8 @@ def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
     todo = db.titles_needing_translation(limit)
     if not todo:
         return {"done": 0, "remaining": 0}
-    out = _translate_titles([t["title"] for t in todo])
+    out = _translate_titles([t["title"] for t in todo],
+                            first_id=todo[0].get("rowid") or 0)
     if out is None:
         return {"done": 0, "remaining": len(todo), "error": "translate failed"}
     n = 0
