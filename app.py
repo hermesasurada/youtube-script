@@ -1919,13 +1919,25 @@ def _title_tr_order(first_id: int = 0) -> tuple[str, ...]:
     return tuple(keys[offset:] + keys[:offset])
 
 
+def _title_tr_reasoning() -> dict[str, str]:
+    """제목 번역에 쓸 추론 수준 — 요약과 같은 값(운영 설정, 없으면 코드 기본값)."""
+    try:
+        return dict(db.get_monitor_summary_config()["reasoning"])
+    except Exception:
+        return dict(llm_gateway.DEFAULT_SUMMARY_REASONING)
+
+
 def _title_tr_with_claude(prompt: str, label: str) -> tuple[str, str]:
+    effort = _title_tr_reasoning().get("opus", "default")
+    command = [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
+               "--output-format", "json"]
+    if effort != "default":
+        command += ["--effort", effort]
+    command.append(prompt)
     with llm_gateway.llm_track("claude", TITLE_TR_MODEL, purpose="title",
-                               title=label, backend="cli") as call:
-        r = llm_gateway.run_command(
-            [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
-             "--output-format", "json", prompt],
-            timeout=TITLE_TR_TIMEOUT)
+                               title=label, backend="cli",
+                               reasoning=None if effort == "default" else effort) as call:
+        r = llm_gateway.run_command(command, timeout=TITLE_TR_TIMEOUT)
         stdout, usage = llm_gateway.unwrap_claude_json(r.stdout or "")
         llm_gateway.llm_fill(call, usage=usage)
         if r.returncode != 0:
@@ -1939,8 +1951,10 @@ def _title_tr_with_claude(prompt: str, label: str) -> tuple[str, str]:
 def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
+    effort = _title_tr_reasoning().get("grok", "default")
     with llm_gateway.llm_track("grok", GROK_MODEL or None, purpose="title",
-                               title=label, backend="cli") as call:
+                               title=label, backend="cli",
+                               reasoning=None if effort == "default" else effort) as call:
         tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
         try:
             tf.write(prompt)
@@ -1948,6 +1962,8 @@ def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
             cmd = [GROK_BIN, "--prompt-file", tf.name, "--output-format", "json"]
             if GROK_MODEL:
                 cmd += ["-m", GROK_MODEL]
+            if effort != "default":
+                cmd += ["--reasoning-effort", effort]
             r = llm_gateway.run_command(cmd, timeout=TITLE_TR_TIMEOUT)
         except Exception as e:
             llm_gateway.llm_fill(call, fail=e)
@@ -1968,13 +1984,14 @@ def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
 
 
 def _title_tr_with_gpt(prompt: str, label: str) -> tuple[str, str]:
-    # 제목 번역은 짧은 변환이라 추론 단계를 올리지 않는다(요약의 high와 다름).
+    effort = _title_tr_reasoning().get("gpt", "default")
     with llm_gateway.llm_track("codex", GPT_MODEL, purpose="title",
-                               title=label, backend="cli") as call:
+                               title=label, backend="cli",
+                               reasoning=None if effort == "default" else effort) as call:
         try:
             r = llm_gateway.run_codex_prompt(prompt, model=GPT_MODEL,
                                              timeout=TITLE_TR_TIMEOUT,
-                                             reasoning_effort="default")
+                                             reasoning_effort=effort)
         except Exception as e:
             llm_gateway.llm_fill(call, fail=e)
             return "", f"gpt 실행 오류: {e}"
