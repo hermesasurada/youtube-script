@@ -1569,7 +1569,7 @@ def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
         llm_gateway.StreamEvent("complete", returncode=1, stderr="usage limit"),
     ]
     monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *args, **kwargs: iter(stream))
-    monkeypatch.setattr(app, "_summarize_with_grok", lambda prompt: ("# Grok 결과", ""))
+    monkeypatch.setattr(app, "_summarize_with_grok", lambda prompt, **kw: ("# Grok 결과", ""))
 
     output = list(app._summarize_with_claude("prompt", None))
     partial_index = next(i for i, chunk in enumerate(output) if "partial" in chunk)
@@ -2043,3 +2043,301 @@ def test_prompt_forbids_coined_hanja_terms():
         text = open(os.path.join(os.path.dirname(app.__file__), name), encoding="utf-8").read()
         assert "한자 조어를 만들지 않는다" in text, name
         assert "데이터 비누지" in text and "데이터 무보존(ZDR)" in text, name
+
+
+# ── LLM 호출 이력(hermes-llm-log) 배선 ────────────────────────────────────────
+# 실 CLI 호출 없이 fixture 봉투로 검증한다. DB는 HERMES_LLM_LOG_DB로 임시 경로에 격리.
+
+_CLAUDE_ENV = {"type": "result", "subtype": "success", "is_error": False, "result": "ok",
+               "usage": {"input_tokens": 2, "cache_creation_input_tokens": 16581,
+                         "cache_read_input_tokens": 28517, "output_tokens": 4},
+               "modelUsage": {"claude-sonnet-5": {"inputTokens": 2, "outputTokens": 4,
+                                                  "cacheReadInputTokens": 28517,
+                                                  "cacheCreationInputTokens": 16581}}}
+_GROK_ENV = {"text": "ok", "stopReason": "end_turn",
+             "usage": {"input_tokens": 18676, "cache_read_input_tokens": 256,
+                       "cache_creation_input_tokens": 0, "output_tokens": 27,
+                       "reasoning_tokens": 26, "total_tokens": 18959},
+             "modelUsage": {"grok-4.6-build": {"inputTokens": 18676, "outputTokens": 27,
+                                               "cacheReadInputTokens": 256,
+                                               "cacheCreationInputTokens": 0, "modelCalls": 1}}}
+_CODEX_EVENTS = "\n".join([
+    '{"type":"thread.started","thread_id":"t1"}',
+    '{"type":"turn.started"}',
+    '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"# 결과"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":17566,"cached_input_tokens":13056,'
+    '"cache_write_input_tokens":7,"output_tokens":5,"reasoning_output_tokens":0}}',
+])
+
+
+def _llm_rows(path):
+    con = sqlite3.connect(str(path))
+    try:
+        return [dict(zip(
+            ("provider", "model", "reasoning", "purpose", "title", "input_tokens", "output_tokens",
+             "cache_read_tokens", "cache_write_tokens", "status", "error", "host", "meta"),
+            row)) for row in con.execute(
+            "SELECT provider, model, reasoning, purpose, title, input_tokens, output_tokens, "
+            "cache_read_tokens, cache_write_tokens, status, error, host, meta "
+            "FROM calls ORDER BY id")]
+    finally:
+        con.close()
+
+
+@pytest.fixture
+def llm_db(tmp_path, monkeypatch):
+    if llm_gateway.llm_log is None:
+        pytest.skip("hermes-llm-log 모듈 없음")
+    path = tmp_path / "calls.db"
+    monkeypatch.setenv("HERMES_LLM_LOG_DB", str(path))
+    monkeypatch.delenv("HERMES_LLM_LOG_DISABLED", raising=False)
+    return path
+
+
+def test_unwrap_claude_json_matches_plain_and_falls_back():
+    text, usage = llm_gateway.unwrap_claude_json(json.dumps(_CLAUDE_ENV))
+    assert text == "ok\n"                      # plain 모드 stdout과 문자 그대로 동일
+    assert usage["model"] == "claude-sonnet-5"
+    assert (usage["input_tokens"], usage["output_tokens"],
+            usage["cache_read_tokens"], usage["cache_write_tokens"]) == (2, 4, 28517, 16581)
+    assert llm_gateway.unwrap_claude_json("plain text\n") == ("plain text\n", {})
+    assert llm_gateway.unwrap_claude_json("{broken") == ("{broken", {})
+    assert llm_gateway.unwrap_claude_json("") == ("", {})
+
+
+def test_unwrap_grok_json_matches_plain_and_falls_back():
+    text, usage = llm_gateway.unwrap_grok_json(json.dumps(_GROK_ENV, indent=2))
+    assert text == "ok\n"
+    assert usage["model"] == "grok-4.6-build"
+    assert (usage["input_tokens"], usage["output_tokens"], usage["cache_read_tokens"]) == (18676, 27, 256)
+    assert llm_gateway.unwrap_grok_json("# 결과\n") == ("# 결과\n", {})
+    assert llm_gateway.unwrap_grok_json('{"no_text": 1}') == ('{"no_text": 1}', {})
+
+
+def test_codex_usage_and_final_message_fallback(monkeypatch):
+    usage = llm_gateway.codex_usage(_CODEX_EVENTS)
+    assert (usage["input_tokens"], usage["output_tokens"],
+            usage["cache_read_tokens"], usage["cache_write_tokens"]) == (17566, 5, 13056, 7)
+    assert llm_gateway.codex_usage("not json") == {}
+
+    monkeypatch.setattr(llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    seen = {}
+
+    def run_command(args, **kwargs):
+        seen["args"] = args
+        return llm_gateway.ProcessResult(0, _CODEX_EVENTS, "")
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    r = llm_gateway.run_codex_prompt("p", model="gpt-6-astra", timeout=5)
+    assert "--json" in seen["args"] and "--output-last-message" in seen["args"]
+    assert r.stdout == "# 결과"               # -o 파일이 비면 agent_message로 복원
+    assert r.events == _CODEX_EVENTS
+    # JSONL이 아닌 stdout은 그대로(회귀 없음)
+    monkeypatch.setattr(llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(0, "# 결과\n", ""))
+    assert llm_gateway.run_codex_prompt("p", model="x", timeout=5).stdout == "# 결과\n"
+
+
+def test_grok_summary_logs_usage_and_keeps_text(llm_db, monkeypatch):
+    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    seen = {}
+
+    def run_command(args, **kwargs):
+        seen["args"] = args
+        env = dict(_GROK_ENV, text="# 요약\n\n본문")
+        return llm_gateway.ProcessResult(0, json.dumps(env), "")
+    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
+    body, err = app._summarize_with_grok("prompt", reasoning_effort="high", title="영상 A")
+    assert not err
+    assert seen["args"][-2:] == ["--reasoning-effort", "high"]
+    assert "--output-format" in seen["args"] and "json" in seen["args"]
+    # plain 출력("# 요약\n\n본문\n")을 넣었을 때와 결과가 같다
+    monkeypatch.setattr(app.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(0, "# 요약\n\n본문\n", ""))
+    plain_body, _ = app._summarize_with_grok("prompt", reasoning_effort="high", title="영상 A")
+    assert body == plain_body
+    rows = _llm_rows(llm_db)
+    assert len(rows) == 2
+    row = rows[0]
+    assert (row["provider"], row["model"], row["reasoning"], row["purpose"], row["title"]) == \
+        ("grok", "grok-4.6-build", "high", "summary", "영상 A")
+    assert (row["input_tokens"], row["output_tokens"], row["cache_read_tokens"]) == (18676, 27, 256)
+    assert row["status"] == "ok"
+    assert rows[1]["input_tokens"] is None and rows[1]["status"] == "ok"   # plain 폴백: 토큰 없이 기록
+
+
+def test_grok_summary_logs_failures(llm_db, monkeypatch):
+    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(app.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(-1, "", "", timed_out=True))
+    body, err = app._summarize_with_grok("prompt", title="T")
+    assert not body and "타임아웃" in err
+    monkeypatch.setattr(app.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(1, "", "usage limit"))
+    body, err = app._summarize_with_grok("prompt", title="T")
+    assert not body and err == "usage limit"
+    rows = _llm_rows(llm_db)
+    assert [r["status"] for r in rows] == ["timeout", "error"]
+    assert "usage limit" in rows[1]["error"]
+
+
+def test_gpt_summary_logs_tokens_from_json_events(llm_db, monkeypatch):
+    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(app.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(0, _CODEX_EVENTS, ""))
+    body, err = app._summarize_with_gpt("prompt", reasoning_effort="xhigh", title="영상 B")
+    assert body.startswith("# 결과") and not err
+    row = _llm_rows(llm_db)[0]
+    assert (row["provider"], row["model"], row["reasoning"], row["purpose"], row["title"]) == \
+        ("codex", app.GPT_MODEL, "xhigh", "summary", "영상 B")
+    assert (row["input_tokens"], row["output_tokens"],
+            row["cache_read_tokens"], row["cache_write_tokens"]) == (17566, 5, 13056, 7)
+
+
+def test_claude_stream_summary_logs_result_usage(llm_db, monkeypatch):
+    result = dict(_CLAUDE_ENV, result="# 요약\n\n본문",
+                  modelUsage={"claude-opus-5-0": {"inputTokens": 2, "outputTokens": 4,
+                                                  "cacheReadInputTokens": 28517,
+                                                  "cacheCreationInputTokens": 16581}})
+    stream = [
+        llm_gateway.StreamEvent("stdout", data='{"type":"system","model":"claude-opus-5-0"}\n'),
+        llm_gateway.StreamEvent(
+            "stdout",
+            data='{"type":"stream_event","event":{"type":"content_block_delta",'
+                 '"delta":{"type":"text_delta","text":"# 요약\\n\\n본문"}}}\n'),
+        llm_gateway.StreamEvent("stdout", data=json.dumps(result) + "\n"),
+        llm_gateway.StreamEvent("complete", returncode=0, stderr=""),
+    ]
+    monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *a, **k: iter(stream))
+    output = list(app._summarize_with_claude("prompt", None, title="영상 C"))
+    assert output[-1].startswith("event: done")
+    row = _llm_rows(llm_db)[0]
+    assert (row["provider"], row["model"], row["purpose"], row["title"], row["status"]) == \
+        ("claude", "claude-opus-5-0", "summary", "영상 C", "ok")
+    assert json.loads(row["meta"])["alias"] == app.CLAUDE_MODEL
+    assert (row["input_tokens"], row["output_tokens"],
+            row["cache_read_tokens"], row["cache_write_tokens"]) == (2, 4, 28517, 16581)
+
+    # 순서형(자동모니터) 경로 — --effort 전달 + 오류 행
+    fail_stream = [
+        llm_gateway.StreamEvent("stdout", data='{"type":"system","model":"claude-opus-5-0"}\n'),
+        llm_gateway.StreamEvent("stdout", data='{"type":"result","is_error":true,"result":"usage limit"}\n'),
+        llm_gateway.StreamEvent("complete", returncode=1, stderr="usage limit"),
+    ]
+    monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *a, **k: iter(fail_stream))
+    monkeypatch.setattr(app, "_summarize_with_grok", lambda p, **kw: ("# Grok", ""))
+    monkeypatch.setattr(app, "_summarize_with_gpt", lambda p, **kw: ("", "quota"))
+    list(app._summarize_ordered("prompt", None, ["opus", "gpt", "grok"], title="영상 D",
+                                reasoning_levels={"opus": "high", "gpt": "high", "grok": "default"}))
+    rows = _llm_rows(llm_db)
+    assert rows[1]["provider"] == "claude" and rows[1]["status"] == "error"
+    assert rows[1]["reasoning"] == "high" and rows[1]["title"] == "영상 D"
+    assert "usage limit" in rows[1]["error"]
+
+
+def test_title_translate_and_query_log_rows(llm_db, monkeypatch):
+    def run_command(args, **kwargs):
+        assert "--output-format" in args and "json" in args
+        if "--allowedTools" in args:                 # 원본 검색어 경로(stdin 프롬프트)
+            assert kwargs.get("input_text")
+            env = dict(_CLAUDE_ENV, result="SpaceX Starship Flight 10 webcast")
+        else:                                        # 제목 번역 경로(argv 프롬프트)
+            env = dict(_CLAUDE_ENV, result='["안녕하세요 세계", "두 번째"]')
+        return llm_gateway.ProcessResult(0, json.dumps(env), "")
+    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
+    out = app._translate_titles(["Hello world", "Second"])
+    assert out and len(out) == 2
+    query = app._original_search_query({"title": "스페이스X 스타십"}, "설명")
+    assert query == "SpaceX Starship Flight 10 webcast"
+    rows = _llm_rows(llm_db)
+    assert [(r["provider"], r["purpose"], r["title"]) for r in rows] == [
+        ("claude", "title", "제목 2건 번역"), ("claude", "query", "스페이스X 스타십")]
+    assert all(r["model"] == "claude-sonnet-5" and r["input_tokens"] == 2 for r in rows)
+
+
+def test_keyframe_vision_calls_log_rows(llm_db, monkeypatch):
+    verdict_json = '[{"name":"a.jpg","keep":true,"section":0,"type":"chart","caption":"차트"}]'
+    monkeypatch.setattr(keyframe_report.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(
+                            0, json.dumps(dict(_CLAUDE_ENV, result=verdict_json)), ""))
+    verdict = keyframe_report.classify_and_assign(
+        [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}], model_order=["opus"], title="영상 E")
+    assert verdict["a.jpg"]["keep"] is True
+    # grok 비전(봉투) + codex 비전(events)
+    monkeypatch.setattr(keyframe_report.llm_gateway, "resolve_grok_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(keyframe_report.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(
+                            0, json.dumps(dict(_GROK_ENV, text=verdict_json)), ""))
+    assert keyframe_report.classify_and_assign(
+        [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}], model_order=["grok"], title="영상 E")
+    monkeypatch.setattr(keyframe_report.llm_gateway, "run_codex_prompt",
+                        lambda prompt, **kw: llm_gateway.ProcessResult(
+                            0, verdict_json, "", events=_CODEX_EVENTS))
+    assert keyframe_report.classify_and_assign(
+        [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}], model_order=["gpt"], title="영상 E")
+    rows = _llm_rows(llm_db)
+    assert [(r["provider"], r["purpose"], r["title"], r["status"]) for r in rows] == [
+        ("claude", "vision", "영상 E", "ok"), ("grok", "vision", "영상 E", "ok"),
+        ("codex", "vision", "영상 E", "ok")]
+    assert rows[0]["model"] == "claude-sonnet-5" and rows[1]["model"] == "grok-4.6-build"
+    assert rows[2]["input_tokens"] == 17566
+
+
+class _FakeOpenAIClient:
+    """openai SDK 응답 모양만 흉내 낸다(model/usage/choices)."""
+    def __init__(self):
+        from types import SimpleNamespace as NS
+        usage = NS(prompt_tokens=100, completion_tokens=50, prompt_tokens_details=None)
+        choice = NS(message=NS(content="번역문"), finish_reason="stop")
+        resp = NS(choices=[choice], usage=usage, model="qwen3.8-27b")
+        self.chat = NS(completions=NS(create=lambda **kw: resp))
+
+
+def test_transcript_translator_logs_local_call(llm_db, monkeypatch):
+    import transcript_translator as tt
+    monkeypatch.setattr(tt, "_client", lambda idx=0: _FakeOpenAIClient())
+    monkeypatch.setattr(tt, "_active", 0)
+    out = tt.translate_chunk("[0:00] hello", title="영상 F [청크 1/3]")
+    assert out == "번역문"
+    row = _llm_rows(llm_db)[0]
+    assert (row["provider"], row["model"], row["reasoning"], row["purpose"], row["title"],
+            row["host"], row["input_tokens"], row["output_tokens"], row["status"]) == \
+        ("local", "qwen3.8-27b", "no-think", "translate", "영상 F [청크 1/3]",
+         "192.168.1.125:8000", 100, 50, "ok")
+    assert tt._title_from_head("---\na: 1\n---\n# 영상 제목\n", "/x/y.md") == "영상 제목"
+    assert tt._title_from_head("", "/x/y.md") == "y.md"
+
+
+def test_llm_logging_never_breaks_the_work(tmp_path, monkeypatch):
+    """(a) llm_log 모듈 부재, (b) DB 경로 기록 불가 — 두 경우 모두 본업 결과가 그대로다."""
+    import transcript_translator as tt
+    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(app.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(0, json.dumps(dict(_GROK_ENV, text="# 요약\n\n본문")), ""))
+    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(tt, "_client", lambda idx=0: _FakeOpenAIClient())
+    monkeypatch.setattr(tt, "_active", 0)
+    expected_grok = app._summarize_with_grok("prompt", title="T")
+    expected_gpt = app._summarize_with_gpt("prompt", title="T")
+    expected_tr = tt.translate_chunk("hello", title="T")
+
+    # (a) 모듈을 못 찾은 상태
+    monkeypatch.setattr(llm_gateway, "llm_log", None)
+    monkeypatch.setattr(tt, "llm_log", None)
+    assert app._summarize_with_grok("prompt", title="T") == expected_grok
+    assert app._summarize_with_gpt("prompt", title="T") == expected_gpt
+    assert tt.translate_chunk("hello", title="T") == expected_tr
+    assert llm_gateway.unwrap_grok_json(json.dumps(_GROK_ENV))[0] == "ok\n"
+    monkeypatch.undo()
+
+    # (b) DB를 쓸 수 없는 경로
+    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(app.llm_gateway, "run_command",
+                        lambda args, **kw: llm_gateway.ProcessResult(0, json.dumps(dict(_GROK_ENV, text="# 요약\n\n본문")), ""))
+    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(tt, "_client", lambda idx=0: _FakeOpenAIClient())
+    monkeypatch.setattr(tt, "_active", 0)
+    monkeypatch.setenv("HERMES_LLM_LOG_DB", "/dev/null/x/calls.db")
+    monkeypatch.delenv("HERMES_LLM_LOG_DISABLED", raising=False)
+    assert app._summarize_with_grok("prompt", title="T") == expected_grok
+    assert app._summarize_with_gpt("prompt", title="T") == expected_gpt
+    assert tt.translate_chunk("hello", title="T") == expected_tr

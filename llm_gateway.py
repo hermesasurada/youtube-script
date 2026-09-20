@@ -19,6 +19,162 @@ import time
 from dataclasses import dataclass
 from typing import Iterator, Sequence
 
+import contextlib
+import sys
+
+# LLM 호출 이력(~/.hermes/data/llm_calls.db, hermes-llm-log). 모듈이 없거나 기록이 실패해도
+# 요약·번역 본업은 그대로 돌아야 하므로 모든 진입점이 예외를 삼킨다.
+try:
+    _LLM_LOG_DIR = os.path.expanduser("~/projects/hermes-llm-log")
+    if _LLM_LOG_DIR not in sys.path:
+        sys.path.append(_LLM_LOG_DIR)
+    import llm_log
+except Exception:  # noqa: BLE001 — 모듈이 없어도 본업은 돈다
+    llm_log = None
+
+LLM_LOG_SERVICE = "yt"
+
+
+def llm_track(provider: str, model: str | None = None, **fields):
+    """`with llm_track(...) as call:` — call은 None일 수 있다(모듈 없음/진입 실패)."""
+    if llm_log is None:
+        return contextlib.nullcontext(None)
+    try:
+        return llm_log.track(LLM_LOG_SERVICE, provider, model or None, **fields)
+    except Exception:  # noqa: BLE001
+        return contextlib.nullcontext(None)
+
+
+def llm_begin(provider: str, model: str | None = None, **fields):
+    """with 블록으로 감쌀 수 없는 제너레이터 경로용. `llm_finish`와 짝을 이룬다."""
+    if llm_log is None:
+        return None
+    try:
+        return llm_log.Call(LLM_LOG_SERVICE, provider, model or None, **fields)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def llm_fill(call, *, usage=None, model=None, fail=None, status: str = "error", meta=None):
+    """진행 중인 call에 usage/실제 모델/실패를 채운다. call이 None이거나 예외가 나도 조용히 넘어간다.
+
+    별칭(opus)으로 요청했는데 실제 ID를 얻으면 model을 실제 ID로 바꾸고 별칭은 meta.alias에 남긴다."""
+    if call is None:
+        return
+    try:
+        requested = call.model
+        if usage:
+            call.usage(usage)
+        if model:
+            call.model = model
+        if requested and call.model and call.model != requested:
+            call.meta.setdefault("alias", requested)
+        if meta:
+            call.meta.update(meta)
+        if fail:
+            call.fail(str(fail)[:500], status=status)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def llm_finish(call, **fill) -> None:
+    llm_fill(call, **fill)
+    if call is None:
+        return
+    try:
+        call.finish()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def unwrap_claude_json(stdout: str) -> tuple[str, dict]:
+    """`claude -p --output-format json` stdout → (plain 출력과 동일한 텍스트, usage dict).
+
+    plain 모드는 `<result>\\n`을 찍으므로 개행을 붙여 문자 그대로 맞춘다.
+    봉투가 아니거나 파싱에 실패하면 원문 stdout을 그대로 돌려준다(빈 문자열 금지)."""
+    raw = stdout or ""
+    try:
+        data = json.loads(raw.strip())
+        if isinstance(data, dict) and data.get("type") == "result":
+            text = data.get("result")
+            if isinstance(text, str) and text:
+                text = text + "\n"
+            elif not isinstance(text, str):
+                text = ""
+            usage = {}
+            if llm_log is not None:
+                try:
+                    usage = llm_log.usage_from_claude_json(data)
+                except Exception:  # noqa: BLE001
+                    usage = {}
+            return text, usage
+    except Exception:  # noqa: BLE001
+        pass
+    return raw, {}
+
+
+def unwrap_grok_json(stdout: str) -> tuple[str, dict]:
+    """`grok --output-format json` stdout → (plain 출력과 동일한 텍스트, usage dict).
+
+    봉투는 {"text", "usage": {input_tokens, output_tokens, cache_read_input_tokens, ...},
+    "modelUsage": {"<model>": {...}}} 로 Claude 봉투와 키가 같아 같은 파서를 쓴다.
+    plain 모드는 `<text>\\n`을 찍으므로 개행을 붙인다. 파싱 실패면 원문 stdout 그대로."""
+    raw = stdout or ""
+    try:
+        data = json.loads(raw.strip())
+        if isinstance(data, dict) and "text" in data:
+            text = data.get("text")
+            text = (text + "\n") if isinstance(text, str) and text else (text if isinstance(text, str) else "")
+            usage = {}
+            if llm_log is not None:
+                try:
+                    usage = llm_log.usage_from_claude_json(data)
+                except Exception:  # noqa: BLE001
+                    usage = {}
+            return text, usage
+    except Exception:  # noqa: BLE001
+        pass
+    return raw, {}
+
+
+def codex_usage(events: str) -> dict:
+    """`codex exec --json` JSONL → usage dict(turn.completed.usage; cache_write까지)."""
+    usage: dict = {}
+    if llm_log is not None:
+        try:
+            usage = dict(llm_log.usage_from_codex_events(events or ""))
+        except Exception:  # noqa: BLE001
+            usage = {}
+    try:
+        for line in (events or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            ev = json.loads(line)
+            u = ev.get("usage") if isinstance(ev, dict) else None
+            if isinstance(u, dict) and u.get("cache_write_input_tokens") is not None:
+                usage["cache_write_tokens"] = int(u["cache_write_input_tokens"])
+    except Exception:  # noqa: BLE001
+        pass
+    return usage
+
+
+def _codex_final_from_events(events: str) -> str:
+    """--json 이벤트에서 마지막 agent_message 텍스트. 없으면 ''."""
+    text = ""
+    for line in (events or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = ev.get("item") if isinstance(ev, dict) else None
+        if isinstance(item, dict) and item.get("type") == "agent_message" and isinstance(item.get("text"), str):
+            text = item["text"]
+    return text
+
 
 @dataclass(frozen=True)
 class ProcessResult:
@@ -26,6 +182,7 @@ class ProcessResult:
     stdout: str
     stderr: str
     timed_out: bool = False
+    events: str = ""       # codex --json JSONL 원문(usage 추출용). 다른 경로는 빈 문자열.
 
 
 @dataclass(frozen=True)
@@ -219,6 +376,8 @@ def run_codex_prompt(
     ``--output-last-message`` separates the final answer from JSON/progress events and
     ``--ephemeral`` avoids leaving an automation thread behind. The model is sandboxed
     read-only; images are attached explicitly instead of asking the agent to open files.
+    ``--json`` turns stdout into JSONL events (kept in ``events`` for token accounting);
+    the answer still comes from the ``-o`` file, with the last agent_message as fallback.
     """
     codex = resolve_codex_bin()
     if not (codex and os.path.exists(codex)):
@@ -230,6 +389,7 @@ def run_codex_prompt(
             codex, "exec", "--ephemeral", "--ignore-rules",
             "--skip-git-repo-check", "--sandbox", "read-only",
             "-C", tempfile.gettempdir(), "--output-last-message", output.name,
+            "--json",
         ]
         if model:
             command += ["-m", model]
@@ -246,11 +406,18 @@ def run_codex_prompt(
                 final = handle.read()
         except OSError:
             pass
+        if not final:
+            # -o 파일이 비었으면 JSONL의 마지막 agent_message, 그것도 없으면 원문 stdout 그대로.
+            try:
+                final = _codex_final_from_events(result.stdout)
+            except Exception:  # noqa: BLE001
+                final = ""
         return ProcessResult(
             result.returncode,
             final or result.stdout,
             result.stderr,
             timed_out=result.timed_out,
+            events=result.stdout,
         )
     finally:
         try:

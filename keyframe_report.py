@@ -462,7 +462,8 @@ def extract_candidates(video: str, outdir: str,
 
 def classify_and_assign(frames: list[tuple[float, str]], headings: list[dict],
                         *, transcript_segments: list[tuple[float, str]] | None = None,
-                        skip_claude: bool = False, model_order=None) -> dict | None:
+                        skip_claude: bool = False, model_order=None,
+                        title: str | None = None) -> dict | None:
     global _LAST_VISION_ERR
     if skip_claude and model_order is None:
         # 게이트가 Claude 불가로 판정 → 비전 폴백이 없으므로 캡처 생략(요약은 유지, 비치명적)
@@ -530,21 +531,41 @@ JSON 배열로만 답하라(다른 설명 금지):
             return None, "JSON 파싱 실패"
         return (data, "") if isinstance(data, list) else (None, "배열 아님")
 
+    def _logged(call, r, parsed: tuple[list | None, str]):
+        """_parse 결과를 LLM 이력에 반영(실패 사유·타임아웃). 기록 실패는 무시."""
+        data, err = parsed
+        if data is None:
+            llm_gateway.llm_fill(call, fail=err or "비전 응답 실패",
+                                 status="timeout" if getattr(r, "timed_out", False) else "error")
+        return parsed
+
     def _call_claude() -> tuple[list | None, str]:
-        return _parse(llm_gateway.run_command(
-            [_claude_bin(), "-p", "--model", VISION_MODEL, prompt], timeout=VISION_TIMEOUT))
+        with llm_gateway.llm_track("claude", VISION_MODEL, purpose="vision", title=title,
+                                   backend="cli") as call:
+            r = llm_gateway.run_command(
+                [_claude_bin(), "-p", "--model", VISION_MODEL, "--output-format", "json", prompt],
+                timeout=VISION_TIMEOUT)
+            stdout, usage = llm_gateway.unwrap_claude_json(r.stdout or "")
+            llm_gateway.llm_fill(call, usage=usage)
+            r = llm_gateway.ProcessResult(r.returncode, stdout, r.stderr, r.timed_out)
+            return _logged(call, r, _parse(r))
 
     def _call_gpt() -> tuple[list | None, str]:
         """Codex CLI에 후보 이미지를 직접 첨부해 같은 JSON 판정을 요청한다."""
-        try:
-            return _parse(llm_gateway.run_codex_prompt(
-                prompt,
-                model=GPT_VISION_MODEL,
-                timeout=VISION_TIMEOUT,
-                images=[path for _, path in frames],
-            ))
-        except Exception as e:
-            return None, f"gpt 실행 오류: {e}"
+        with llm_gateway.llm_track("codex", GPT_VISION_MODEL, purpose="vision", title=title,
+                                   backend="cli") as call:
+            try:
+                r = llm_gateway.run_codex_prompt(
+                    prompt,
+                    model=GPT_VISION_MODEL,
+                    timeout=VISION_TIMEOUT,
+                    images=[path for _, path in frames],
+                )
+            except Exception as e:
+                llm_gateway.llm_fill(call, fail=e)
+                return None, f"gpt 실행 오류: {e}"
+            llm_gateway.llm_fill(call, usage=llm_gateway.codex_usage(getattr(r, "events", "")))
+            return _logged(call, r, _parse(r))
 
     def _call_grok() -> tuple[list | None, str]:
         """요약과 같은 Grok 폴백. grok CLI는 이미지 첨부 옵션이 없지만 프롬프트의 @경로를
@@ -552,21 +573,28 @@ JSON 배열로만 답하라(다른 설명 금지):
         grok = llm_gateway.resolve_grok_bin()
         if not (grok and os.path.exists(grok)):
             return None, "grok 실행파일 없음"
-        tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
-        try:
-            tf.write(prompt)
-            tf.close()
-            cmd = [grok, "--prompt-file", tf.name]
-            if GROK_VISION_MODEL:
-                cmd += ["-m", GROK_VISION_MODEL]
-            return _parse(llm_gateway.run_command(cmd, timeout=VISION_TIMEOUT))
-        except Exception as e:
-            return None, f"grok 실행 오류: {e}"
-        finally:
+        with llm_gateway.llm_track("grok", GROK_VISION_MODEL or None, purpose="vision",
+                                   title=title, backend="cli") as call:
+            tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
             try:
-                os.remove(tf.name)
-            except OSError:
-                pass
+                tf.write(prompt)
+                tf.close()
+                cmd = [grok, "--prompt-file", tf.name, "--output-format", "json"]
+                if GROK_VISION_MODEL:
+                    cmd += ["-m", GROK_VISION_MODEL]
+                r = llm_gateway.run_command(cmd, timeout=VISION_TIMEOUT)
+            except Exception as e:
+                llm_gateway.llm_fill(call, fail=e)
+                return None, f"grok 실행 오류: {e}"
+            finally:
+                try:
+                    os.remove(tf.name)
+                except OSError:
+                    pass
+            stdout, usage = llm_gateway.unwrap_grok_json(r.stdout or "")
+            llm_gateway.llm_fill(call, usage=usage)
+            r = llm_gateway.ProcessResult(r.returncode, stdout, r.stderr, r.timed_out)
+            return _logged(call, r, _parse(r))
 
     # 자동모니터가 보낸 순서대로 폴백한다. Opus는 기존 안정성 정책대로 최대 3회,
     # GPT/Grok은 각 1회 시도해 다음 폴백이 과도하게 지연되지 않게 한다.
@@ -820,6 +848,7 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
             cands, meta["headings"], transcript_segments=transcript_segments,
             skip_claude=skip_claude,
             model_order=model_order,
+            title=meta.get("title") or os.path.basename(summary_md_path),
         )  # 중복은 비전이 keep=false로
         if verdict is None:
             # 비전 호출 실패 — 실패 사유를 error로 전달(호출측이 usage limit/장애를 분류)

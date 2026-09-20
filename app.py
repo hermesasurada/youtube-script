@@ -812,20 +812,28 @@ def _original_search_query(meta: dict, description: str) -> str:
         uploader=(meta.get("uploader") or meta.get("channel") or "")[:200],
         description=(description or "")[:4_000],
     )
-    try:
-        result = llm_gateway.run_command(
-            [_resolve_claude_bin(), "-p", "--model", ORIGINAL_QUERY_MODEL,
-             "--allowedTools", ""],
-            input_text=prompt,
-            timeout=ORIGINAL_QUERY_TIMEOUT,
-        )
-    except Exception as exc:
-        log.info("original-video query generation failed: %s", exc)
-        return ""
-    if result.returncode != 0 or result.timed_out:
-        log.info("original-video query unavailable: %s", (result.stderr or "")[:160])
-        return ""
-    lines = [line.strip(" `\t") for line in (result.stdout or "").splitlines() if line.strip()]
+    with llm_gateway.llm_track("claude", ORIGINAL_QUERY_MODEL, purpose="query",
+                               title=meta.get("title"), backend="cli") as call:
+        try:
+            result = llm_gateway.run_command(
+                [_resolve_claude_bin(), "-p", "--model", ORIGINAL_QUERY_MODEL,
+                 "--output-format", "json", "--allowedTools", ""],
+                input_text=prompt,
+                timeout=ORIGINAL_QUERY_TIMEOUT,
+            )
+        except Exception as exc:
+            llm_gateway.llm_fill(call, fail=exc)
+            log.info("original-video query generation failed: %s", exc)
+            return ""
+        stdout, usage = llm_gateway.unwrap_claude_json(result.stdout or "")
+        llm_gateway.llm_fill(call, usage=usage)
+        if result.returncode != 0 or result.timed_out:
+            llm_gateway.llm_fill(
+                call, fail=(result.stderr or stdout or f"rc={result.returncode}")[:200],
+                status="timeout" if result.timed_out else "error")
+            log.info("original-video query unavailable: %s", (result.stderr or "")[:160])
+            return ""
+    lines = [line.strip(" `\t") for line in (stdout or "").splitlines() if line.strip()]
     query = lines[-1] if lines else ""
     query = re.sub(r"^(?:search\s*query|query|검색어)\s*:\s*", "", query, flags=re.I)
     query = re.sub(r"[^A-Za-z0-9&+.' -]+", " ", query)
@@ -1905,14 +1913,20 @@ def _translate_titles(titles: list[str]) -> list[str] | None:
     if not titles:
         return []
     body = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(titles))
-    r = llm_gateway.run_command(
-        [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
-         _TITLE_TR_PROMPT + body],
-        timeout=TITLE_TR_TIMEOUT)
-    if r.returncode != 0:
-        log.warning("title translate failed: rc=%s %s", r.returncode, (r.stderr or "")[:160])
-        return None
-    parsed = _parse_title_json(r.stdout, len(titles))
+    with llm_gateway.llm_track("claude", TITLE_TR_MODEL, purpose="title",
+                               title=f"제목 {len(titles)}건 번역", backend="cli") as call:
+        r = llm_gateway.run_command(
+            [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
+             "--output-format", "json", _TITLE_TR_PROMPT + body],
+            timeout=TITLE_TR_TIMEOUT)
+        stdout, usage = llm_gateway.unwrap_claude_json(r.stdout or "")
+        llm_gateway.llm_fill(call, usage=usage)
+        if r.returncode != 0:
+            llm_gateway.llm_fill(call, fail=(r.stderr or stdout or f"rc={r.returncode}")[:200],
+                                 status="timeout" if r.timed_out else "error")
+            log.warning("title translate failed: rc=%s %s", r.returncode, (r.stderr or "")[:160])
+            return None
+    parsed = _parse_title_json(stdout, len(titles))
     if parsed is None:
         return None
     return [_preserve_title_terms(source, translated)
@@ -2077,25 +2091,36 @@ def _compress_line(summary_body: str, transcript_chars: int) -> str:
     return f"<!--SUMMARY_COMPRESS:{pct}-->\n\n"
 
 
-def _summarize_with_gpt(prompt: str, *, reasoning_effort: str = "default") -> tuple[str, str]:
+def _summarize_with_gpt(prompt: str, *, reasoning_effort: str = "default",
+                        title: str | None = None) -> tuple[str, str]:
     """Codex CLI의 GPT 모델로 단일턴 요약. (요약 텍스트, 오류사유)."""
-    try:
-        r = llm_gateway.run_codex_prompt(
-            _SUMMARY_SYS + "\n\n" + prompt,
-            model=GPT_MODEL,
-            timeout=GPT_TIMEOUT,
-            reasoning_effort=reasoning_effort,
-        )
-    except Exception as e:
-        return "", f"gpt 실행 오류: {e}"
-    if r.timed_out:
-        return "", f"gpt 타임아웃({GPT_TIMEOUT}s)"
-    if r.returncode != 0:
-        return "", (r.stderr or r.stdout or f"gpt rc={r.returncode}").strip()[:200]
-    out = _prepare_summary_body(r.stdout or "")
-    if not out.strip():
-        return "", "gpt 빈 응답"
-    return out, ""
+    effort = str(reasoning_effort or "default").lower()
+    with llm_gateway.llm_track("codex", GPT_MODEL, purpose="summary", title=title,
+                               reasoning=None if effort == "default" else effort,
+                               backend="cli") as call:
+        try:
+            r = llm_gateway.run_codex_prompt(
+                _SUMMARY_SYS + "\n\n" + prompt,
+                model=GPT_MODEL,
+                timeout=GPT_TIMEOUT,
+                reasoning_effort=reasoning_effort,
+            )
+        except Exception as e:
+            llm_gateway.llm_fill(call, fail=e)
+            return "", f"gpt 실행 오류: {e}"
+        llm_gateway.llm_fill(call, usage=llm_gateway.codex_usage(getattr(r, "events", "")))
+        if r.timed_out:
+            llm_gateway.llm_fill(call, fail=f"타임아웃({GPT_TIMEOUT}s)", status="timeout")
+            return "", f"gpt 타임아웃({GPT_TIMEOUT}s)"
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or f"gpt rc={r.returncode}").strip()[:200]
+            llm_gateway.llm_fill(call, fail=err)
+            return "", err
+        out = _prepare_summary_body(r.stdout or "")
+        if not out.strip():
+            llm_gateway.llm_fill(call, fail="빈 응답")
+            return "", "gpt 빈 응답"
+        return out, ""
 
 
 # Grok 전용 문체 보정. 2026-09-16 Opus·Grok 각 5건 비교에서 Grok만 반복한 결함을 겨냥한다 —
@@ -2126,42 +2151,55 @@ _GROK_STYLE_NOTE = """[문체 보정 — 아래 규칙은 본 지시문보다 �
 """
 
 
-def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default") -> tuple[str, str]:
+def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default",
+                         title: str | None = None) -> tuple[str, str]:
     """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
 
     긴 전사 프롬프트는 argv 대신 --prompt-file(임시파일)로 전달(ARG_MAX 회피).
+    출력은 --output-format json 봉투로 받아 usage를 남기고, 텍스트는 plain과 동일하게 복원한다.
     """
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
-    tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
-    try:
-        tf.write(_GROK_STYLE_NOTE + prompt)
-        tf.close()
-        cmd = [GROK_BIN, "--prompt-file", tf.name]
-        if GROK_MODEL:
-            cmd += ["-m", GROK_MODEL]
-        if reasoning_effort != "default":
-            cmd += ["--reasoning-effort", reasoning_effort]
-        r = llm_gateway.run_command(cmd, timeout=GROK_TIMEOUT)
-    except Exception as e:
-        return "", f"grok 실행 오류: {e}"
-    finally:
+    with llm_gateway.llm_track("grok", GROK_MODEL or None, purpose="summary", title=title,
+                               reasoning=None if reasoning_effort == "default" else reasoning_effort,
+                               backend="cli") as call:
+        tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
         try:
-            os.remove(tf.name)
-        except OSError:
-            pass
-    if r.timed_out:
-        return "", f"grok 타임아웃({GROK_TIMEOUT}s)"
-    if r.returncode != 0:
-        return "", (r.stderr or f"grok rc={r.returncode}").strip()[:200]
-    out = _prepare_summary_body(r.stdout or "")
-    if not out.strip():
-        return "", "grok 빈 응답"
-    return out, ""
+            tf.write(_GROK_STYLE_NOTE + prompt)
+            tf.close()
+            cmd = [GROK_BIN, "--prompt-file", tf.name, "--output-format", "json"]
+            if GROK_MODEL:
+                cmd += ["-m", GROK_MODEL]
+            if reasoning_effort != "default":
+                cmd += ["--reasoning-effort", reasoning_effort]
+            r = llm_gateway.run_command(cmd, timeout=GROK_TIMEOUT)
+        except Exception as e:
+            llm_gateway.llm_fill(call, fail=e)
+            return "", f"grok 실행 오류: {e}"
+        finally:
+            try:
+                os.remove(tf.name)
+            except OSError:
+                pass
+        stdout, usage = llm_gateway.unwrap_grok_json(r.stdout or "")
+        llm_gateway.llm_fill(call, usage=usage)
+        if r.timed_out:
+            llm_gateway.llm_fill(call, fail=f"타임아웃({GROK_TIMEOUT}s)", status="timeout")
+            return "", f"grok 타임아웃({GROK_TIMEOUT}s)"
+        if r.returncode != 0:
+            err = (r.stderr or f"grok rc={r.returncode}").strip()[:200]
+            llm_gateway.llm_fill(call, fail=err)
+            return "", err
+        out = _prepare_summary_body(stdout or "")
+        if not out.strip():
+            llm_gateway.llm_fill(call, fail="빈 응답")
+            return "", "grok 빈 응답"
+        return out, ""
 
 
 def _summarize_ordered(prompt: str, save_path: str | None, model_order,
-                       *, transcript_chars: int = 0, reasoning_levels=None):
+                       *, transcript_chars: int = 0, reasoning_levels=None,
+                       title: str | None = None):
     """지정 순서대로 Opus/GPT/Grok을 시도하는 자동모니터용 SSE 생성기."""
     order = llm_gateway.normalize_model_order(model_order)
     reasoning = llm_gateway.normalize_reasoning_levels(reasoning_levels)
@@ -2206,6 +2244,10 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             error_msg: str | None = None
             used_model: str | None = None
             marker_sent = False
+            result_event: dict | None = None
+            llm_call = llm_gateway.llm_begin(
+                "claude", CLAUDE_MODEL, purpose="summary", title=title, backend="cli",
+                reasoning=None if reasoning["opus"] == "default" else reasoning["opus"])
             try:
                 for process_event in llm_gateway.stream_command(
                     command, input_text=prompt, timeout=CLAUDE_TIMEOUT
@@ -2248,12 +2290,16 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
                                     client_has_output = True
                                     yield f"data: {json.dumps(text)}\n\n"
                     elif event_type == "result":
+                        result_event = ev
                         if ev.get("is_error"):
                             error_msg = ev.get("result") or "Claude CLI 오류"
                         else:
                             final = ev.get("result") or "".join(chunks)
             except Exception as e:
                 error_msg = str(e)
+            finally:
+                _finish_claude_stream_log(llm_call, result_event, used_model, error_msg,
+                                          final if final is not None else "".join(chunks))
 
             cleaned = _clean_summary(final if final is not None else "".join(chunks))
             body = humanize_korean.humanize_summary(cleaned)
@@ -2287,8 +2333,8 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
 
         def _call(p: str):
             if key == "gpt":
-                return _summarize_with_gpt(p, reasoning_effort=reasoning["gpt"])
-            return _summarize_with_grok(p, reasoning_effort=reasoning["grok"])
+                return _summarize_with_gpt(p, reasoning_effort=reasoning["gpt"], title=title)
+            return _summarize_with_grok(p, reasoning_effort=reasoning["grok"], title=title)
         body, err = _call(prompt)
         if key == "gpt":
             label = _model_label(GPT_MODEL or "gpt")
@@ -2326,8 +2372,32 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
     yield f"event: error\ndata: {json.dumps('모든 요약 모델 실패: ' + ' / '.join(failures))}\n\n"
 
 
+def _finish_claude_stream_log(call, result_event, used_model, error_msg, text) -> None:
+    """stream-json 요약 호출 1건을 이력에 남긴다(제너레이터라 with 대신 begin/finish).
+
+    result 이벤트의 usage/modelUsage에서 토큰·실제 모델을 뽑고, 오류·타임아웃·빈 응답·
+    클라이언트 중단(result 없이 종료)을 status에 반영한다. 어떤 경우에도 예외를 내지 않는다."""
+    if call is None:
+        return
+    try:
+        usage = {}
+        if llm_gateway.llm_log is not None and result_event:
+            usage = llm_gateway.llm_log.usage_from_claude_json(result_event)
+        fail, status = None, "error"
+        if error_msg:
+            fail = error_msg
+            status = "timeout" if "타임아웃" in error_msg else "error"
+        elif result_event is None:
+            fail = "중단됨(result 이벤트 없음)"
+        elif not (text or "").strip():
+            fail = "빈 응답"
+        llm_gateway.llm_finish(call, usage=usage, model=used_model, fail=fail, status=status)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: bool = False,
-                           transcript_chars: int = 0):
+                           transcript_chars: int = 0, title: str | None = None):
     """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장.
     Claude 실패 시 Grok CLI로 폴백(GROK_FALLBACK).
     skip_claude=True 이면 Claude 호출 없이 Grok만 시도(게이트가 Claude 불가로 판정한 경우).
@@ -2339,7 +2409,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
             yield f"event: error\ndata: {json.dumps((err_prefix or 'Claude 스킵') + ' / Grok 폴백 비활성')}\n\n"
             return
         log.warning("summarize → Grok CLI%s", " (skip_claude)" if skip_claude else " 폴백 시도")
-        gtext, gerr = _summarize_with_grok(prompt)
+        gtext, gerr = _summarize_with_grok(prompt, title=title)
         if gtext:
             # Claude 부분 출력이 이미 전송됐을 수 있으므로 클라이언트가 본문을 비우게 한다.
             yield "event: reset\ndata: \"\"\n\n"
@@ -2378,6 +2448,9 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
     final: str | None = None
     error_msg: str | None = None
     used_model: str | None = None
+    result_event: dict | None = None
+    llm_call = llm_gateway.llm_begin("claude", CLAUDE_MODEL, purpose="summary",
+                                     title=title, backend="cli")
     try:
         for process_event in llm_gateway.stream_command(
             command, input_text=prompt, timeout=CLAUDE_TIMEOUT
@@ -2413,12 +2486,16 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
                             chunks.append(text)
                             yield f"data: {json.dumps(text)}\n\n"
             elif event_type == "result":
+                result_event = ev
                 if ev.get("is_error"):
                     error_msg = ev.get("result") or "Claude CLI 오류"
                 else:
                     final = ev.get("result") or "".join(chunks)
     except Exception as e:
         error_msg = str(e)
+    finally:
+        _finish_claude_stream_log(llm_call, result_event, used_model, error_msg,
+                                  final if final is not None else "".join(chunks))
 
     if error_msg:
         log.warning("summarize failed (claude): %s", error_msg)
@@ -2495,6 +2572,9 @@ def summarize():
         os.path.basename(abs_path),
         " (skip_claude→grok)" if skip_claude else "",
     )
+    # LLM 이력의 title — 전사 frontmatter 제목, 없으면 파일명.
+    video_title = (str((transcript_meta or {}).get("title") or "").strip()
+                   or os.path.basename(abs_path))
 
     def guarded_summary():
         with _summarize_sem:
@@ -2503,11 +2583,13 @@ def summarize():
                     prompt, save_path, model_order,
                     transcript_chars=len(transcript_blob),
                     reasoning_levels=reasoning_levels,
+                    title=video_title,
                 )
             else:
                 yield from _summarize_with_claude(
                     prompt, save_path, skip_claude=skip_claude,
                     transcript_chars=len(transcript_blob),
+                    title=video_title,
                 )
 
     return Response(guarded_summary(), mimetype="text/event-stream",

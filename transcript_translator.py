@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import os
 import re
@@ -22,6 +23,55 @@ import time
 
 import db
 import document_io
+
+# LLM 호출 이력(hermes-llm-log). 모듈이 없거나 기록이 실패해도 번역 본업은 그대로 돈다.
+try:
+    _LLM_LOG_DIR = os.path.expanduser("~/projects/hermes-llm-log")
+    if _LLM_LOG_DIR not in sys.path:
+        sys.path.append(_LLM_LOG_DIR)
+    import llm_log
+except Exception:  # noqa: BLE001
+    llm_log = None
+
+LLM_LOG_SERVICE = "yt"
+
+
+def _llm_track(provider: str, model: str | None = None, **fields):
+    if llm_log is None:
+        return contextlib.nullcontext(None)
+    try:
+        return llm_log.track(LLM_LOG_SERVICE, provider, model, **fields)
+    except Exception:  # noqa: BLE001
+        return contextlib.nullcontext(None)
+
+
+def _llm_host(base_url: str) -> str:
+    try:
+        if llm_log is not None:
+            return llm_log.local_host_label(base_url)
+        from urllib.parse import urlparse
+        return urlparse(base_url).netloc or base_url
+    except Exception:  # noqa: BLE001
+        return base_url
+
+
+def _llm_record_response(call, r) -> None:
+    """openai SDK 응답 객체의 model/usage를 call에 옮긴다. 실패해도 조용히."""
+    if call is None:
+        return
+    try:
+        usage = getattr(r, "usage", None)
+        call.tokens(input=getattr(usage, "prompt_tokens", None),
+                    output=getattr(usage, "completion_tokens", None))
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", None)
+        if cached is not None:
+            call.tokens(cache_read=cached)
+        if getattr(r, "model", None):
+            call.model = r.model
+    except Exception:  # noqa: BLE001
+        pass
+
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 RES_DIR    = os.path.join(BASE_DIR, "res")
@@ -145,25 +195,31 @@ def _is_conn_error(msg: str) -> bool:
     return "connection" in m or "timeout" in m or "refused" in m or "unreachable" in m
 
 
-def _call(user: str, temperature: float, rep_penalty: float) -> tuple[str, str]:
+def _call(user: str, temperature: float, rep_penalty: float,
+          *, title: str | None = None) -> tuple[str, str]:
     """활성 백엔드로 한 청크 번역. 연결이 안 되면 짧게 재시도한 뒤 다음 백엔드로 넘어간다.
 
     (한 번의 connection error로 영상 전체가 영구 실패 처리된 사례가 있었다)
+    시도 한 번이 LLM 이력 한 행이다(연결 실패도 error 행으로 남는다).
     """
     global _active
     last = None
     for idx in range(_active, len(BACKENDS)):
-        name, _base, model = BACKENDS[idx]
+        name, base, model = BACKENDS[idx]
         for attempt in range(2):
             try:
-                r = _client(idx).chat.completions.create(
-                    model=model,
-                    messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                              {"role": "user", "content": user}],
-                    max_tokens=MAX_TOKENS, temperature=temperature,
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False},
-                                "repetition_penalty": rep_penalty},
-                )
+                with _llm_track("local", model, purpose="translate", title=title,
+                                reasoning="no-think", backend="http",
+                                host=_llm_host(base)) as call:
+                    r = _client(idx).chat.completions.create(
+                        model=model,
+                        messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                                  {"role": "user", "content": user}],
+                        max_tokens=MAX_TOKENS, temperature=temperature,
+                        extra_body={"chat_template_kwargs": {"enable_thinking": False},
+                                    "repetition_penalty": rep_penalty},
+                    )
+                    _llm_record_response(call, r)
                 if idx != _active:
                     log(f"  ✓ {name} 백엔드로 전환")
                     _active = idx
@@ -203,16 +259,16 @@ def _looks_degenerate(out: str, chunk: str, finish: str) -> bool:
     return longest > 3000
 
 
-def translate_chunk(chunk: str, prev_tail: str = "") -> str:
+def translate_chunk(chunk: str, prev_tail: str = "", *, title: str | None = None) -> str:
     user = chunk
     if prev_tail:
         user = (f"[직전까지의 번역 끝부분 — 용어와 화자를 잇기 위한 참고. "
                 f"다시 번역하지 말 것]\n{prev_tail}\n\n[여기부터 번역]\n{chunk}")
-    out, finish = _call(user, 0.3, 1.05)
+    out, finish = _call(user, 0.3, 1.05, title=title)
     if _looks_degenerate(out, chunk, finish):
         # 폭주는 샘플링 운에 좌우되므로, 온도를 낮추고 반복 페널티를 올려 한 번 더.
         log(f"  ↻ 폭주 감지({len(out):,}자, finish={finish}) — 재시도")
-        out2, finish2 = _call(user, 0.15, 1.15)
+        out2, finish2 = _call(user, 0.15, 1.15, title=f"{title} (재시도)" if title else None)
         if not _looks_degenerate(out2, chunk, finish2):
             return out2
         log(f"  ⚠ 재시도도 비정상({len(out2):,}자) — 짧은 쪽을 채택")
@@ -226,10 +282,18 @@ def out_path_for(md_path: str) -> str:
     return os.path.join(TRANS_DIR, rel)
 
 
-def translate_file(md_path: str, yt_id: str = "") -> dict:
-    """전사 하나를 통째로 번역해 저장. 청크 단위로 이어쓰기 때문에 중단에 안전하다."""
+def _title_from_head(head: str, md_path: str) -> str:
+    m = re.search(r"^#\s+(.+)$", head or "", re.M)
+    return m.group(1).strip() if m else os.path.basename(md_path)
+
+
+def translate_file(md_path: str, yt_id: str = "", *, title: str | None = None) -> dict:
+    """전사 하나를 통째로 번역해 저장. 청크 단위로 이어쓰기 때문에 중단에 안전하다.
+
+    title은 LLM 이력용 영상 제목(없으면 전사 H1, 그것도 없으면 파일명)."""
     md = open(md_path, encoding="utf-8").read()
     head, body = split_body(md)
+    title = (title or "").strip() or _title_from_head(head, md_path)
     if not body.strip():
         return {"ok": False, "error": "본문 없음"}
     if not is_foreign(body):
@@ -267,7 +331,7 @@ def translate_file(md_path: str, yt_id: str = "") -> dict:
         tail = parts[-1][-CTX_TAIL_CHARS:] if parts else ""
         t0 = time.time()
         try:
-            out = translate_chunk(chunks[i], tail)
+            out = translate_chunk(chunks[i], tail, title=f"{title} [청크 {i + 1}/{len(chunks)}]")
         except Exception as e:                        # noqa: BLE001
             db.set_translation_state(yt_id, md_path, dest, "failed", len(parts),
                                      len(chunks), str(e)[:300])
@@ -385,7 +449,7 @@ def main() -> int:
             log("대상 없음")
             return 0
         log(f"대상: {nxt['title'][:60]}")
-        r = translate_file(nxt["md_path"], nxt["yt_id"])
+        r = translate_file(nxt["md_path"], nxt["yt_id"], title=nxt.get("title"))
         log(str(r))
         return 0 if r.get("ok") else 1
 
