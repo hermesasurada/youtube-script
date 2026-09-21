@@ -2091,6 +2091,9 @@ def llm_db(tmp_path, monkeypatch):
     path = tmp_path / "calls.db"
     monkeypatch.setenv("HERMES_LLM_LOG_DB", str(path))
     monkeypatch.delenv("HERMES_LLM_LOG_DISABLED", raising=False)
+    # 서빙 별칭→정식명 표도 격리한다. 이 맥에는 실제 표가 있어(qwen3.8-27b →
+    # Qwen3.8-27B-NVFP4) 격리하지 않으면 기록되는 모델명이 기계 상태에 좌우된다.
+    monkeypatch.setenv("HERMES_LLM_LOG_ALIASES", str(tmp_path / "no-aliases.json"))
     return path
 
 

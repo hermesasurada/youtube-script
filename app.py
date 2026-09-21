@@ -1864,9 +1864,10 @@ def _reindex_summary(save_path: str) -> None:
 TITLE_TR_MODEL   = os.environ.get("TITLE_TR_MODEL", "claude-sonnet-5")
 TITLE_TR_BATCH   = 40            # 한 번 호출에 묶는 제목 수
 TITLE_TR_TIMEOUT = 240
-# 추론 수준은 모델과 무관하게 medium 고정(2026-09-21 사용자 지시). 모델 순번은
+# 추론 수준은 모델과 무관하게 low 고정(2026-09-21 사용자 지시). 모델 순번은
 # 요약과 같이 돌지만 추론까지 따라가면 grok(high)이 제목 한 묶음에 49초를 쓴다.
-TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "medium")
+# 제목 번역은 판단이 아니라 옮기기라 낮은 추론으로 충분하다.
+TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "low")
 
 _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역한다.
 
