@@ -765,16 +765,32 @@
     }
   }
 
+  /**
+   * 요약 모델 라벨을 다른 LLM처럼 브랜드를 붙인 형식으로(2026-09-23). 옛 요약 파일은 그대로 두고
+   * 표시할 때만 고친다 — 파일을 바꾸면 mtime이 달라져 발행된 블로그 글이 전부 '수정됨'이 된다.
+   *   claude-opus-5 / claude-opus-4-8 → Claude Opus 5 / Claude Opus 4.8
+   *   Opus 4.8(접두어 없는 옛 표기)   → Claude Opus 4.8
+   * 뒤에 붙은 ' · 메모'는 보존한다. Grok·GPT 등 다른 표기는 손대지 않는다.
+   */
+  function normalizeModelLabel(label) {
+    const s = String(label || '').trim();
+    const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    let m = s.match(/^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\b.*)?$/i);
+    if (m) return `Claude ${cap(m[1])} ${m[3] ? `${m[2]}.${m[3]}` : m[2]}${m[4] || ''}`;
+    if (/^(Opus|Sonnet|Haiku|Fable)\b/.test(s)) return `Claude ${s}`;
+    return s;
+  }
+
   /** 마크다운 → HTML. YAML 프론트매터 제거 + CJK 강조 보정 후 marked.js + 소제목·요약 꾸미기. */
   function renderMarkdown(src) {
     src = String(src || '').replace(/^---\n[\s\S]*?\n---\n?/, '');
     // 요약 모델 표기 → 메타 칩(YouTube 보기 옆)으로 이동, 본문에선 제거.
     let model = '';
     // (신) HTML 주석 마커
-    src = src.replace(/<!--\s*SUMMARY_MODEL:([\s\S]*?)-->\s*/, (_, m) => { model = m.trim(); return ''; });
+    src = src.replace(/<!--\s*SUMMARY_MODEL:([\s\S]*?)-->\s*/, (_, m) => { model = normalizeModelLabel(m); return ''; });
     // (구) 화면에 보이던 '*🧠 요약 모델: ...*' 라인(상단 또는 하단 --- 구분선과 함께)도 흡수
     src = src.replace(/(?:\n*---[ \t]*\n*)?\*\s*🧠\s*요약\s*모델:\s*([^*\n]+?)\s*\*[ \t]*/g,
-      (_, m) => { if (!model) model = m.trim(); return ''; });
+      (_, m) => { if (!model) model = normalizeModelLabel(m); return ''; });
     // 압축률 마커 → '원문 대비 N%' 칩
     let compress = '';
     src = src.replace(/<!--\s*SUMMARY_COMPRESS:(\d+)\s*-->\s*/, (_, p) => { compress = p; return ''; });
@@ -1115,6 +1131,7 @@
 
   global.YS = {
     renderMarkdown,
+    normalizeModelLabel,
     mdToBloggerHtml,
     escapeHtml,
     attrEscape,

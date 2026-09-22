@@ -113,7 +113,7 @@ function handleChannelsOverlayClick(e) {
 }
 const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
 const MONITOR_NONE = 'none';
-const MONITOR_MODEL_LABELS = { opus: 'Opus 5', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
+const MONITOR_MODEL_LABELS = { opus: 'Claude Opus', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
 let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
 let monitorSummaryReasoning = { opus: 'default', gpt: 'high', grok: 'default' };
 let monitorSummaryNextModel = 'opus';

@@ -1281,7 +1281,7 @@ def test_monitor_model_labels_follow_grok_cli_default(monkeypatch):
     monkeypatch.setattr(app, "GROK_MODEL", "")
     labels = app._monitor_model_labels()
     assert labels["grok"] == "Grok 4.6"
-    assert labels["opus"] == "Opus 5"
+    assert labels["opus"].startswith("Claude Opus")   # 별칭 → 확인된 실제 버전 또는 버전 없음
     assert labels["none"] == "없음"
     payload = app.app.test_client().get("/channels").get_json()
     assert payload["model_labels"]["grok"] == "Grok 4.6"
@@ -2344,3 +2344,24 @@ def test_llm_logging_never_breaks_the_work(tmp_path, monkeypatch):
     assert app._summarize_with_grok("prompt", title="T") == expected_grok
     assert app._summarize_with_gpt("prompt", title="T") == expected_gpt
     assert tt.translate_chunk("hello", title="T") == expected_tr
+
+
+def test_model_label_brands_claude_like_other_llms(monkeypatch):
+    """Claude도 다른 LLM처럼 브랜드를 붙인다 — 예전엔 두 조각 ID가 원문 그대로 찍혔다."""
+    monkeypatch.setattr(app, "_CLAUDE_SEEN", {})
+    assert app._model_label("claude-opus-5-5") == "Claude Opus 5.5"
+    assert app._model_label("claude-opus-5") == "Claude Opus 5"
+    assert app._model_label("claude-opus-4-8") == "Claude Opus 4.8"
+    assert app._model_label("claude-haiku-4-5-20251001") == "Claude Haiku 4.5"
+    assert app._model_label("claude-fable-5-1") == "Claude Fable 5.1"
+    assert app._model_label("claude-sonnet-5") == "Claude Sonnet 5"
+    # 다른 LLM 표기는 그대로
+    assert app._model_label("grok-4.7") == "Grok 4.7"
+    assert app._model_label("gpt-6-astra") == "GPT 6 Astra"
+
+
+def test_model_label_alias_uses_last_confirmed_model(monkeypatch):
+    monkeypatch.setattr(app, "_CLAUDE_SEEN", {})
+    assert app._model_label("opus") == "Claude Opus"          # 아직 확인된 모델 없음
+    app._model_label("claude-opus-5-5")                         # 실제 응답으로 확인
+    assert app._model_label("opus") == "Claude Opus 5.5"
