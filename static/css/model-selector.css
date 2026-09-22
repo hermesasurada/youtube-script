@@ -65,3 +65,43 @@
 .msel-notes ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .msel-notes li { font-size: 11.5px; line-height: 1.45; color: var(--ms-muted); }
 .msel-notes b { margin-right: 4px; font-weight: 600; color: var(--ms-text); }
+/* 서비스 고유 행(wm 장문 우선): 기준값 · 모델 · 추론 */
+.msel-row.is-lead { grid-template-columns: 88px minmax(0, 1fr) 104px; }
+.msel-row.is-lead.is-off select,
+.msel-row.is-lead.is-off input { opacity: .5; }
+/* 켜기/끄기 스위치 — 머리줄 오른쪽 끝에 둔다 */
+.msel-switch { position: relative; display: inline-flex; align-items: center; margin-left: auto; cursor: pointer; }
+.msel-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.msel-switch span {
+  width: 30px; height: 18px; border-radius: 999px;
+  background: var(--ms-border); transition: background .15s;
+  position: relative;
+}
+.msel-switch span::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s;
+}
+.msel-switch input:checked + span { background: var(--ms-accent); }
+.msel-switch input:checked + span::after { transform: translateX(12px); }
+.msel-switch input:focus-visible + span { outline: 2px solid var(--ms-accent); outline-offset: 2px; }
+/* 슬롯 모드(yt 요약): 행 끝에 빼기 버튼, 목록 아래 추가 버튼 */
+.msel-row.has-remove { grid-template-columns: 20px minmax(0, 1fr) 104px 30px 22px; }
+.msel-remove {
+  width: 22px; height: 22px; padding: 0;
+  border: none; border-radius: 50%;
+  background: transparent; color: var(--ms-muted);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.msel-remove:hover:not(:disabled) { background: var(--ms-surface2); color: var(--ms-text); }
+.msel-remove:disabled { opacity: .3; cursor: default; }
+.msel-add {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px; margin-left: 26px;
+  border: 1px dashed var(--ms-border); border-radius: 6px;
+  background: transparent; color: var(--ms-muted);
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.msel-add:hover { border-color: var(--ms-accent); color: var(--ms-accent); }
+.msel-add span { font-size: 11px; opacity: .8; }

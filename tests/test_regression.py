@@ -1276,84 +1276,72 @@ def test_item_distill_overrides_channel_setting():
         conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
 
 
-def test_monitor_model_labels_follow_grok_cli_default(monkeypatch):
+def test_monitor_model_options_follow_grok_cli_default(monkeypatch):
     monkeypatch.setattr(app.llm_gateway, "resolve_grok_default_model", lambda: "grok-4.6")
     monkeypatch.setattr(app, "GROK_MODEL", "")
-    labels = app._monitor_model_labels()
-    assert labels["grok"] == "Grok 4.6"
-    assert labels["opus"].startswith("Opus")   # 별칭 → 확인된 실제 버전 또는 버전 없음
-    assert labels["none"] == "없음"
     payload = app.app.test_client().get("/channels").get_json()
-    assert payload["model_labels"]["grok"] == "Grok 4.6"
+    labels = {o["value"]: o["label"] for o in payload["model_options"]}
+    assert labels["grok"] == "Grok 4.6"
+    assert labels["opus"] == "Opus (최신 별칭)"
+    assert labels["claude-opus-5-5"] == "Opus 5.5"
+    assert labels["gpt-6-sol"] == "GPT 6 Sol"
 
 
-def test_monitor_model_orders_persist_independently():
+def test_monitor_summary_slots_and_capture_persist():
     db.init()
+    client = app.app.test_client()
     try:
-        saved = db.set_monitor_model_orders(
-            summary=["gpt", "opus", "grok"],
-            capture=["grok", "gpt", "opus"],
-        )
-        assert saved == {
-            "summary": ["gpt", "opus", "grok"],
-            "capture": ["grok", "gpt", "opus"],
-        }
-        assert db.get_monitor_model_orders() == saved
-
-        client = app.app.test_client()
+        slots = [{"model": "gpt-6-sol", "effort": "medium"},
+                 {"model": "gpt-6-luna", "effort": "low"},       # 같은 계열도 여러 슬롯 가능
+                 {"model": "claude-opus-5-5", "effort": "xhigh"},
+                 {"model": "grok", "effort": "default"}]
+        r = client.patch("/channels/model-orders", json={"summary_slots": slots}).get_json()
+        assert r["summary_slots"] == slots
+        assert r["slot_limits"] == {"min": 1, "max": 5}
+        r = client.patch("/channels/model-orders",
+                         json={"capture": ["gpt-6-luna", "grok", "none"]}).get_json()
+        assert r["capture_models"] == ["gpt-6-luna", "grok", "none"]
+        assert r["summary_slots"] == slots                        # 캡처만 바꿔도 요약은 그대로
         payload = client.get("/channels").get_json()
-        assert payload["model_orders"] == saved
-        assert payload["summary_reasoning"] == {
-            "opus": "default", "gpt": "high", "grok": "default",
-        }
-        assert payload["summary_next_model"] == "gpt"
-        changed = client.patch(
-            "/channels/model-orders", json={"summary": ["opus", "grok", "gpt"]}
-        ).get_json()
-        assert changed["model_orders"]["summary"] == ["opus", "grok", "gpt"]
-        assert changed["model_orders"]["capture"] == ["grok", "gpt", "opus"]
-        bad = client.patch(
-            "/channels/model-orders", json={"capture": ["opus", "opus", "gpt"]}
-        )
-        assert bad.status_code == 400
-        truncated = client.patch(
-            "/channels/model-orders", json={"summary": ["grok", "none", "none"]}
-        )
-        assert truncated.status_code == 400
-        middle = client.patch(
-            "/channels/model-orders", json={"summary": ["opus", "none", "gpt"]}
-        )
-        assert middle.status_code == 400
-        reasoning = client.patch(
-            "/channels/model-orders", json={"summary_reasoning": {"opus": "xhigh"}}
-        ).get_json()
-        assert reasoning["summary_reasoning"]["opus"] == "xhigh"
-        assert reasoning["summary_reasoning"]["gpt"] == "high"
-        bad_reasoning = client.patch(
-            "/channels/model-orders", json={"summary_reasoning": {"gpt": "extreme"}}
-        )
-        assert bad_reasoning.status_code == 400
+        assert payload["summary_slots"] == slots and payload["capture_models"][0] == "gpt-6-luna"
+        # 경계: 0개·6개·모르는 모델·잘못된 추론은 거부
+        for bad in ([], slots + slots[:2], [{"model": "gpt-9"}],
+                    [{"model": "grok", "effort": "extreme"}]):
+            assert client.patch("/channels/model-orders",
+                                json={"summary_slots": bad}).status_code == 400
+        # 캡처: 1순위 비움, 중간 none 뒤 모델은 거부
+        for bad in (["none", "grok", "none"], ["grok", "none", "opus"], ["grok", "gpt-9", "none"]):
+            assert client.patch("/channels/model-orders", json={"capture": bad}).status_code == 400
+        assert client.patch("/channels/model-orders",
+                            json={"summary_slots": [{"model": "grok"}]}).status_code == 200  # 최소 1개
     finally:
-        db.set_monitor_model_orders(
-            summary=["opus", "gpt", "grok"], capture=["opus", "gpt", "grok"]
-        )
-        db.set_monitor_summary_reasoning(
-            {"opus": "default", "gpt": "high", "grok": "default"}
-        )
+        db.set_monitor_summary_slots([{"model": "opus", "effort": "default"},
+                                      {"model": "gpt-6-astra", "effort": "high"},
+                                      {"model": "grok", "effort": "default"}])
+        db.set_monitor_capture_models(["opus", "gpt-6-astra", "grok"])
 
 
-def test_monitor_summary_round_robin_rotates_and_wraps():
+def test_monitor_summary_slot_round_robin_rotates_and_wraps():
     db.init()
     try:
-        db.set_monitor_model_orders(summary=["gpt", "grok", "opus"])
-        rounds = [db.reserve_monitor_summary_round() for _ in range(4)]
-        assert [item["primary"] for item in rounds] == ["gpt", "grok", "opus", "gpt"]
-        assert rounds[0]["models"] == ["gpt", "grok", "opus"]
-        assert rounds[1]["models"] == ["grok", "opus", "gpt"]
-        assert rounds[2]["models"] == ["opus", "gpt", "grok"]
-        assert rounds[0]["reasoning"]["gpt"] == "high"
+        db.set_monitor_summary_slots([{"model": "gpt-6-sol", "effort": "high"},
+                                      {"model": "grok", "effort": "default"},
+                                      {"model": "opus", "effort": "low"}])
+        rounds = [db.reserve_monitor_summary_slots() for _ in range(4)]
+        assert [r["primary"]["model"] for r in rounds] == ["gpt-6-sol", "grok", "opus", "gpt-6-sol"]
+        assert [s["model"] for s in rounds[1]["slots"]] == ["grok", "opus", "gpt-6-sol"]
+        assert rounds[0]["slots"][0]["effort"] == "high"
     finally:
-        db.set_monitor_model_orders(summary=["opus", "gpt", "grok"])
+        db.set_monitor_summary_slots([{"model": "opus", "effort": "default"},
+                                      {"model": "gpt-6-astra", "effort": "high"},
+                                      {"model": "grok", "effort": "default"}])
+
+
+def test_legacy_family_capture_order_maps_to_models():
+    """옛 저장값(계열 키)도 구체 모델로 읽힌다 — gpt는 캡처 기본 GPT 비전 모델."""
+    legacy = {"opus": "opus", "gpt": "gpt-6-astra", "grok": "grok"}
+    assert app.llm_gateway.normalize_capture_models(["grok", "gpt", "opus"], legacy) == \
+        ["grok", "gpt-6-astra", "opus"]
 
 
 def test_membership_capture_failure_is_not_retried(monkeypatch):
@@ -1399,8 +1387,7 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
     # 캡처 재시도는 본편(pending)과 분리된 전용 인출구로 나온다
     monkeypatch.setattr(channel_monitor.db, "queue_claim_one", lambda: None)
     monkeypatch.setattr(channel_monitor.db, "queue_claim_kf_retry", lambda: retry)
-    monkeypatch.setattr(channel_monitor.db, "get_monitor_model_orders",
-                        lambda: {"summary": ["opus"], "capture": ["opus"]})
+    monkeypatch.setattr(channel_monitor.db, "get_monitor_capture_models", lambda: ["opus"])
     monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)
     monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
     monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda: (True, "claude", ""))

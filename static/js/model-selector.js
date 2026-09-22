@@ -14,7 +14,10 @@
      hint, status, notes: [{rule, detail}], extra: html,
      capture:  null | {tag, hint, rows: [{value, options: [{value, label}]}]}
    }
-   handlers = { onModel(index, value), onEffort(slot, value), onCapture(index, value) } */
+   슬롯 모드(yt): order 대신 slots: [{model, effort}], nextIndex, limits: {min, max}.
+     행마다 모델·추론을 따로 고르고(같은 계열 여러 번 가능) 행을 더하고 뺀다.
+   handlers = { onModel(index, value), onEffort(slot, value), onCapture(index, value),
+                onSlotModel(i, v), onSlotEffort(i, v), onAddSlot(), onRemoveSlot(i) } */
 (function (global) {
   const NONE = '__none__';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -28,7 +31,28 @@
     if (!root) return;
     const versions = state.versions || [];
     const efforts = state.efforts || [];
-    const rows = (state.order || []).map((slot, i) => {
+    const slotRows = () => {
+      const lim = state.limits || { min: 1, max: 5 };
+      const list = state.slots || [];
+      const rows = list.map((s, i) => {
+        const isNext = i === state.nextIndex;
+        const canRemove = list.length > lim.min;
+        return `<div class="msel-row has-remove${isNext ? ' is-next' : ''}">`
+          + `<span class="msel-step">${i + 1}</span>`
+          + `<select data-msel="slot-model" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 모델">`
+          + versions.map(v => option(v.value, v.label, v.value === s.model)).join('') + `</select>`
+          + `<select data-msel="slot-effort" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 추론 수준">`
+          + efforts.map(e => option(e.value, e.label, e.value === s.effort)).join('') + `</select>`
+          + `<span class="msel-next">${isNext ? '다음' : ''}</span>`
+          + `<button type="button" class="msel-remove" data-msel="slot-remove" data-index="${i}"`
+          + `${canRemove ? '' : ' disabled'} aria-label="${i + 1}번 슬롯 빼기" title="슬롯 빼기">×</button></div>`;
+      }).join('');
+      const add = list.length < lim.max
+        ? `<button type="button" class="msel-add" data-msel="slot-add">+ 슬롯 추가 `
+          + `<span>${list.length}/${lim.max}</span></button>` : '';
+      return rows + add;
+    };
+    const rows = state.slots ? slotRows() : (state.order || []).map((slot, i) => {
       const models = versions.map(v =>
         option(v.value, v.label, slot === v.slot && (state.version || {})[slot] === v.value)).join('')
         + (state.allowNone ? option(NONE, '사용 안 함', !slot) : '');
@@ -68,10 +92,19 @@
       root.addEventListener('change', e => {
         const el = e.target.closest('[data-msel]');
         if (!el || !root._mselHandlers) return;
-        const h = root._mselHandlers, kind = el.dataset.msel;
-        if (kind === 'model' && h.onModel) h.onModel(Number(el.dataset.index), el.value === NONE ? null : el.value);
+        const h = root._mselHandlers, kind = el.dataset.msel, i = Number(el.dataset.index);
+        if (kind === 'model' && h.onModel) h.onModel(i, el.value === NONE ? null : el.value);
         if (kind === 'effort' && h.onEffort) h.onEffort(el.dataset.slot, el.value);
-        if (kind === 'capture' && h.onCapture) h.onCapture(Number(el.dataset.index), el.value);
+        if (kind === 'capture' && h.onCapture) h.onCapture(i, el.value);
+        if (kind === 'slot-model' && h.onSlotModel) h.onSlotModel(i, el.value);
+        if (kind === 'slot-effort' && h.onSlotEffort) h.onSlotEffort(i, el.value);
+      });
+      root.addEventListener('click', e => {
+        const el = e.target.closest('button[data-msel]');
+        if (!el || el.disabled || !root._mselHandlers) return;
+        const h = root._mselHandlers;
+        if (el.dataset.msel === 'slot-add' && h.onAddSlot) h.onAddSlot();
+        if (el.dataset.msel === 'slot-remove' && h.onRemoveSlot) h.onRemoveSlot(Number(el.dataset.index));
       });
     }
     root._mselHandlers = handlers || {};

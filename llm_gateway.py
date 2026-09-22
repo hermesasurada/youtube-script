@@ -271,14 +271,87 @@ MODEL_VERSION_CHOICES = {
 }
 
 
-def normalize_model_versions(value, defaults: dict[str, str]) -> dict[str, str]:
-    """슬롯별 모델 버전. 목록에 없는 값은 기본값(환경변수 기준)으로 되돌린다."""
-    raw = value if isinstance(value, dict) else {}
-    out = {}
-    for key, choices in MODEL_VERSION_CHOICES.items():
-        picked = str(raw.get(key) or "").strip()
-        out[key] = picked if picked in choices else defaults.get(key, choices[0])
+# ── 요약 슬롯(2026-09-23) ──────────────────────────────────────────────
+# 요약 순번은 계열 목록이 아니라 슬롯 목록이다. 슬롯 하나 = {"model": 구체 모델,
+# "effort": 추론 수준}. 같은 계열이 여러 슬롯에 들어갈 수 있다(GPT Sol·Luna 등).
+SUMMARY_MODEL_CHOICES = MODEL_VERSION_CHOICES["opus"] + MODEL_VERSION_CHOICES["gpt"] + ("grok",)
+MIN_SUMMARY_SLOTS = 1
+MAX_SUMMARY_SLOTS = 5
+CAPTURE_SLOTS = 3
+
+
+def model_family(model: str) -> str:
+    """구체 모델 → 계열 키(opus/gpt/grok). 옛 저장값의 계열 키도 그대로 받는다."""
+    m = str(model or "").strip().lower()
+    if m.startswith("gpt"):
+        return "gpt"
+    if m.startswith("grok"):
+        return "grok"
+    return "opus"
+
+
+def normalize_summary_slots(value, defaults: list[dict]) -> list[dict]:
+    """슬롯 목록 정규화: 알 수 없는 모델은 버리고, 추론 수준은 없으면 default.
+    1개 미만이면 기본값, 5개를 넘으면 앞에서 자른다."""
+    out: list[dict] = []
+    for raw in value if isinstance(value, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        model = str(raw.get("model") or "").strip()
+        if model not in SUMMARY_MODEL_CHOICES:
+            continue
+        effort = str(raw.get("effort") or "default").strip().lower()
+        out.append({"model": model,
+                    "effort": effort if effort in REASONING_LEVELS else "default"})
+    if len(out) < MIN_SUMMARY_SLOTS:
+        return [dict(s) for s in defaults]
+    return out[:MAX_SUMMARY_SLOTS]
+
+
+def is_valid_summary_slots(value) -> bool:
+    if not isinstance(value, list) or not (MIN_SUMMARY_SLOTS <= len(value) <= MAX_SUMMARY_SLOTS):
+        return False
+    return all(isinstance(s, dict)
+               and s.get("model") in SUMMARY_MODEL_CHOICES
+               and str(s.get("effort") or "default").lower() in REASONING_LEVELS
+               for s in value)
+
+
+def normalize_capture_models(value, legacy: dict[str, str]) -> list[str]:
+    """캡처 순차 폴백 3칸 — 구체 모델 또는 none. 옛 계열 키(gpt 등)는 legacy로 바꾼다.
+    1순위는 비울 수 없고, none 뒤는 모두 none이다."""
+    raw = value if isinstance(value, list) else []
+    out: list[str] = []
+    for item in raw[:CAPTURE_SLOTS]:
+        key = str(item or "").strip()
+        if key == NONE_KEY:
+            out.append(NONE_KEY)
+        elif key in SUMMARY_MODEL_CHOICES:
+            out.append(key)
+        elif key in legacy:
+            out.append(legacy[key])
+    while len(out) < CAPTURE_SLOTS:
+        out.append(NONE_KEY)
+    if out[0] == NONE_KEY:
+        out[0] = legacy.get("opus", "opus")
+    if NONE_KEY in out:
+        cut = out.index(NONE_KEY)
+        out = out[:cut] + [NONE_KEY] * (CAPTURE_SLOTS - cut)
     return out
+
+
+def is_valid_capture_models(value) -> bool:
+    if not isinstance(value, list) or len(value) != CAPTURE_SLOTS:
+        return False
+    if value[0] == NONE_KEY:
+        return False
+    seen_none = False
+    for item in value:
+        if item == NONE_KEY:
+            seen_none = True
+        elif seen_none or item not in SUMMARY_MODEL_CHOICES:
+            return False
+    return True
 
 
 def _parse_model_tokens(value) -> list[str]:

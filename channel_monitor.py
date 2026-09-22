@@ -484,11 +484,12 @@ def _get_prompt() -> str:
 
 
 def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
-                  summary_models=None, capture_models=None, summary_reasoning=None) -> dict:
+                  summary_models=None, capture_models=None, summary_reasoning=None,
+                  summary_slots=None) -> dict:
     """전사→요약→캡처를 서버 엔드포인트로 순차 수행. 완료 요약 파일 경로 반환.
 
-    summary_models: 이번 작업의 순환 시작 모델부터 배치한 요약 폴백 순서.
-    summary_reasoning: 요약 모델별 추론 수준. capture_models는 기존 캡처 폴백 순서.
+    summary_slots: 이번 작업의 시작 슬롯부터 돈 요약 슬롯 목록(모델+추론). 있으면 우선.
+    summary_models/summary_reasoning: 옛 계열 순서 호출 호환. capture_models는 캡처 폴백 순서.
     skip_claude는 구버전 호출 호환용이며 명시 순서가 있으면 사용하지 않는다.
     """
     url = v["url"]
@@ -538,7 +539,9 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     summary_err = None
     await_err = False
     sum_body = {"txt_path": txt_path, "prompt": prompt}
-    if summary_models is not None:
+    if summary_slots is not None:
+        sum_body["slots"] = summary_slots
+    elif summary_models is not None:
         sum_body["models"] = llm_gateway.normalize_model_order(summary_models)
         if summary_reasoning is not None:
             sum_body["reasoning_levels"] = llm_gateway.normalize_reasoning_levels(
@@ -579,7 +582,7 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     try:
         kf_body = {"txt_path": txt_path, "url": url}
         if capture_models is not None:
-            kf_body["models"] = llm_gateway.normalize_model_order(capture_models)
+            kf_body["models"] = list(capture_models)       # 구체 모델 목록(서버가 정규화)
         elif skip_claude:
             kf_body["skip_claude"] = True
             kf_body["mode"] = "grok"
@@ -610,7 +613,7 @@ def process_capture_only(txt_path: str, url: str, *, capture_models=None) -> dic
     """
     body = {"txt_path": txt_path, "url": url}
     if capture_models is not None:
-        body["models"] = llm_gateway.normalize_model_order(capture_models)
+        body["models"] = list(capture_models)
     return requests.post(f"{BASE}/keyframes", json=body, timeout=KF_TIMEOUT).json()
 
 
@@ -623,7 +626,7 @@ def drain() -> None:
     받는 작업이라 주기당 1건으로 제한된다. deferred는 due가 되면 poll 단계에서
     pending으로 복귀한다.
     """
-    capture_order = db.get_monitor_model_orders()["capture"]
+    capture_order = db.get_monitor_capture_models()
     _drain_main_one(capture_order)
     _drain_kf_retry_one(capture_order)
 
@@ -705,27 +708,34 @@ def _drain_main_one(capture_order) -> None:
         return
     title = v["title"] or v["yt_id"]
     head = _notify_head(v, title)
-    summary_round = db.reserve_monitor_summary_round()
-    summary_order = summary_round["models"]
-    primary = summary_round["primary"]
-    proceed, mode, detail = summarizer_gate(summary_order)
+    summary_round = db.reserve_monitor_summary_slots()
+    slots = summary_round["slots"]
+    primary = slots[0]["model"]
+    # 게이트는 계열 단위(Claude 인증·CLI 존재)라, 슬롯 계열 순서로 물어 처음 쓸 수 있는
+    # 계열을 받고 그 계열의 첫 슬롯부터 넘긴다(앞의 쓸 수 없는 슬롯은 건너뛴다).
+    families = []
+    for slot in slots:
+        fam = llm_gateway.model_family(slot["model"])
+        if fam not in families:
+            families.append(fam)
+    proceed, mode, detail = summarizer_gate(families)
     if not proceed:
         # 요약 경로가 없으면 시도 자체를 안 한 것 — 예산을 태우지 않고 되돌린다.
         db.queue_unclaim(v["id"])
         notify("⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
                f"사유: {detail}")
         return
-    active_summary_order = summary_order[summary_order.index(mode):]
+    start = next(i for i, x in enumerate(slots) if llm_gateway.model_family(x["model"]) == mode)
+    active_slots = slots[start:]
     if detail:
-        notify(f"⚠️ 이번 요약 순번 {primary.upper()} 사용 불가 — "
-               f"{mode.upper()}부터 순환 폴백\n{detail}")
+        notify(f"⚠️ 이번 요약 순번 {primary} 사용 불가 — "
+               f"{active_slots[0]['model']}부터 순환 폴백\n{detail}")
 
-    log(f"[drain] 처리 시작: {title} (round={primary}, mode={mode})")
+    log(f"[drain] 처리 시작: {title} (round={primary}, start={active_slots[0]['model']})")
     try:
         res = process_video(
             v, _get_prompt(),
-            summary_models=active_summary_order,
-            summary_reasoning=summary_round["reasoning"],
+            summary_slots=active_slots,
             capture_models=capture_order,
         )
         kf_note = res.get("kf_note")

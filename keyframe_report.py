@@ -539,25 +539,27 @@ JSON 배열로만 답하라(다른 설명 금지):
                                  status="timeout" if getattr(r, "timed_out", False) else "error")
         return parsed
 
-    def _call_claude() -> tuple[list | None, str]:
-        with llm_gateway.llm_track("claude", VISION_MODEL, purpose="vision", title=title,
+    # 캡처 모델은 모니터 선택기에서 구체 모델로 고른다(2026-09-23). 추론 수준은 넘기지
+    # 않는다 — low/high 비교에서 유지·소제목 판정 8/8, 캡션 5/8이 같았고 시간만 늘었다.
+    def _call_claude(model: str = VISION_MODEL) -> tuple[list | None, str]:
+        with llm_gateway.llm_track("claude", model, purpose="vision", title=title,
                                    backend="cli") as call:
             r = llm_gateway.run_command(
-                [_claude_bin(), "-p", "--model", VISION_MODEL, "--output-format", "json", prompt],
+                [_claude_bin(), "-p", "--model", model, "--output-format", "json", prompt],
                 timeout=VISION_TIMEOUT)
             stdout, usage = llm_gateway.unwrap_claude_json(r.stdout or "")
             llm_gateway.llm_fill(call, usage=usage)
             r = llm_gateway.ProcessResult(r.returncode, stdout, r.stderr, r.timed_out)
             return _logged(call, r, _parse(r))
 
-    def _call_gpt() -> tuple[list | None, str]:
+    def _call_gpt(model: str = GPT_VISION_MODEL) -> tuple[list | None, str]:
         """Codex CLI에 후보 이미지를 직접 첨부해 같은 JSON 판정을 요청한다."""
-        with llm_gateway.llm_track("codex", GPT_VISION_MODEL, purpose="vision", title=title,
+        with llm_gateway.llm_track("codex", model, purpose="vision", title=title,
                                    backend="cli") as call:
             try:
                 r = llm_gateway.run_codex_prompt(
                     prompt,
-                    model=GPT_VISION_MODEL,
+                    model=model,
                     timeout=VISION_TIMEOUT,
                     images=[path for _, path in frames],
                 )
@@ -567,7 +569,7 @@ JSON 배열로만 답하라(다른 설명 금지):
             llm_gateway.llm_fill(call, usage=llm_gateway.codex_usage(getattr(r, "events", "")))
             return _logged(call, r, _parse(r))
 
-    def _call_grok() -> tuple[list | None, str]:
+    def _call_grok(model: str = "grok") -> tuple[list | None, str]:
         """요약과 같은 Grok 폴백. grok CLI는 이미지 첨부 옵션이 없지만 프롬프트의 @경로를
         읽어 비전이 동작한다(TUI가 뜨지 않도록 --prompt-file 단일턴으로 호출)."""
         grok = llm_gateway.resolve_grok_bin()
@@ -600,21 +602,23 @@ JSON 배열로만 답하라(다른 설명 금지):
     # GPT/Grok은 각 1회 시도해 다음 폴백이 과도하게 지연되지 않게 한다.
     _LAST_VISION_ERR = ""
     data = None
-    legacy_default = ["opus"] + (["grok"] if GROK_VISION_FALLBACK else [])
-    order = llm_gateway.normalize_model_order(
-        legacy_default if model_order is None else model_order,
-        default=legacy_default if model_order is None else llm_gateway.MODEL_KEYS,
-    )
+    legacy = {"opus": VISION_MODEL, "gpt": GPT_VISION_MODEL, "grok": "grok"}
+    if model_order is None:
+        order = [VISION_MODEL] + (["grok"] if GROK_VISION_FALLBACK else [])
+    else:
+        # 구체 모델 목록(옛 계열 키도 받는다: gpt → GPT_VISION_MODEL).
+        order = llm_gateway.normalize_capture_models(model_order, legacy)
     failures: list[str] = []
     callers = {"opus": _call_claude, "gpt": _call_gpt, "grok": _call_grok}
-    for key in order:
-        if key == "none":
+    for model in order:
+        if model == "none":
             break
+        key = llm_gateway.model_family(model)
         if key not in callers:
             continue
         attempts = 3 if key == "opus" else 1
         for attempt in range(attempts):
-            data, err = callers[key]()
+            data, err = callers[key](model)
             if data is not None:
                 log(f"  비전 {key} 성공")
                 break

@@ -2,29 +2,29 @@
 import llm_gateway
 
 
-DEFAULTS = {"opus": "opus", "gpt": "gpt-6-astra"}
-
-
 def test_choices_include_new_models():
     assert "claude-opus-5-5" in llm_gateway.MODEL_VERSION_CHOICES["opus"]
     assert {"gpt-6-sol", "gpt-6-luna"} <= set(llm_gateway.MODEL_VERSION_CHOICES["gpt"])
 
 
-def test_normalize_keeps_valid_and_restores_invalid():
-    out = llm_gateway.normalize_model_versions(
-        {"opus": "claude-opus-5-5", "gpt": "gpt-9-fake"}, DEFAULTS)
-    assert out == {"opus": "claude-opus-5-5", "gpt": "gpt-6-astra"}
+def test_slots_drop_unknown_models_and_cap_at_five():
+    d = [{"model": "opus", "effort": "default"}]
+    out = llm_gateway.normalize_summary_slots(
+        [{"model": "claude-opus-5-5", "effort": "HIGH"}, {"model": "gpt-9"}], d)
+    assert out == [{"model": "claude-opus-5-5", "effort": "high"}]
+    assert llm_gateway.normalize_summary_slots([], d) == d
+    assert len(llm_gateway.normalize_summary_slots([{"model": "grok"}] * 9, d)) == 5
 
 
-def test_normalize_empty_uses_defaults():
-    assert llm_gateway.normalize_model_versions(None, DEFAULTS) == DEFAULTS
-
-
-def test_patch_rejects_unknown_version():
+def test_summary_attempts_follow_slots():
+    """요약 실행이 슬롯의 모델·추론을 그대로 쓴다(같은 계열 두 슬롯도 각각)."""
     import app
-    client = app.app.test_client()
-    r = client.patch("/channels/model-orders", json={"model_versions": {"gpt": "gpt-9-fake"}})
-    assert r.status_code == 400
+    att = app._summary_attempts(slots=[{"model": "gpt-6-sol", "effort": "low"},
+                                       {"model": "gpt-6-luna", "effort": "high"},
+                                       {"model": "claude-opus-5-5", "effort": "default"}])
+    assert [(a["family"], a["model"], a["effort"]) for a in att] == [
+        ("gpt", "gpt-6-sol", "low"), ("gpt", "gpt-6-luna", "high"),
+        ("opus", "claude-opus-5-5", "default")]
 
 
 def test_shared_selector_files_match_website_monitor():

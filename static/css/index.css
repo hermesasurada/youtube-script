@@ -2685,3 +2685,7 @@ header h1 { font-size: 15px; }
 .term-excl-form { display: flex; gap: 6px; }
 .term-excl-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; font: inherit; font-size: .85rem; }
 .term-excl-add { padding: 6px 12px; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; background: var(--surface, #fff); cursor: pointer; font: inherit; font-size: .85rem; }
+
+/* 텍스트 버튼 안의 선 아이콘(채널 모니터 톱니 — wm 설정 버튼과 같은 그림) */
+.btn-with-icon { display: inline-flex; align-items: center; gap: 5px; }
+.btn-with-icon .btn-icon { flex: 0 0 auto; }

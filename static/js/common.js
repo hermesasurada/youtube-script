@@ -1133,64 +1133,55 @@
 
   /* ── 채널 모니터 모델 선택기(데스크톱·모바일 공용) ─────────────────────
      화면은 공통 렌더러(ModelSelector, static/js/model-selector.js — wm과 같은 파일)가
-     그리고, 여기서는 상태·저장만 맡는다. 예전에는 두 페이지가 같은 코드를 따로 가졌다. */
-  const MM_SLOTS = ['opus', 'gpt', 'grok'];
+     그리고, 여기서는 상태·저장만 맡는다.
+     요약: 슬롯 1~5개(슬롯마다 구체 모델+추론 수준, 같은 계열 여러 번 가능), 라운드로빈.
+     캡처: 3칸 순차 폴백, 구체 모델만(추론 수준은 쓰지 않는다 — 판정 결과가 같았다). */
   const MM_NONE = 'none';
   const _mm = {
-    summary: MM_SLOTS.slice(), capture: MM_SLOTS.slice(),
-    version: { opus: 'opus', gpt: 'gpt-6-astra', grok: 'grok' },
-    effort: { opus: 'default', gpt: 'high', grok: 'default' },
-    next: 'opus', versions: [], notes: [], status: '',
+    slots: [], nextIndex: 0, limits: { min: 1, max: 5 },
+    capture: ['opus', 'gpt-6-astra', 'grok'],
+    options: [], notes: [], status: '',
     efforts: [
       { value: 'default', label: '모델 기본값' }, { value: 'low', label: '낮음' },
       { value: 'medium', label: '보통' }, { value: 'high', label: '높음' },
       { value: 'xhigh', label: '매우 높음' }, { value: 'max', label: '최대' },
     ],
-    captureLabels: { opus: 'Opus', gpt: 'GPT', grok: 'Grok', none: '없음' },
     root: null, onSaved: null,
   };
 
   function mmLoad(d) {
     if (!d) return;
-    if (d.model_orders) {
-      _mm.summary = d.model_orders.summary || _mm.summary;
-      _mm.capture = d.model_orders.capture || _mm.capture;
-    }
-    if (d.summary_reasoning) _mm.effort = d.summary_reasoning;
-    if (d.summary_next_model) _mm.next = d.summary_next_model;
+    if (Array.isArray(d.summary_slots)) _mm.slots = d.summary_slots.map(x => ({ ...x }));
+    if (typeof d.summary_next_index === 'number') _mm.nextIndex = d.summary_next_index;
+    if (d.slot_limits) _mm.limits = d.slot_limits;
+    if (Array.isArray(d.capture_models)) _mm.capture = d.capture_models.slice();
+    if (d.model_options) _mm.options = d.model_options;
     if (d.reasoning_options) _mm.efforts = d.reasoning_options;
-    if (d.model_versions) _mm.version = Object.assign({ grok: 'grok' }, d.model_versions);
-    if (d.version_options) _mm.versions = d.version_options;
-    if (d.capture_labels) _mm.captureLabels = d.capture_labels;
     if (d.model_notes) _mm.notes = d.model_notes;
   }
   /** 페이지 캐시에 되써 둘 필드만 추린다(모달을 다시 열 때 최신 상태로 그리게). */
   function mmFields(d) {
     const out = {};
-    ['model_orders', 'model_labels', 'summary_reasoning', 'summary_next_model',
-     'model_versions', 'version_options', 'capture_labels', 'model_notes']
+    ['summary_slots', 'summary_next_index', 'slot_limits', 'capture_models',
+     'model_options', 'reasoning_options', 'model_notes']
       .forEach(k => { if (d && d[k] !== undefined) out[k] = d[k]; });
     return out;
   }
 
-  // 캡처는 순차 폴백: '없음' 뒤로는 모두 '없음', 1순위는 비울 수 없다.
-  function mmPadCapture(order) {
-    const next = (order || []).slice(0, MM_SLOTS.length);
-    while (next.length < MM_SLOTS.length) next.push(MM_NONE);
-    return next;
-  }
+  // 캡처 순차 폴백: 1순위는 비울 수 없고 '없음' 뒤는 모두 '없음'.
   function mmCaptureChoices(order, index) {
+    const models = _mm.options.map(o => o.value);
     if (index > 0 && order.slice(0, index).includes(MM_NONE)) return [MM_NONE];
-    return index === 0 ? MM_SLOTS.slice() : MM_SLOTS.concat(MM_NONE);
+    return index === 0 ? models : models.concat(MM_NONE);
   }
   function mmApplyCapture(order, index, selected) {
-    const next = mmPadCapture(order);
+    const next = order.slice();
     if (index === 0 && selected === MM_NONE) return next;
     if (selected === MM_NONE) {
       for (let i = index; i < next.length; i++) next[i] = MM_NONE;
       return next;
     }
-    const other = next.indexOf(selected);
+    const other = next.indexOf(selected);        // 같은 모델을 두 번 시도할 이유가 없다 — 자리 교환
     if (other >= 0 && other !== index) [next[index], next[other]] = [next[other], next[index]];
     else next[index] = selected;
     const noneAt = next.indexOf(MM_NONE);
@@ -1201,43 +1192,51 @@
   function mmRender() {
     const MS = global.ModelSelector;
     if (!_mm.root || !MS) return;
-    const cap = mmPadCapture(_mm.capture);
+    const label = v => v === MM_NONE ? '없음' : ((_mm.options.find(o => o.value === v) || {}).label || v);
     MS.render(_mm.root, {
-      order: _mm.summary, version: _mm.version, effort: _mm.effort, next: _mm.next,
-      versions: _mm.versions, efforts: _mm.efforts, allowNone: false,
-      hint: '영상마다 시작 모델을 한 칸씩 넘기고, 실패하면 다음 순번이 받는다.',
+      slots: _mm.slots, nextIndex: _mm.nextIndex, limits: _mm.limits,
+      versions: _mm.options, efforts: _mm.efforts,
+      hint: '영상마다 시작 슬롯을 한 칸씩 넘기고, 실패하면 다음 슬롯이 받는다. 같은 모델을 여러 슬롯에 둘 수 있다.',
       status: _mm.status, notes: _mm.notes,
       capture: {
         tag: '순차 폴백', hint: '1순위부터 시도하고 실패할 때만 다음으로 넘어간다.',
-        rows: cap.map((v, i) => ({
+        rows: _mm.capture.map((v, i) => ({
           value: v,
-          options: mmCaptureChoices(cap, i).map(k => ({ value: k, label: _mm.captureLabels[k] || k })),
+          options: mmCaptureChoices(_mm.capture, i).map(k => ({ value: k, label: label(k) })),
         })),
       },
     }, {
-      onModel(index, value) {
-        const r = MS.pick({ order: _mm.summary, version: _mm.version, versions: _mm.versions }, index, value);
-        if (!r) return mmRender();
-        mmSave({ summary: r.order, model_versions: { opus: r.version.opus, gpt: r.version.gpt } },
-               () => { _mm.summary = r.order; _mm.version = r.version; });
+      onSlotModel(i, value) {
+        mmSave('slots', () => { _mm.slots[i] = { ..._mm.slots[i], model: value }; });
       },
-      onEffort(slot, level) {
-        mmSave({ summary_reasoning: { [slot]: level } },
-               () => { _mm.effort = Object.assign({}, _mm.effort, { [slot]: level }); });
+      onSlotEffort(i, value) {
+        mmSave('slots', () => { _mm.slots[i] = { ..._mm.slots[i], effort: value }; });
       },
-      onCapture(index, value) {
-        const next = mmApplyCapture(_mm.capture, index, value);
-        mmSave({ capture: next }, () => { _mm.capture = next; });
+      onAddSlot() {
+        if (_mm.slots.length >= _mm.limits.max) return;
+        // 아직 안 쓴 모델을 먼저 제안한다(다 쓰였으면 첫 모델).
+        const used = new Set(_mm.slots.map(x => x.model));
+        const fresh = _mm.options.find(o => !used.has(o.value)) || _mm.options[0];
+        mmSave('slots', () => { _mm.slots.push({ model: fresh.value, effort: 'default' }); });
+      },
+      onRemoveSlot(i) {
+        if (_mm.slots.length <= _mm.limits.min) return;
+        mmSave('slots', () => { _mm.slots.splice(i, 1); });
+      },
+      onCapture(i, value) {
+        mmSave('capture', () => { _mm.capture = mmApplyCapture(_mm.capture, i, value); });
       },
     });
   }
 
-  async function mmSave(body, optimistic) {
-    const snapshot = JSON.stringify([_mm.summary, _mm.capture, _mm.version, _mm.effort]);
-    optimistic();
+  /** 변경을 적용하고 바로 저장한다. 실패하면 적용 전 상태로 되돌린다. */
+  async function mmSave(kind, mutate) {
+    const snapshot = JSON.stringify([_mm.slots, _mm.capture]);
+    mutate();
     _mm.status = '저장 중…';
     mmRender();
-    _mm.root.querySelectorAll('select').forEach(el => { el.disabled = true; });
+    _mm.root.querySelectorAll('select, button').forEach(el => { el.disabled = true; });
+    const body = kind === 'slots' ? { summary_slots: _mm.slots } : { capture: _mm.capture };
     try {
       const r = await fetch('/channels/model-orders', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -1248,7 +1247,7 @@
       _mm.status = '저장됨';
       if (_mm.onSaved) _mm.onSaved(d);
     } catch (e) {
-      [_mm.summary, _mm.capture, _mm.version, _mm.effort] = JSON.parse(snapshot);
+      [_mm.slots, _mm.capture] = JSON.parse(snapshot);
       _mm.status = '저장 실패';
       alert('모델 설정 저장 실패: ' + e.message);
     } finally {
