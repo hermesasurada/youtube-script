@@ -3445,11 +3445,44 @@ def summary_content():
 BLOG_RENDER_VERSION = "2026-09-14-tight-leading-2"
 
 
+_TERM_NOTE_LABEL_RE = re.compile(
+    r'<p class="term-note">\s*\*?\s*<strong>(.*?)</strong>', re.S)
+
+
+def _excluded_note_mtime(summary_path: str) -> float:
+    """이 글의 각주 중 '제외 목록에 들어가 사라진' 것들의 최신 추가 시각(epoch).
+
+    각주 제거는 전역 term_exclusions에 용어를 넣는 방식이라 요약 파일도 메모도
+    건드리지 않는다. 그래서 각주만 지우면 발행 상태가 '변경 없음'으로 남아
+    재발행을 못 했다(2026-09-22 사용자 지시). 이 글에 실제로 있던 각주와 제외
+    목록의 교집합만 보므로, 다른 글 때문에 추가된 용어는 영향을 주지 않는다.
+    """
+    if not summary_path or not os.path.isfile(summary_path):
+        return 0.0
+    times = db.term_exclusion_times()
+    if not times:
+        return 0.0
+    try:
+        with open(summary_path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return 0.0
+    latest = 0.0
+    for raw in _TERM_NOTE_LABEL_RE.findall(text):
+        # 화면과 같은 기준으로 맞춘다: '용어 (원어)' → '용어'
+        label = re.sub(r"\s*\([^()]*\)\s*$", "", re.sub(r"<[^>]+>", "", raw)).strip()
+        hit = times.get(db.normalize_term(label))
+        if hit:
+            latest = max(latest, hit)
+    return latest
+
+
 def _blog_state(item: dict | None) -> dict:
     """발행 버튼이 쓰는 상태 — 발행 여부와 '발행 뒤 내용이 바뀌었는지'.
 
-    비교 대상은 블로그 본문에 실제로 실리는 두 가지다: 요약 파일(mtime)과 섹션 메모
-    (summary_notes.updated_at). 둘 중 더 나중이 발행시각보다 뒤면 수정할 거리가 있다.
+    비교 대상은 블로그 본문에 실제로 실리는 세 가지다: 요약 파일(mtime), 섹션 메모
+    (summary_notes.updated_at), 그리고 이 글의 각주를 지운 제외 용어의 추가 시각.
+    셋 중 가장 나중이 발행시각보다 뒤면 수정할 거리가 있다.
     blog_published_at은 로컬 naive 문자열이라 같은 기준(epoch)으로 맞춘다. 발행시각
     기록이 없는 옛 글은 판단할 근거가 없으므로 '수정 가능'으로 본다.
     """
@@ -3464,6 +3497,7 @@ def _blog_state(item: dict | None) -> dict:
     path = item.get("summary_path") or ""
     if path and os.path.isfile(path):
         edited = max(edited, os.path.getmtime(path))
+    edited = max(edited, _excluded_note_mtime(path))
     # 1초 여유: 발행 직후 같은 초에 기록된 mtime을 '변경'으로 보지 않는다.
     content_changed = bool(edited and (not published or edited > published + 1))
     # 내용이 그대로여도 표시 형식이 바뀌었으면 발행본은 옛 모양이다.

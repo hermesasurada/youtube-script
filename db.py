@@ -853,6 +853,17 @@ def list_term_exclusions() -> list[str]:
         "SELECT term FROM term_exclusions ORDER BY rowid")]   # 추가한 순서
 
 
+def term_exclusion_times() -> dict[str, float]:
+    """제외 용어 → 추가 시각(epoch). 각주가 언제 사라졌는지 판단하는 데 쓴다."""
+    out: dict[str, float] = {}
+    for r in _conn().execute("SELECT key, added_at FROM term_exclusions"):
+        try:
+            out[r["key"]] = datetime.strptime(r["added_at"], "%Y-%m-%d %H:%M:%S").timestamp()
+        except (ValueError, TypeError):
+            out[r["key"]] = 0.0
+    return out
+
+
 def add_term_exclusion(term: str) -> bool:
     """제외 용어 추가. 이미 있으면 False."""
     key = normalize_term(term)
