@@ -263,6 +263,23 @@ SLOT_COUNT = len(MODEL_KEYS)
 REASONING_LEVELS = ("default", "low", "medium", "high", "xhigh", "max")
 DEFAULT_SUMMARY_REASONING = {"opus": "default", "gpt": "high", "grok": "default"}
 
+# 슬롯별로 고를 수 있는 구체 모델. "opus"는 Claude CLI의 최신 Opus 별칭이다
+# (2026-09-23 현재 claude-opus-5-5로 풀린다). Grok은 CLI 기본 모델을 따라가므로 없다.
+MODEL_VERSION_CHOICES = {
+    "opus": ("opus", "claude-opus-5-5"),
+    "gpt": ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna"),
+}
+
+
+def normalize_model_versions(value, defaults: dict[str, str]) -> dict[str, str]:
+    """슬롯별 모델 버전. 목록에 없는 값은 기본값(환경변수 기준)으로 되돌린다."""
+    raw = value if isinstance(value, dict) else {}
+    out = {}
+    for key, choices in MODEL_VERSION_CHOICES.items():
+        picked = str(raw.get(key) or "").strip()
+        out[key] = picked if picked in choices else defaults.get(key, choices[0])
+    return out
+
 
 def _parse_model_tokens(value) -> list[str]:
     raw = value

@@ -358,6 +358,14 @@ def init() -> None:
                 PRIMARY KEY (md_path, section_key)
             )""")
             c.execute("PRAGMA user_version = 19")
+        if ver < 22:
+            # v22: 요약 슬롯별 구체 모델(Opus 별칭/5.5, GPT-6 Astra/Sol/Luna). 빈 값이면
+            # 환경변수 기본값(CLAUDE_MODEL·GPT_MODEL)을 쓴다.
+            mcols = {r[1] for r in c.execute("PRAGMA table_info(monitor_settings)").fetchall()}
+            if "model_versions" not in mcols:
+                c.execute("ALTER TABLE monitor_settings ADD COLUMN model_versions "
+                          "TEXT NOT NULL DEFAULT '{}'")
+            c.execute("PRAGMA user_version = 22")
 
 
 def get_summary_notes(md_path: str) -> dict:
@@ -906,6 +914,35 @@ def get_monitor_summary_config() -> dict:
         "reasoning": reasoning,
         "next_model": order[cursor],
     }
+
+
+def get_monitor_model_versions() -> dict:
+    """저장된 슬롯별 모델 버전(원시값). 정규화는 호출측이 기본값과 함께 한다."""
+    try:
+        row = _conn().execute(
+            "SELECT model_versions FROM monitor_settings WHERE id = 1").fetchone()
+    except sqlite3.OperationalError:
+        return {}
+    if not row:
+        return {}
+    try:
+        data = json.loads(row["model_versions"] or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def set_monitor_model_versions(value: dict) -> None:
+    with _lock:
+        cur = _conn().execute(
+            "UPDATE monitor_settings SET model_versions = ?, updated_at = ? WHERE id = 1",
+            (json.dumps(value), _now()))
+        if cur.rowcount == 0:
+            order = json.dumps(list(llm_gateway.MODEL_KEYS))
+            _conn().execute(
+                "INSERT INTO monitor_settings (id, summary_models, capture_models, "
+                "model_versions, updated_at) VALUES (1, ?, ?, ?, ?)",
+                (order, order, json.dumps(value), _now()))
 
 
 def set_monitor_summary_reasoning(value) -> dict:

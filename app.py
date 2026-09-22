@@ -1981,11 +1981,11 @@ def _title_tr_with_grok(prompt: str, label: str) -> tuple[str, str]:
 
 def _title_tr_with_gpt(prompt: str, label: str) -> tuple[str, str]:
     effort = TITLE_TR_REASONING
-    with llm_gateway.llm_track("codex", GPT_MODEL, purpose="title",
+    with llm_gateway.llm_track("codex", _gpt_model(), purpose="title",
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
         try:
-            r = llm_gateway.run_codex_prompt(prompt, model=GPT_MODEL,
+            r = llm_gateway.run_codex_prompt(prompt, model=_gpt_model(),
                                              timeout=TITLE_TR_TIMEOUT,
                                              reasoning_effort=effort)
         except Exception as e:
@@ -2145,6 +2145,24 @@ _CLAUDE_TIERS = ("opus", "sonnet", "haiku", "fable")
 _CLAUDE_SEEN: dict[str, str] = {}
 
 
+def _model_versions() -> dict[str, str]:
+    """슬롯별 구체 모델 — 모니터 설정에서 고른 값, 없으면 환경변수 기본값."""
+    try:
+        saved = db.get_monitor_model_versions()
+    except Exception:
+        saved = {}
+    return llm_gateway.normalize_model_versions(
+        saved, {"opus": CLAUDE_MODEL, "gpt": GPT_MODEL})
+
+
+def _claude_model() -> str:
+    return _model_versions()["opus"]
+
+
+def _gpt_model() -> str:
+    return _model_versions()["gpt"]
+
+
 def _model_label(model_id: str) -> str:
     """모델 ID → 사람이 읽는 라벨. Claude는 접두어 없이 등급+버전(2026-09-23 사용자 지시).
 
@@ -2178,11 +2196,48 @@ def _monitor_model_labels() -> dict[str, str]:
     """채널 모니터 선택기에 보여줄 이름. Grok은 CLI 기본 모델을 따라간다."""
     grok_id = GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok"
     return {
-        "opus": _model_label(CLAUDE_MODEL),
-        "gpt": _model_label(GPT_MODEL),
+        "opus": _model_label(_claude_model()),
+        "gpt": _model_label(_gpt_model()),
         "grok": _model_label(grok_id),
         "none": "없음",
     }
+
+
+def _monitor_version_options() -> list[dict[str, str]]:
+    """모델 선택기에 보일 구체 모델 목록(슬롯·값·표시명)."""
+    opts = []
+    for slot, choices in llm_gateway.MODEL_VERSION_CHOICES.items():
+        for value in choices:
+            label = "Opus (최신 별칭)" if value == "opus" else _model_label(value)
+            opts.append({"slot": slot, "value": value, "label": label})
+    grok_id = GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok"
+    opts.append({"slot": "grok", "value": "grok", "label": _model_label(grok_id)})
+    return opts
+
+
+def _monitor_capture_labels() -> dict[str, str]:
+    """캡처 순위에 보일 이름 — 캡처는 요약 버전 선택과 별개로 비전 모델을 쓴다."""
+    import keyframe_report as kr
+    grok_id = kr.GROK_VISION_MODEL or GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok"
+    return {"opus": _model_label(kr.VISION_MODEL), "gpt": _model_label(kr.GPT_VISION_MODEL),
+            "grok": _model_label(grok_id), "none": "없음"}
+
+
+def _monitor_model_notes() -> list[dict[str, str]]:
+    """모델 선택기 아래 '예외 규칙' — 순번과 다르게 도는 경로를 알려 준다(읽기 전용)."""
+    cap = _monitor_capture_labels()
+    return [
+        {"rule": "캡처",
+         "detail": f"요약 버전 선택과 별개로 {cap['opus']} · {cap['gpt']} · {cap['grok']}을 쓴다."},
+        {"rule": "제목 번역",
+         "detail": f"요약과 같은 순번을 돌되 Claude는 {_model_label(TITLE_TR_MODEL)}, "
+                   f"추론은 {TITLE_TR_REASONING}로 고정한다."},
+        {"rule": "Grok 문체 보정",
+         "detail": "Grok 요약에만 한국어 문체 보정 지시를 앞에 붙인다."},
+        {"rule": "문자 누출",
+         "detail": "GPT·Grok 요약에 한자·영어 조각이 섞이면 같은 모델로 1회 다시 요청하고, "
+                   "그래도 남으면 다음 순번으로 넘긴다."},
+    ]
 
 
 def _monitor_reasoning_options() -> list[dict[str, str]]:
@@ -2215,13 +2270,13 @@ def _summarize_with_gpt(prompt: str, *, reasoning_effort: str = "default",
                         title: str | None = None) -> tuple[str, str]:
     """Codex CLI의 GPT 모델로 단일턴 요약. (요약 텍스트, 오류사유)."""
     effort = str(reasoning_effort or "default").lower()
-    with llm_gateway.llm_track("codex", GPT_MODEL, purpose="summary", title=title,
+    with llm_gateway.llm_track("codex", _gpt_model(), purpose="summary", title=title,
                                reasoning=None if effort == "default" else effort,
                                backend="cli") as call:
         try:
             r = llm_gateway.run_codex_prompt(
                 _SUMMARY_SYS + "\n\n" + prompt,
-                model=GPT_MODEL,
+                model=_gpt_model(),
                 timeout=GPT_TIMEOUT,
                 reasoning_effort=reasoning_effort,
             )
@@ -2352,7 +2407,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
                 _resolve_claude_bin(), "-p",
                 "--output-format", "stream-json",
                 "--include-partial-messages",
-                "--model", CLAUDE_MODEL,
+                "--model", _claude_model(),
                 "--allowedTools", "",
                 "--append-system-prompt", _SUMMARY_SYS,
                 "--verbose",
@@ -2366,7 +2421,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             marker_sent = False
             result_event: dict | None = None
             llm_call = llm_gateway.llm_begin(
-                "claude", CLAUDE_MODEL, purpose="summary", title=title, backend="cli",
+                "claude", _claude_model(), purpose="summary", title=title, backend="cli",
                 reasoning=None if reasoning["opus"] == "default" else reasoning["opus"])
             try:
                 for process_event in llm_gateway.stream_command(
@@ -2405,7 +2460,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
                                     if not marker_sent:
                                         marker_sent = True
                                         client_has_output = True
-                                        yield f"data: {json.dumps(_model_line(_model_label(CLAUDE_MODEL)))}\n\n"
+                                        yield f"data: {json.dumps(_model_line(_model_label(_claude_model())))}\n\n"
                                     chunks.append(text)
                                     client_has_output = True
                                     yield f"data: {json.dumps(text)}\n\n"
@@ -2424,7 +2479,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             cleaned = _clean_summary(final if final is not None else "".join(chunks))
             body = humanize_korean.humanize_summary(cleaned)
             if not error_msg and body:
-                label = _model_label(used_model or CLAUDE_MODEL)
+                label = _model_label(used_model or _claude_model())
                 if body != cleaned and client_has_output:
                     reset = reset_client()
                     if reset:
@@ -2457,7 +2512,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order,
             return _summarize_with_grok(p, reasoning_effort=reasoning["grok"], title=title)
         body, err = _call(prompt)
         if key == "gpt":
-            label = _model_label(GPT_MODEL or "gpt")
+            label = _model_label(_gpt_model() or "gpt")
         else:
             # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.
             label = _model_label(GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok")
@@ -2559,7 +2614,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         _resolve_claude_bin(), "-p",
         "--output-format", "stream-json",
         "--include-partial-messages",
-        "--model", CLAUDE_MODEL,
+        "--model", _claude_model(),
         "--allowedTools", "",
         "--append-system-prompt", _SUMMARY_SYS,
         "--verbose",
@@ -2569,7 +2624,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
     error_msg: str | None = None
     used_model: str | None = None
     result_event: dict | None = None
-    llm_call = llm_gateway.llm_begin("claude", CLAUDE_MODEL, purpose="summary",
+    llm_call = llm_gateway.llm_begin("claude", _claude_model(), purpose="summary",
                                      title=title, backend="cli")
     try:
         for process_event in llm_gateway.stream_command(
@@ -2628,7 +2683,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         yield from _yield_grok("Claude 빈 응답")
         return
     cline = _compress_line(body, transcript_chars)
-    full = _model_line(_model_label(used_model or CLAUDE_MODEL)) + cline + body
+    full = _model_line(_model_label(used_model or _claude_model())) + cline + body
     if body != cleaned and chunks:
         yield "event: reset\ndata: \"\"\n\n"
         yield f"data: {json.dumps(full)}\n\n"
@@ -3068,7 +3123,11 @@ def channels_list():
                       "model_labels": _monitor_model_labels(),
                       "summary_reasoning": summary_config["reasoning"],
                       "summary_next_model": summary_config["next_model"],
-                      "reasoning_options": _monitor_reasoning_options()})
+                      "reasoning_options": _monitor_reasoning_options(),
+                      "model_versions": _model_versions(),
+                      "version_options": _monitor_version_options(),
+                      "capture_labels": _monitor_capture_labels(),
+                      "model_notes": _monitor_model_notes()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 
@@ -3095,18 +3154,31 @@ def channel_model_orders():
     reasoning_update = data.get("summary_reasoning")
     if reasoning_update is not None and not llm_gateway.is_valid_reasoning_levels(reasoning_update):
         return _json({"error": "유효하지 않은 요약 추론 수준입니다."}, 400)
-    if not updates and reasoning_update is None:
+    versions_update = data.get("model_versions")
+    if versions_update is not None:
+        if not isinstance(versions_update, dict) or any(
+            v not in llm_gateway.MODEL_VERSION_CHOICES.get(k, ())
+            for k, v in versions_update.items()
+        ):
+            return _json({"error": "유효하지 않은 모델 버전입니다."}, 400)
+    if not updates and reasoning_update is None and versions_update is None:
         return _json({"error": "변경할 모델 순서나 추론 수준이 없습니다."}, 400)
     try:
         saved = db.set_monitor_model_orders(**updates) if updates else db.get_monitor_model_orders()
         if reasoning_update is not None:
             db.set_monitor_summary_reasoning(reasoning_update)
+        if versions_update is not None:
+            db.set_monitor_model_versions({**_model_versions(), **versions_update})
         summary_config = db.get_monitor_summary_config()
         return _json({"ok": True, "model_orders": saved,
                       "model_labels": _monitor_model_labels(),
                       "summary_reasoning": summary_config["reasoning"],
                       "summary_next_model": summary_config["next_model"],
-                      "reasoning_options": _monitor_reasoning_options()})
+                      "reasoning_options": _monitor_reasoning_options(),
+                      "model_versions": _model_versions(),
+                      "version_options": _monitor_version_options(),
+                      "capture_labels": _monitor_capture_labels(),
+                      "model_notes": _monitor_model_notes()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 

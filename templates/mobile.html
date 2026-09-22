@@ -8,6 +8,7 @@
   <title>유튜브 전사내역</title>
   <!-- 작은 로컬 marked는 선로드하고, 본문용 웹폰트·KaTeX는 요약 뒤에 로딩한다. -->
   <link rel="stylesheet" href="/reader-fonts/core.css?v={{ reader_font_v('core.css') }}">
+  <link rel="stylesheet" href="/static/css/model-selector.css?v={{ static_v('css/model-selector.css') }}">
   <style>
     :root {
       --bg:        #f6f7f9;
@@ -434,54 +435,10 @@
     .ch-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
     .ch-queue { font-size: 11.5px; font-family: var(--font-mono); color: var(--muted);
       background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: .45rem .6rem; }
-    .model-order-card { display: grid; gap: .6rem; padding: .75rem; min-width: 0;
-      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-    .model-order-head { display: flex; align-items: center; justify-content: space-between;
-      color: var(--text); font-size: 13px; font-weight: 700; }
-    .model-order-status { min-height: 1em; color: var(--muted); font-size: 11px; font-weight: 500; }
     .model-order-row { display: flex; align-items: center; gap: .55rem; min-width: 0; }
     .model-order-label { flex: 0 0 34px; color: var(--muted); font-size: 12px; font-weight: 650; }
-    .model-order-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .3rem; flex: 1; min-width: 0; }
     .model-order-slot { display: flex; align-items: center; gap: .2rem; min-width: 0; }
     .model-order-rank { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); }
-    .model-order-select { appearance: none; -webkit-appearance: none;
-      min-width: 0; max-width: 100%; width: 100%; height: 31px; padding: 0 1.1rem 0 .3rem;
-      color: var(--text); background-color: var(--surface2); border: 1px solid var(--border);
-      border-radius: 5px; font: 12px var(--font-sans);
-      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888178' d='M1 1l4 4 4-4'/></svg>");
-      background-repeat: no-repeat; background-position: right .35rem center; }
-    .model-order-select:disabled { opacity: .55; }
-    .model-config-section { display: grid; gap: .55rem; min-width: 0; }
-    .capture-config-section { padding-top: .75rem; border-top: 1px solid var(--border); }
-    .model-config-heading { display: grid; gap: .25rem; }
-    .model-config-heading > div { display: flex; align-items: center; gap: .4rem; }
-    .model-config-heading strong { color: var(--text); font-size: 12.5px; }
-    .model-config-heading small { color: var(--muted); font-size: 10.5px; line-height: 1.35; }
-    .model-mode-badge { padding: 2px 7px; border-radius: 999px; color: var(--highlight);
-      background: var(--highlight-soft); font-size: 9.5px; font-weight: 700; }
-    .model-mode-badge.neutral { color: var(--muted); background: var(--surface2); }
-    .model-order-selects#summary-model-order { grid-template-columns: minmax(0, 1fr); gap: .45rem; }
-    .summary-model-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: .45rem; min-width: 0; padding: .6rem; background: var(--surface2);
-      border: 1px solid transparent; border-radius: 9px; }
-    .summary-model-card.is-next { border-color: color-mix(in srgb, var(--highlight) 38%, transparent);
-      background: color-mix(in srgb, var(--highlight) 4%, var(--surface2)); }
-    .model-card-top { grid-column: 1 / -1; display: flex; align-items: center;
-      justify-content: space-between; min-height: 18px; }
-    .model-step { color: var(--muted); font-size: 10px; font-weight: 700; }
-    .model-field { display: grid; gap: .35rem; min-width: 0; }
-    .model-field > span { padding-left: 2px; color: var(--muted); font-size: 10px;
-      font-weight: 700; letter-spacing: .025em; }
-    .model-order-selects#capture-model-order { grid-template-columns: minmax(0, 1fr); gap: .4rem; }
-    .model-reasoning-select { font-family: var(--font-sans); }
-    .model-round-next { display: inline-flex; align-items: center; gap: 4px; color: var(--highlight);
-      font-size: 10px; font-weight: 700; white-space: nowrap; }
-    .model-round-next i { width: 6px; height: 6px; border-radius: 50%; background: currentColor;
-      box-shadow: 0 0 0 3px var(--highlight-soft); }
-    .capture-model-card { display: grid; grid-template-columns: 38px minmax(0, 1fr);
-      align-items: center; gap: .4rem; min-width: 0; }
-    .capture-rank { color: var(--muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
-    .model-order-hint { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
     .ch-empty, .ch-loading { color: var(--muted); font-size: 13.5px; padding: .5rem .2rem; }
     .ch-row { display: flex; align-items: center; gap: .75rem; padding: .7rem .8rem;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -563,8 +520,7 @@
     .hist-icon-btn { border-color: transparent; background: var(--surface2); }
     .hist-icon-btn-summary { border-color: transparent; }
     .modal-hdr { padding: .65rem .85rem; }
-    .ch-queue, .model-order-card { border: 0; background: var(--surface2); }
-    .model-order-select { background-color: var(--surface); }
+    .ch-queue { border: 0; background: var(--surface2); }
     .ch-list-head,
     .ch-row {
       display: grid; grid-template-columns: minmax(0, 1fr) 50px 50px 46px;
@@ -639,15 +595,6 @@
     .mq-group .ch-empty { padding: .9rem .7rem; }
     .mq-st { border: 0; border-radius: 999px; background: var(--surface2); }
     .mq-ctl button { border-color: transparent; border-radius: var(--radius-sm); }
-
-    .modal-body.channels .model-order-card { padding: .8rem; border-radius: 10px; background: var(--surface); }
-    .modal-body.channels .model-order-select {
-      height: 34px; border-color: var(--border-strong);
-      background-color: color-mix(in oklab, var(--surface2) 72%, var(--surface));
-    }
-    .modal-body.channels .model-order-select:focus {
-      outline: none; border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft);
-    }
     .modal-body.channels .ch-queue { border: 0; background: var(--surface); }
     .ch-list-shell .ch-list-head { background: var(--surface2); }
     .ch-list-shell .ch-row { background: transparent; }
@@ -785,6 +732,7 @@ window.YS_META_COMPACT = true;
 window.YS_ASSET_VERSIONS={googleCss:"{{ reader_font_v('google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
 <script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
 <script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
+<script src="/static/js/model-selector.js?v={{ static_v('js/model-selector.js') }}"></script>
 <script>
 const SVG = {
   summary:    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3V2z"/><path d="M10 2v3h3"/><path d="M5.5 8h5M5.5 10.5h5M5.5 6h2.5"/></svg>',
@@ -1346,186 +1294,13 @@ async function openChannels() {
   else $('modal-body').innerHTML = '<div class="m-utility-loading"><span></span><span></span><span></span></div>';
   requestAnimationFrame(() => { loadChannels({ force: !!_mobileChannelsCache }); });
 }
-const MONITOR_MODELS = ['opus', 'gpt', 'grok'];
-const MONITOR_NONE = 'none';
-const MONITOR_MODEL_LABELS = { opus: 'Opus', gpt: 'GPT 6 Astra', grok: 'Grok', none: '없음' };
-let monitorModelOrders = { summary: [...MONITOR_MODELS], capture: [...MONITOR_MODELS] };
-let monitorSummaryReasoning = { opus: 'default', gpt: 'high', grok: 'default' };
-let monitorSummaryNextModel = 'opus';
-let monitorReasoningOptions = [
-  {value: 'default', label: '모델 기본값'}, {value: 'low', label: '낮음'},
-  {value: 'medium', label: '보통'}, {value: 'high', label: '높음'},
-  {value: 'xhigh', label: '매우 높음'}, {value: 'max', label: '최대'},
-];
+// 모델 선택기는 common.js의 YS.monitorModels가 상태·저장을, model-selector.js가 화면을 맡는다.
 let _mobileChannelsCache = null;
 let _mobileChannelsRequest = null;
 
-function applyMonitorModelLabels(labels) {
-  if (!labels || typeof labels !== 'object') return;
-  [...MONITOR_MODELS, MONITOR_NONE].forEach(key => { if (labels[key]) MONITOR_MODEL_LABELS[key] = labels[key]; });
-}
-
-function padMonitorOrder(order) {
-  const next = (order || []).slice(0, MONITOR_MODELS.length);
-  while (next.length < MONITOR_MODELS.length) next.push(MONITOR_NONE);
-  return next;
-}
-
-function monitorOrderChoices(order, index) {
-  if (index > 0 && order.slice(0, index).includes(MONITOR_NONE)) return [MONITOR_NONE];
-  if (index === 0) return MONITOR_MODELS.slice();
-  return MONITOR_MODELS.concat(MONITOR_NONE);
-}
-
-function applyMonitorOrderChange(order, index, selected) {
-  const next = padMonitorOrder(order);
-  if (index === 0 && selected === MONITOR_NONE) return next;
-  if (selected === MONITOR_NONE) {
-    for (let i = index; i < next.length; i++) next[i] = MONITOR_NONE;
-    return next;
-  }
-  const other = next.indexOf(selected);
-  if (other === index) return next;
-  if (other >= 0) {
-    const displaced = next[index];
-    next[index] = next[other];
-    next[other] = displaced;
-  } else {
-    next[index] = selected;
-  }
-  const noneAt = next.indexOf(MONITOR_NONE);
-  if (noneAt >= 0) {
-    for (let i = noneAt; i < next.length; i++) next[i] = MONITOR_NONE;
-  }
-  return next;
-}
-
-function monitorModelControlsHtml() {
-  return `<div class="model-order-card">
-    <div class="model-order-head"><span>모델 운영 방식</span><span class="model-order-status" id="model-order-status"></span></div>
-    <section class="model-config-section">
-      <div class="model-config-heading"><div><strong>요약</strong><span class="model-mode-badge">라운드로빈</span></div><small>영상마다 1 → 2 → 3 순번으로 시작 모델을 바꿉니다.</small></div>
-      <div class="model-order-selects summary-model-cards" id="summary-model-order"></div>
-      <p class="model-order-hint">실패하면 다음 순번으로 이어집니다. 높은 추론 수준은 처리 시간이 늘어날 수 있습니다.</p>
-    </section>
-    <section class="model-config-section capture-config-section">
-      <div class="model-config-heading"><div><strong>캡처</strong><span class="model-mode-badge neutral">순차 폴백</span></div><small>실패할 때만 다음 모델을 사용합니다.</small></div>
-      <div class="model-order-selects capture-model-cards" id="capture-model-order"></div>
-    </section>
-  </div>`;
-}
-
-function renderMonitorModelOrders() {
-  const summaryEl = $('summary-model-order');
-  if (summaryEl) {
-    const order = monitorModelOrders.summary || MONITOR_MODELS;
-    summaryEl.innerHTML = order.map((selected, index) => {
-      const models = MONITOR_MODELS.map(model =>
-        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
-      ).join('');
-      const levels = monitorReasoningOptions.map(option =>
-        `<option value="${option.value}" ${option.value === monitorSummaryReasoning[selected] ? 'selected' : ''}>${option.label}</option>`
-      ).join('');
-      const isNext = selected === monitorSummaryNextModel;
-      return `<div class="summary-model-card ${isNext ? 'is-next' : ''}">`
-        + `<div class="model-card-top"><span class="model-step">${index + 1}번</span>`
-        + `${isNext ? '<span class="model-round-next"><i></i>다음 실행</span>' : ''}</div>`
-        + `<label class="model-field"><span>모델</span><select class="model-order-select" aria-label="요약 순환 ${index + 1}순번" `
-        + `title="이 순번에 사용할 모델" onchange="changeMonitorModelOrder('summary', ${index}, this.value)">${models}</select></label>`
-        + `<label class="model-field"><span>추론 수준</span><select class="model-order-select model-reasoning-select" `
-        + `aria-label="${MONITOR_MODEL_LABELS[selected]} 추론 수준" onchange="changeMonitorReasoning('${selected}', this.value)">${levels}</select></label></div>`;
-    }).join('');
-  }
-  const captureEl = $('capture-model-order');
-  if (captureEl) {
-    const order = padMonitorOrder(monitorModelOrders.capture || MONITOR_MODELS);
-    captureEl.innerHTML = order.map((selected, index) => {
-      const options = monitorOrderChoices(order, index).map(model =>
-        `<option value="${model}" ${model === selected ? 'selected' : ''}>${MONITOR_MODEL_LABELS[model] || model}</option>`
-      ).join('');
-      return `<label class="capture-model-card"><span class="capture-rank">${index + 1}순위</span>`
-        + `<select class="model-order-select" aria-label="캡처 ${index + 1}순위" `
-        + `onchange="changeMonitorModelOrder('capture', ${index}, this.value)">${options}</select></label>`;
-    }).join('');
-  }
-}
-
-async function changeMonitorModelOrder(kind, index, selected) {
-  const original = [...monitorModelOrders[kind]];
-  const next = kind === 'summary'
-    ? applyMonitorOrderChange(original, index, selected).filter(model => model !== MONITOR_NONE)
-    : applyMonitorOrderChange(original, index, selected);
-  monitorModelOrders[kind] = next;
-  renderMonitorModelOrders();
-  const selects = document.querySelectorAll('.model-order-select');
-  const status = $('model-order-status');
-  selects.forEach(el => { el.disabled = true; });
-  status.textContent = '저장 중…';
-  try {
-    const d = await (await fetch('/channels/model-orders', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [kind]: next }),
-    })).json();
-    if (d.error) throw new Error(d.error);
-    monitorModelOrders = d.model_orders;
-    monitorSummaryReasoning = d.summary_reasoning || monitorSummaryReasoning;
-    monitorSummaryNextModel = d.summary_next_model || monitorSummaryNextModel;
-    applyMonitorModelLabels(d.model_labels);
-    if (_mobileChannelsCache) {
-      _mobileChannelsCache.model_orders = d.model_orders;
-      _mobileChannelsCache.model_labels = d.model_labels;
-      _mobileChannelsCache.summary_reasoning = monitorSummaryReasoning;
-      _mobileChannelsCache.summary_next_model = monitorSummaryNextModel;
-    }
-    status.textContent = '저장됨';
-  } catch (e) {
-    monitorModelOrders[kind] = original;
-    status.textContent = '저장 실패';
-    alert('모델 순서 저장 실패: ' + e.message);
-  } finally {
-    renderMonitorModelOrders();
-    window.setTimeout(() => { if (status.textContent === '저장됨') status.textContent = ''; }, 1400);
-  }
-}
-
-async function changeMonitorReasoning(model, level) {
-  const original = monitorSummaryReasoning[model];
-  monitorSummaryReasoning[model] = level;
-  renderMonitorModelOrders();
-  const selects = document.querySelectorAll('.model-order-select');
-  const status = $('model-order-status');
-  selects.forEach(el => { el.disabled = true; });
-  status.textContent = '저장 중…';
-  try {
-    const d = await (await fetch('/channels/model-orders', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({summary_reasoning: {[model]: level}}),
-    })).json();
-    if (d.error) throw new Error(d.error);
-    monitorSummaryReasoning = d.summary_reasoning;
-    monitorSummaryNextModel = d.summary_next_model;
-    if (_mobileChannelsCache) {
-      _mobileChannelsCache.summary_reasoning = d.summary_reasoning;
-      _mobileChannelsCache.summary_next_model = d.summary_next_model;
-    }
-    status.textContent = '저장됨';
-  } catch (e) {
-    monitorSummaryReasoning[model] = original;
-    status.textContent = '저장 실패';
-    alert('추론 수준 저장 실패: ' + e.message);
-  } finally {
-    renderMonitorModelOrders();
-    window.setTimeout(() => { if (status.textContent === '저장됨') status.textContent = ''; }, 1400);
-  }
-}
-
 function renderChannelsM(d) {
   const body = $('modal-body');
-  monitorModelOrders = d.model_orders || monitorModelOrders;
-  monitorSummaryReasoning = d.summary_reasoning || monitorSummaryReasoning;
-  monitorSummaryNextModel = d.summary_next_model || monitorSummaryNextModel;
-  monitorReasoningOptions = d.reasoning_options || monitorReasoningOptions;
-  applyMonitorModelLabels(d.model_labels);
+  YS.monitorModels.load(d);
   const q = d.queue || {}, parts = [];
   if (q.pending)    parts.push(`대기 ${q.pending}`);
   if (q.processing) parts.push(`처리중 ${q.processing}`);
@@ -1556,10 +1331,12 @@ function renderChannelsM(d) {
       </div>`;
   }).join('') : '<div class="ch-empty">등록된 채널이 없습니다.</div>';
   body.innerHTML = `<p class="m-utility-note">등록 채널의 새 영상을 20분마다 확인해 전사·요약·캡처합니다.</p>`
-    + monitorModelControlsHtml() + `<div class="ch-queue">${esc(qline)}</div>`
+    + `<div class="msel-host" id="model-selector"></div>` + `<div class="ch-queue">${esc(qline)}</div>`
     + `<section class="ch-list-shell"><div class="m-utility-section-head"><span>등록 채널</span>`
     + `<small id="mobile-channels-count">${chans.filter(c => c.enabled).length} ON · 전체 ${chans.length}</small></div>${rows}</section>`;
-  renderMonitorModelOrders();
+  YS.monitorModels.mount($('model-selector'), {
+    onSaved: saved => { if (_mobileChannelsCache) Object.assign(_mobileChannelsCache, YS.monitorModels.fields(saved)); },
+  });
 }
 
 async function _fetchChannelsM(force = false) {
