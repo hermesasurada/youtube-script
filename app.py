@@ -2141,15 +2141,15 @@ _SUMMARY_SYS = ("요청된 마크다운 요약 결과 본문만 그대로 출력
 
 _CLAUDE_TIERS = ("opus", "sonnet", "haiku", "fable")
 # 별칭(opus)만 알 때 쓰려고, 실제 응답으로 확인된 Claude 모델 ID를 tier별로 기억한다.
-# 요약이 한 번 돌면 채워지고, 그 전에는 버전 없이 'Claude Opus'로 표시한다.
+# 요약이 한 번 돌면 채워지고, 그 전에는 버전 없이 'Opus'로 표시한다.
 _CLAUDE_SEEN: dict[str, str] = {}
 
 
 def _model_label(model_id: str) -> str:
-    """모델 ID → 사람이 읽는 라벨. 다른 LLM처럼 브랜드를 붙인다(2026-09-23 사용자 지시).
+    """모델 ID → 사람이 읽는 라벨. Claude는 접두어 없이 등급+버전(2026-09-23 사용자 지시).
 
-    claude-opus-5-5 → Claude Opus 5.5, claude-opus-5 → Claude Opus 5,
-    claude-haiku-4-5-20251001 → Claude Haiku 4.5(날짜 접미사 무시),
+    claude-opus-5-5 → Opus 5.5, claude-opus-5 → Opus 5,
+    claude-haiku-4-5-20251001 → Haiku 4.5(날짜 접미사 무시),
     grok-4.7 → Grok 4.7, grok-composer-2.5-fast → Grok Composer 2.5, gpt-6-astra → GPT 6 Astra.
     예전엔 세 조각 ID만 인식해 `claude-opus-5`가 원문 그대로 찍혔다.
     """
@@ -2159,10 +2159,10 @@ def _model_label(model_id: str) -> str:
     if m:
         tier, major, minor = m.groups()
         _CLAUDE_SEEN[tier] = mid
-        return f"Claude {tier.capitalize()} {major}.{minor}" if minor else f"Claude {tier.capitalize()} {major}"
+        return f"{tier.capitalize()} {major}.{minor}" if minor else f"{tier.capitalize()} {major}"
     if low in _CLAUDE_TIERS:            # 별칭만 알 때 — 확인된 실제 모델이 있으면 그 버전으로
         seen = _CLAUDE_SEEN.get(low)
-        return _model_label(seen) if seen else f"Claude {low.capitalize()}"
+        return _model_label(seen) if seen else low.capitalize()
     if low.startswith("grok"):
         v = re.search(r"(\d+)\.(\d+)", mid)
         ver = f" {v.group(0)}" if v else ""
@@ -3458,7 +3458,7 @@ def summary_content():
 
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
-BLOG_RENDER_VERSION = "2026-09-23-claude-model-label"
+BLOG_RENDER_VERSION = "2026-09-23-model-label-no-brand"
 
 
 _TERM_NOTE_LABEL_RE = re.compile(

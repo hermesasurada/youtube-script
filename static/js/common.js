@@ -766,18 +766,20 @@
   }
 
   /**
-   * 요약 모델 라벨을 다른 LLM처럼 브랜드를 붙인 형식으로(2026-09-23). 옛 요약 파일은 그대로 두고
-   * 표시할 때만 고친다 — 파일을 바꾸면 mtime이 달라져 발행된 블로그 글이 전부 '수정됨'이 된다.
-   *   claude-opus-5 / claude-opus-4-8 → Claude Opus 5 / Claude Opus 4.8
-   *   Opus 4.8(접두어 없는 옛 표기)   → Claude Opus 4.8
+   * 요약 모델 라벨 정규화(2026-09-23). Claude는 접두어 없이 등급+버전으로 보인다.
+   * 옛 요약 파일은 그대로 두고 표시할 때만 고친다 — 파일을 바꾸면 mtime이 달라져
+   * 발행된 블로그 글이 전부 '수정됨'이 된다.
+   *   claude-opus-5 / claude-opus-4-8 → Opus 5 / Opus 4.8
+   *   Claude Opus 4.8(한때의 표기)   → Opus 4.8
    * 뒤에 붙은 ' · 메모'는 보존한다. Grok·GPT 등 다른 표기는 손대지 않는다.
    */
   function normalizeModelLabel(label) {
     const s = String(label || '').trim();
     const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
     let m = s.match(/^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\b.*)?$/i);
-    if (m) return `Claude ${cap(m[1])} ${m[3] ? `${m[2]}.${m[3]}` : m[2]}${m[4] || ''}`;
-    if (/^(Opus|Sonnet|Haiku|Fable)\b/.test(s)) return `Claude ${s}`;
+    if (m) return `${cap(m[1])} ${m[3] ? `${m[2]}.${m[3]}` : m[2]}${m[4] || ''}`;
+    m = s.match(/^Claude\s+((?:Opus|Sonnet|Haiku|Fable)\b.*)$/i);
+    if (m) return m[1];
     return s;
   }
 
