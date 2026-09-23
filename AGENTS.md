@@ -44,3 +44,5 @@
 - Service selections, slot counts, routing and fallback order remain local. Preserve saved selections during catalog outages or model deactivation. New discoveries are candidates until manually enabled.
 - Keep actual historical model IDs unchanged. Catalog readers must not depend on portal availability or trigger inference.
 - 모델 선택기에는 '다음' 글자를 두지 않는다 — 다음 차례는 번호 배지 강조(`is-next`)만으로 표시한다(2026-09-23 사용자 지시).
+
+- **중앙 LLM 카탈로그(`hermes-llm-log/llm_catalog.py`)는 부가 정보다 — 못 불러와도 본업이 멈추면 안 된다**(2026-09-23 사용자 지시로 수정). import는 반드시 `try/except Exception`으로 감싸고 실패하면 같은 API를 흉내 내는 `llm_catalog_fallback.py`(모르는 모델 허용·저장된 설정 유지)로 대신한다. 이 파일은 wm과 **같은 내용**으로 유지. 카탈로그 경로는 `sys.path.append`로 **뒤에** 붙여 이 저장소 모듈을 가리지 않게 한다. 대체 모드의 선택지는 무엇이든 '포함'으로 답하므로 **모델 계열 판단에 선택지 소속(`in …_CHOICES`)을 쓰지 말고** `llm_catalog.resolve()`의 provider → 모델 ID 접두어 순으로 판단한다. 검증은 문법 오류가 있는 `llm_catalog.py`를 PYTHONPATH 앞에 끼워 재현한다(`tests/test_catalog_isolation.py`).

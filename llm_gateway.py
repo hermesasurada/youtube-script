@@ -8,10 +8,19 @@ from __future__ import annotations
 
 
 # Shared metadata; service execution policy remains local.
+# 카탈로그는 부가 정보라, 모듈을 못 불러와도 본업(요약·번역·캡처)이 멈추면 안 된다.
+# 실패하면 같은 API를 흉내 내는 llm_catalog_fallback으로 대신한다(저장된 설정 유지).
+# 경로는 뒤에 붙여(append) 이 저장소의 모듈을 가리지 않게 한다.
 import sys as _catalog_sys
 from pathlib import Path as _CatalogPath
-_catalog_sys.path.insert(0, str(_CatalogPath.home() / "projects/hermes-llm-log"))
-import llm_catalog
+_CATALOG_DIR = str(_CatalogPath.home() / "projects/hermes-llm-log")
+if _CATALOG_DIR not in _catalog_sys.path:
+    _catalog_sys.path.append(_CATALOG_DIR)
+try:
+    import llm_catalog
+except Exception as _catalog_exc:  # noqa: BLE001 — SyntaxError 포함 어떤 실패든 본업은 계속
+    import llm_catalog_fallback as llm_catalog
+    _catalog_sys.stderr.write(f"[llm_catalog] 불러오기 실패 → 대체 모드: {type(_catalog_exc).__name__}: {_catalog_exc}\n")
 
 import glob
 import json
