@@ -2212,7 +2212,6 @@ def _model_label(model_id: str) -> str:
 def _monitor_version_options(capability="text") -> list[dict[str, str]]:
     """모델 선택기에 보일 구체 모델 목록(슬롯·값·표시명)."""
     selected = [slot["model"] for slot in db.get_monitor_summary_slots()["slots"]]
-    selected += db.get_monitor_capture_models()
     opts = []
     for provider, family in (("claude", "opus"), ("codex", "gpt"), ("grok", "grok")):
         for item in llm_gateway.llm_catalog.options(provider, capability=capability,
@@ -2221,10 +2220,38 @@ def _monitor_version_options(capability="text") -> list[dict[str, str]]:
     return opts
 
 
-def _capture_legacy() -> dict[str, str]:
-    """옛 계열 키 → 캡처 기본 비전 모델(저장값이 계열 키였던 시절 호환)."""
+_SUMMARY_MODEL_RE = re.compile(r"<!--SUMMARY_MODEL:([^>]*?)(?: · [^>]*)?-->")
+
+
+def _summary_model_of(summary_path: str | None, candidates: list[str]) -> str | None:
+    """요약 파일의 '요약 모델' 마커(표시명)를 구체 모델 ID로 되돌린다. 모르면 None."""
+    try:
+        with open(summary_path or "", encoding="utf-8", errors="replace") as f:
+            m = _SUMMARY_MODEL_RE.search(f.read(4096))
+    except OSError:
+        return None
+    if not m:
+        return None
+    label = m.group(1).strip()
+    pool = list(candidates) + [o["value"] for o in llm_gateway.llm_catalog.options(capability="vision")]
+    return next((x for x in pool if _model_label(x) == label), None)
+
+
+def _capture_order(summary_path: str | None) -> list[str]:
+    """캡처 모델 순서 — 그 영상을 요약한 모델이 먼저, 실패하면 요약 슬롯 순서로 넘긴다.
+
+    캡처 전용 설정은 두지 않는다(2026-09-23 사용자 지시: 요약 모델이 캡처까지 맡는다).
+    이미지 입력이 안 되는 모델은 건너뛰고, 하나도 없으면 기본 비전 모델을 쓴다.
+    """
     import keyframe_report as kr
-    return {"opus": kr.VISION_MODEL, "gpt": kr.GPT_VISION_MODEL, "grok": "grok"}
+    try:
+        slots = [x["model"] for x in db.get_monitor_summary_slots()["slots"]]
+    except Exception:
+        slots = []
+    first = _summary_model_of(summary_path, slots)
+    order = list(dict.fromkeys(([first] if first else []) + slots))
+    order = [m for m in order if llm_gateway.llm_catalog.valid(m, capability="vision")]
+    return order or [kr.VISION_MODEL]
 
 
 def _monitor_model_payload() -> dict:
@@ -2233,10 +2260,7 @@ def _monitor_model_payload() -> dict:
     return {
         "summary_slots": summary["slots"],
         "summary_next_index": summary["next_index"],
-        "capture_models": db.get_monitor_capture_models(),
         "model_options": _monitor_version_options(),
-        "capture_options": [m for m in _monitor_version_options("vision")
-                            if llm_gateway.llm_catalog.valid(m["value"], capability="vision")],
         "catalog_revision": llm_gateway.llm_catalog.read()["revision"],
         "reasoning_options": _monitor_reasoning_options(),
         "slot_limits": {"min": llm_gateway.MIN_SUMMARY_SLOTS, "max": llm_gateway.MAX_SUMMARY_SLOTS},
@@ -2247,8 +2271,9 @@ def _monitor_model_payload() -> dict:
 def _monitor_model_notes() -> list[dict[str, str]]:
     """모델 선택기 아래 '예외 규칙' — 순번과 다르게 도는 경로를 알려 준다(읽기 전용)."""
     return [
-        {"rule": "캡처 추론",
-         "detail": "캡처는 추론 수준을 쓰지 않는다 — 같은 프레임을 low·high로 판정해 보니 "
+        {"rule": "캡처",
+         "detail": "그 영상을 요약한 모델이 캡처도 맡고, 실패하면 요약 슬롯 순서로 넘긴다. "
+                   "추론 수준은 쓰지 않는다 — 같은 프레임을 low·high로 판정해 보니 "
                    "유지·소제목 배정이 모두 같았고 시간만 늘었다(2026-09-23)."},
         {"rule": "제목 번역",
          "detail": f"요약 순번과 무관하게 {_model_label(TITLE_TR_MODEL)} · 추론 기본값으로 고정. "
@@ -3166,22 +3191,16 @@ def channels_list():
 
 @app.route("/channels/model-orders", methods=["PATCH"])
 def channel_model_orders():
-    """자동모니터의 요약 슬롯(1~5개, 모델+추론)과 캡처 폴백(3칸, 모델)을 저장한다."""
+    """자동모니터의 요약 슬롯(1~5개, 모델+추론)을 저장한다. 캡처는 요약 모델을 따른다."""
     data = request.get_json(force=True) or {}
     slots = data.get("summary_slots")
-    capture = data.get("capture")
-    if slots is not None and not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
+    if slots is None:
+        return _json({"error": "변경할 요약 슬롯이 없습니다."}, 400)
+    if not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
         return _json({"error": f"요약 슬롯은 {llm_gateway.MIN_SUMMARY_SLOTS}~"
                                f"{llm_gateway.MAX_SUMMARY_SLOTS}개, 목록에 있는 모델이어야 합니다."}, 400)
-    if capture is not None and not llm_gateway.is_valid_capture_models(capture, db.get_monitor_capture_models()):
-        return _json({"error": "캡처 순서는 1순위에 모델을 두고, 없음은 맨 뒤에만 둘 수 있습니다."}, 400)
-    if slots is None and capture is None:
-        return _json({"error": "변경할 요약 슬롯이나 캡처 순서가 없습니다."}, 400)
     try:
-        if slots is not None:
-            db.set_monitor_summary_slots(slots)
-        if capture is not None:
-            db.set_monitor_capture_models(capture)
+        db.set_monitor_summary_slots(slots)
         return _json({"ok": True, **_monitor_model_payload()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
@@ -3995,9 +4014,12 @@ def keyframes():
                 or data.get("skip_claude_vision")
                 or str(data.get("mode") or "").lower() == "grok"
             )
+            # 순서를 명시하지 않으면 요약한 모델 → 요약 슬롯 순(수동 캡처·자동모니터 공통).
             requested_order = data.get("models") or data.get("model_order")
-            model_order = (llm_gateway.normalize_capture_models(requested_order, _capture_legacy())
-                           if requested_order is not None else None)
+            if requested_order is not None:
+                model_order = [str(m) for m in requested_order if str(m or "").strip()]
+            else:
+                model_order = None if skip_claude else _capture_order(summary_path)
             res = keyframe_report.generate_keyframes(
                 summary_path, _keyframe_source_url(abs_path, (data.get("url") or "").strip()),
                 frames_dir, url_base,

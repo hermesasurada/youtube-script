@@ -301,7 +301,6 @@ def grok_call_model(model=None, fallback=""):
     return entry["model"] if entry else model
 MIN_SUMMARY_SLOTS = 1
 MAX_SUMMARY_SLOTS = 5
-CAPTURE_SLOTS = 3
 
 
 def model_family(model: str) -> str:
@@ -341,45 +340,6 @@ def is_valid_summary_slots(value, existing=()) -> bool:
     return all(isinstance(s, dict) and (s in existing or (s.get("model") in SUMMARY_MODEL_CHOICES
                and llm_catalog.valid(s.get("model"), str(s.get("effort") or "default").lower(), selectable=True)))
                for s in value)
-
-
-def normalize_capture_models(value, legacy: dict[str, str], preserve_unknown=False) -> list[str]:
-    """캡처 순차 폴백 3칸 — 구체 모델 또는 none. 옛 계열 키(gpt 등)는 legacy로 바꾼다.
-    1순위는 비울 수 없고, none 뒤는 모두 none이다."""
-    raw = value if isinstance(value, list) else []
-    out: list[str] = []
-    for item in raw[:CAPTURE_SLOTS]:
-        key = str(item or "").strip()
-        if key == NONE_KEY:
-            out.append(NONE_KEY)
-        elif key in SUMMARY_MODEL_CHOICES:
-            out.append(key)
-        elif key in legacy:
-            out.append(legacy[key])
-        elif preserve_unknown and key and not key.startswith("-"):
-            out.append(key)
-    while len(out) < CAPTURE_SLOTS:
-        out.append(NONE_KEY)
-    if out[0] == NONE_KEY:
-        out[0] = legacy.get("opus", "opus")
-    if NONE_KEY in out:
-        cut = out.index(NONE_KEY)
-        out = out[:cut] + [NONE_KEY] * (CAPTURE_SLOTS - cut)
-    return out
-
-
-def is_valid_capture_models(value, existing=()) -> bool:
-    if not isinstance(value, list) or len(value) != CAPTURE_SLOTS:
-        return False
-    if value[0] == NONE_KEY:
-        return False
-    seen_none = False
-    for item in value:
-        if item == NONE_KEY:
-            seen_none = True
-        elif seen_none or (item not in existing and (item not in SUMMARY_MODEL_CHOICES or not llm_catalog.valid(item, capability='vision', selectable=True))):
-            return False
-    return True
 
 
 def _parse_model_tokens(value) -> list[str]:

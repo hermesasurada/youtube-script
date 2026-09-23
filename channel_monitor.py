@@ -489,7 +489,8 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     """전사→요약→캡처를 서버 엔드포인트로 순차 수행. 완료 요약 파일 경로 반환.
 
     summary_slots: 이번 작업의 시작 슬롯부터 돈 요약 슬롯 목록(모델+추론). 있으면 우선.
-    summary_models/summary_reasoning: 옛 계열 순서 호출 호환. capture_models는 캡처 폴백 순서.
+    summary_models/summary_reasoning: 옛 계열 순서 호출 호환. capture_models를 주지 않으면
+    서버가 '요약한 모델 → 요약 슬롯' 순으로 캡처한다(캡처 전용 설정은 없다).
     skip_claude는 구버전 호출 호환용이며 명시 순서가 있으면 사용하지 않는다.
     """
     url = v["url"]
@@ -626,9 +627,8 @@ def drain() -> None:
     받는 작업이라 주기당 1건으로 제한된다. deferred는 due가 되면 poll 단계에서
     pending으로 복귀한다.
     """
-    capture_order = db.get_monitor_capture_models()
-    _drain_main_one(capture_order)
-    _drain_kf_retry_one(capture_order)
+    _drain_main_one()
+    _drain_kf_retry_one()
 
 
 def _live_status(url: str) -> str:
@@ -652,7 +652,7 @@ _KF_POST_LIVE_WAIT_S = 3600      # VOD 처리 대기 간격
 _KF_POST_LIVE_MAX_H  = 48        # 이 시간이 지나도 post_live면 그냥 시도한다
 
 
-def _drain_kf_retry_one(capture_order) -> None:
+def _drain_kf_retry_one() -> None:
     """캡처 재시도 큐에서 1건 — 본편과 별도 슬롯(주기당 본편 1 + 캡처 1).
 
     캡처도 유튜브에서 저해상도 영상을 새로 받으므로 무제한으로 풀 수는 없다.
@@ -677,7 +677,7 @@ def _drain_kf_retry_one(capture_order) -> None:
         return
     log(f"[kf-retry] 캡처 재시도: {title}")
     try:
-        kf = process_capture_only(txt_path, v["url"], capture_models=capture_order)
+        kf = process_capture_only(txt_path, v["url"])
         if kf.get("ok"):
             db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
             notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
@@ -701,7 +701,7 @@ def _drain_kf_retry_one(capture_order) -> None:
     return
 
 
-def _drain_main_one(capture_order) -> None:
+def _drain_main_one() -> None:
     """본편 큐(pending)에서 1건 — 전사→요약→캡처 전체 파이프라인."""
     v = db.queue_claim_one()
     if not v:
@@ -736,7 +736,6 @@ def _drain_main_one(capture_order) -> None:
         res = process_video(
             v, _get_prompt(),
             summary_slots=active_slots,
-            capture_models=capture_order,
         )
         kf_note = res.get("kf_note")
         # 큐에서 증류를 지정했으면(NULL 아님) 완성된 이력에 영상 단위 오버라이드로 이관.

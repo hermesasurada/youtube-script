@@ -369,19 +369,15 @@ def init() -> None:
         if ver < 23:
             # v23: 요약 순번을 '슬롯 목록'으로(1~5개, 슬롯마다 구체 모델+추론 수준).
             # 기존 계열 순번·버전·추론 수준에서 그대로 옮겨 동작을 바꾸지 않는다.
-            # 캡처 순번의 계열 키도 구체 모델로 바꾼다(gpt → gpt-6-astra).
             mcols = {r[1] for r in c.execute("PRAGMA table_info(monitor_settings)").fetchall()}
             if "summary_slots" not in mcols:
                 c.execute("ALTER TABLE monitor_settings ADD COLUMN summary_slots "
                           "TEXT NOT NULL DEFAULT '[]'")
-            row = c.execute("SELECT summary_models, summary_reasoning, model_versions, "
-                            "capture_models FROM monitor_settings WHERE id = 1").fetchone()
+            row = c.execute("SELECT summary_models, summary_reasoning, model_versions "
+                            "FROM monitor_settings WHERE id = 1").fetchone()
             if row:
-                c.execute("UPDATE monitor_settings SET summary_slots = ?, capture_models = ? "
-                          "WHERE id = 1",
-                          (json.dumps(_slots_from_legacy(row)),
-                           json.dumps(llm_gateway.normalize_capture_models(
-                               _json_list(row["capture_models"]), _CAPTURE_LEGACY))))
+                c.execute("UPDATE monitor_settings SET summary_slots = ? WHERE id = 1",
+                          (json.dumps(_slots_from_legacy(row)),))
             c.execute("PRAGMA user_version = 23")
 
 
@@ -868,8 +864,6 @@ def remove_term_exclusion(term: str) -> bool:
         return cur.rowcount > 0
 
 
-# 옛 계열 키 → 구체 모델(캡처는 비전 모델 기본값을 따른다).
-_CAPTURE_LEGACY = {"opus": "opus", "gpt": "gpt-6-astra", "grok": "grok"}
 _DEFAULT_SLOTS = [{"model": "opus", "effort": "default"},
                   {"model": "gpt-6-astra", "effort": "high"},
                   {"model": "grok", "effort": "default"}]
@@ -955,26 +949,6 @@ def reserve_monitor_summary_slots() -> dict:
     rotated = slots[cursor:] + slots[:cursor]
     return {"slots": rotated, "primary": rotated[0], "start_index": cursor,
             "next_index": next_cursor}
-
-
-def get_monitor_capture_models() -> list[str]:
-    row = _conn().execute(
-        "SELECT capture_models FROM monitor_settings WHERE id = 1").fetchone()
-    return llm_gateway.normalize_capture_models(
-        _json_list(row["capture_models"]) if row else list(llm_gateway.MODEL_KEYS),
-        _CAPTURE_LEGACY, preserve_unknown=True)
-
-
-def set_monitor_capture_models(value) -> list[str]:
-    models = llm_gateway.normalize_capture_models(value, _CAPTURE_LEGACY, preserve_unknown=True)
-    with _lock:
-        cur = _conn().execute("UPDATE monitor_settings SET capture_models = ?, updated_at = ? "
-                              "WHERE id = 1", (json.dumps(models), _now()))
-        if cur.rowcount == 0:
-            _conn().execute("INSERT INTO monitor_settings (id, summary_models, capture_models, "
-                            "updated_at) VALUES (1, ?, ?, ?)",
-                            (json.dumps(list(llm_gateway.MODEL_KEYS)), json.dumps(models), _now()))
-    return get_monitor_capture_models()
 
 
 def set_item_distill(path: str, value: bool | None) -> bool:

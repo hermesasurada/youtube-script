@@ -11,12 +11,11 @@
      versions: [{slot, value, label}]  모델 드롭다운 항목
      efforts:  [{value, label}]
      allowNone: bool                 요약 행에 '사용 안 함'을 둘지
-     hint, status, notes: [{rule, detail}], extra: html,
-     capture:  null | {tag, hint, rows: [{value, options: [{value, label}]}]}
+     hint, status, notes: [{rule, detail}], extra: html
    }
    슬롯 모드(yt): order 대신 slots: [{model, effort}], nextIndex, limits: {min, max}.
      행마다 모델·추론을 따로 고르고(같은 계열 여러 번 가능) 행을 더하고 뺀다.
-   handlers = { onModel(index, value), onEffort(slot, value), onCapture(index, value),
+   handlers = { onModel(index, value), onEffort(slot, value),
                 onSlotModel(i, v), onSlotEffort(i, v), onAddSlot(), onRemoveSlot(i) } */
 (function (global) {
   const NONE = '__none__';
@@ -71,16 +70,6 @@
         + `<select data-msel="effort" data-slot="${esc(slot || '')}"${slot ? '' : ' disabled'} aria-label="요약 ${i + 1}순번 추론 수준">${levels}</select></div>`;
     }).join('');
 
-    const cap = state.capture;
-    const capture = cap ? `<section class="msel-block">`
-      + `<div class="msel-head"><strong>캡처</strong><span class="msel-tag">${esc(cap.tag || '순차 폴백')}</span></div>`
-      + cap.rows.map((r, i) => `<div class="msel-row no-effort"><span class="msel-step">${i + 1}</span>`
-        + `<select data-msel="capture" data-index="${i}" aria-label="캡처 ${i + 1}순위">`
-        + r.options.map(o => option(o.value, o.label, o.value === r.value)).join('')
-        + `</select></div>`).join('')
-      + (cap.hint ? `<p class="msel-hint">${esc(cap.hint)}</p>` : '')
-      + `</section>` : '';
-
     const notes = (state.notes || []).length
       ? `<div class="msel-notes"><div class="msel-notes-title">예외 규칙</div><ul>`
         + state.notes.map(n => `<li><b>${esc(n.rule)}</b>${esc(n.detail)}</li>`).join('')
@@ -90,7 +79,7 @@
       + `<section class="msel-block"><div class="msel-head"><strong>요약</strong>`
       + `<span class="msel-tag">라운드로빈</span><span class="msel-status" data-msel-status>${esc(state.status || '')}</span></div>`
       + rows + (state.hint ? `<p class="msel-hint">${esc(state.hint)}</p>` : '') + `</section>`
-      + capture + (state.extra || '') + notes + `</div>`;
+      + (state.extra || '') + notes + `</div>`;
 
     if (!root._mselBound) {             // 이벤트 위임은 한 번만 건다(다시 그려도 유지)
       root._mselBound = true;
@@ -100,7 +89,6 @@
         const h = root._mselHandlers, kind = el.dataset.msel, i = Number(el.dataset.index);
         if (kind === 'model' && h.onModel) h.onModel(i, el.value === NONE ? null : el.value);
         if (kind === 'effort' && h.onEffort) h.onEffort(el.dataset.slot, el.value);
-        if (kind === 'capture' && h.onCapture) h.onCapture(i, el.value);
         if (kind === 'slot-model' && h.onSlotModel) h.onSlotModel(i, el.value);
         if (kind === 'slot-effort' && h.onSlotEffort) h.onSlotEffort(i, el.value);
       });

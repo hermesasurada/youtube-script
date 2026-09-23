@@ -1291,7 +1291,7 @@ def test_monitor_model_options_follow_catalog(monkeypatch, tmp_path):
     assert labels["grok"] != "Grok 4.6"
 
 
-def test_monitor_summary_slots_and_capture_persist(monkeypatch, tmp_path):
+def test_monitor_summary_slots_persist_and_capture_setting_is_gone(monkeypatch, tmp_path):
     catalog = app.llm_gateway.llm_catalog
     monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
     catalog.save(catalog.seed(), 0)
@@ -1305,27 +1305,22 @@ def test_monitor_summary_slots_and_capture_persist(monkeypatch, tmp_path):
         r = client.patch("/channels/model-orders", json={"summary_slots": slots}).get_json()
         assert r["summary_slots"] == slots
         assert r["slot_limits"] == {"min": 1, "max": 5}
-        r = client.patch("/channels/model-orders",
-                         json={"capture": ["gpt-6-luna", "grok", "none"]}).get_json()
-        assert r["capture_models"] == ["gpt-6-luna", "grok", "none"]
-        assert r["summary_slots"] == slots                        # 캡처만 바꿔도 요약은 그대로
+        # 캡처 설정은 없어졌다 — 요약 모델이 캡처까지 맡는다(2026-09-23 사용자 지시).
+        assert client.patch("/channels/model-orders",
+                            json={"capture": ["gpt-6-luna", "grok", "none"]}).status_code == 400
         payload = client.get("/channels").get_json()
-        assert payload["summary_slots"] == slots and payload["capture_models"][0] == "gpt-6-luna"
+        assert payload["summary_slots"] == slots and "capture_models" not in payload
         # 경계: 0개·6개·모르는 모델·잘못된 추론은 거부
         for bad in ([], slots + slots[:2], [{"model": "gpt-9"}],
                     [{"model": "grok", "effort": "extreme"}]):
             assert client.patch("/channels/model-orders",
                                 json={"summary_slots": bad}).status_code == 400
-        # 캡처: 1순위 비움, 중간 none 뒤 모델은 거부
-        for bad in (["none", "grok", "none"], ["grok", "none", "opus"], ["grok", "gpt-9", "none"]):
-            assert client.patch("/channels/model-orders", json={"capture": bad}).status_code == 400
         assert client.patch("/channels/model-orders",
                             json={"summary_slots": [{"model": "grok"}]}).status_code == 200  # 최소 1개
     finally:
         db.set_monitor_summary_slots([{"model": "opus", "effort": "default"},
                                       {"model": "gpt-6-astra", "effort": "high"},
                                       {"model": "grok", "effort": "default"}])
-        db.set_monitor_capture_models(["opus", "gpt-6-astra", "grok"])
 
 
 def test_monitor_summary_slot_round_robin_rotates_and_wraps():
@@ -1344,11 +1339,30 @@ def test_monitor_summary_slot_round_robin_rotates_and_wraps():
                                       {"model": "grok", "effort": "default"}])
 
 
-def test_legacy_family_capture_order_maps_to_models():
-    """옛 저장값(계열 키)도 구체 모델로 읽힌다 — gpt는 캡처 기본 GPT 비전 모델."""
-    legacy = {"opus": "opus", "gpt": "gpt-6-astra", "grok": "grok"}
-    assert app.llm_gateway.normalize_capture_models(["grok", "gpt", "opus"], legacy) == \
-        ["grok", "gpt-6-astra", "opus"]
+def test_capture_order_starts_with_the_model_that_summarized(monkeypatch, tmp_path):
+    """캡처는 그 영상을 요약한 모델이 먼저, 이어서 요약 슬롯 순서(중복 없이)."""
+    slots = [{"model": "claude-opus-5-5", "effort": "high"},
+             {"model": "gpt-6-sol", "effort": "high"},
+             {"model": "grok-4.7", "effort": "default"}]
+    monkeypatch.setattr(app.db, "get_monitor_summary_slots",
+                        lambda: {"slots": slots, "next_index": 0})
+    monkeypatch.setattr(app.llm_gateway.llm_catalog, "valid", lambda m, **kw: True)
+    summary = tmp_path / "s.md"
+    summary.write_text("<!--SUMMARY_MODEL:GPT 6 Sol · 1회 재시도-->\n\n## 본문\n", encoding="utf-8")
+    assert app._capture_order(str(summary)) == ["gpt-6-sol", "claude-opus-5-5", "grok-4.7"]
+    # 마커가 없으면 슬롯 순서 그대로
+    summary.write_text("## 본문\n", encoding="utf-8")
+    assert app._capture_order(str(summary)) == ["claude-opus-5-5", "gpt-6-sol", "grok-4.7"]
+    # 이미지 입력이 안 되는 모델은 뺀다
+    monkeypatch.setattr(app.llm_gateway.llm_catalog, "valid",
+                        lambda m, **kw: m != "grok-4.7")
+    assert "grok-4.7" not in app._capture_order(str(summary))
+
+
+def test_keyframe_vision_accepts_any_length_order():
+    """서버가 넘긴 순서를 자르지 않는다(예전 3칸 제한 없음) — 옛 계열 키는 비전 기본값으로."""
+    src = open(keyframe_report.__file__, encoding="utf-8").read()
+    assert "normalize_capture_models" not in src
 
 
 def test_membership_capture_failure_is_not_retried(monkeypatch):
@@ -1394,7 +1408,6 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
     # 캡처 재시도는 본편(pending)과 분리된 전용 인출구로 나온다
     monkeypatch.setattr(channel_monitor.db, "queue_claim_one", lambda: None)
     monkeypatch.setattr(channel_monitor.db, "queue_claim_kf_retry", lambda: retry)
-    monkeypatch.setattr(channel_monitor.db, "get_monitor_capture_models", lambda: ["opus"])
     monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)
     monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
     monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda: (True, "claude", ""))
@@ -1474,7 +1487,7 @@ def test_process_video_recovers_indexed_transcript_after_restart(monkeypatch):
     assert not any(url.endswith("/start") for url in calls)
 
 
-def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
+def test_process_video_sends_summary_order_and_lets_server_pick_capture(monkeypatch):
     calls = []
 
     class ResponseStub:
@@ -1496,7 +1509,6 @@ def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
         {"id": 1, "url": "https://youtu.be/orders", "txt_path": "/tmp/existing.md"},
         "prompt",
         summary_models=["gpt", "opus", "grok"],
-        capture_models=["grok", "gpt", "opus"],
         summary_reasoning={"opus": "low", "gpt": "high", "grok": "medium"},
     )
     summary_body = next(body for url, body in calls if url.endswith("/summarize"))
@@ -1505,7 +1517,7 @@ def test_process_video_sends_separate_summary_and_capture_orders(monkeypatch):
     assert summary_body["reasoning_levels"] == {
         "opus": "low", "gpt": "high", "grok": "medium",
     }
-    assert capture_body["models"] == ["grok", "gpt", "opus"]
+    assert "models" not in capture_body       # 서버가 요약한 모델 → 요약 슬롯 순으로 정한다
 
 
 def test_stream_command_timeout_and_stderr_drain():

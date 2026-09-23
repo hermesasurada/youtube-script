@@ -27,7 +27,6 @@
   align-items: center;
   gap: 6px;
 }
-.msel-row.no-effort { grid-template-columns: 20px minmax(0, 1fr); }
 .msel-step {
   width: 20px; height: 20px;
   display: inline-flex; align-items: center; justify-content: center;

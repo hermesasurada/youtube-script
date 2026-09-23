@@ -599,7 +599,7 @@ JSON 배열로만 답하라(다른 설명 금지):
             r = llm_gateway.ProcessResult(r.returncode, stdout, r.stderr, r.timed_out)
             return _logged(call, r, _parse(r))
 
-    # 자동모니터가 보낸 순서대로 폴백한다. Opus는 기존 안정성 정책대로 최대 3회,
+    # 받은 순서대로 폴백한다. Opus는 기존 안정성 정책대로 최대 3회,
     # GPT/Grok은 각 1회 시도해 다음 폴백이 과도하게 지연되지 않게 한다.
     _LAST_VISION_ERR = ""
     data = None
@@ -607,8 +607,9 @@ JSON 배열로만 답하라(다른 설명 금지):
     if model_order is None:
         order = [VISION_MODEL] + (["grok"] if GROK_VISION_FALLBACK else [])
     else:
-        # 구체 모델 목록(옛 계열 키도 받는다: gpt → GPT_VISION_MODEL).
-        order = llm_gateway.normalize_capture_models(model_order, legacy)
+        # 구체 모델 목록(옛 계열 키도 받는다: gpt → GPT_VISION_MODEL). 개수 제한 없음 —
+        # 서버가 '요약한 모델 → 요약 슬롯' 순서로 만들어 넘긴다.
+        order = [legacy.get(str(m), str(m)) for m in model_order] or [VISION_MODEL]
     failures: list[str] = []
     callers = {"opus": _call_claude, "gpt": _call_gpt, "grok": _call_grok}
     for model in order:

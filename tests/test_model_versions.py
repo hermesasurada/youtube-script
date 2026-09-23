@@ -50,7 +50,6 @@ def test_catalog_changes_validation_and_preserves_legacy(monkeypatch, tmp_path):
     c.save(data, 0)
     assert llm_gateway.is_valid_summary_slots([{'model': 'gpt-text-only', 'effort': 'low'}])
     assert not llm_gateway.is_valid_summary_slots([{'model': 'gpt-text-only', 'effort': 'high'}])
-    assert not llm_gateway.is_valid_capture_models(['gpt-text-only', 'none', 'none'])
     legacy = [{'model': 'retired-model', 'effort': 'high'}]
     assert llm_gateway.normalize_summary_slots(legacy, [], preserve_unknown=True) == legacy
     assert llm_gateway.is_valid_summary_slots(legacy, existing=legacy)
@@ -66,12 +65,9 @@ def test_grok_catalog_options_and_vision_filter(monkeypatch, tmp_path):
     data['models'].append(c.entry('grok-vision-test', 'grok', levels=['default'], vision=True))
     c.save(data, 0)
     monkeypatch.setattr(app.db, 'get_monitor_summary_slots', lambda: {'slots': [], 'next_index': 0})
-    monkeypatch.setattr(app.db, 'get_monitor_capture_models', lambda: ['grok-4.7', 'none', 'none'])
     payload = app._monitor_model_payload()
     assert 'grok-4.7' in {x['value'] for x in payload['model_options']}
-    assert 'grok-4.7' not in {x['value'] for x in payload['capture_options']}
-    assert 'grok-vision-test' in {x['value'] for x in payload['capture_options']}
-    assert payload['capture_models'][0] == 'grok-4.7'
+    assert 'capture_models' not in payload and 'capture_options' not in payload   # 캡처 설정은 없다
     assert llm_gateway.is_valid_summary_slots([{'model': 'grok-4.7', 'effort': 'default'}])
     assert not llm_gateway.is_valid_summary_slots([{'model': 'grok-4.7', 'effort': 'high'}])
     assert llm_gateway.grok_call_model('grok-4.7', 'old-model') == 'grok-4.7'
