@@ -910,13 +910,13 @@ def get_monitor_summary_slots() -> dict:
     if not row:
         slots, cursor = [dict(x) for x in _DEFAULT_SLOTS], 0
     else:
-        slots = llm_gateway.normalize_summary_slots(_json_list(row["summary_slots"]), _DEFAULT_SLOTS)
+        slots = llm_gateway.normalize_summary_slots(_json_list(row["summary_slots"]), _DEFAULT_SLOTS, preserve_unknown=True)
         cursor = int(row["summary_cursor"] or 0) % len(slots)
     return {"slots": slots, "next_index": cursor}
 
 
 def set_monitor_summary_slots(value) -> dict:
-    slots = llm_gateway.normalize_summary_slots(value, _DEFAULT_SLOTS)
+    slots = llm_gateway.normalize_summary_slots(value, _DEFAULT_SLOTS, preserve_unknown=True)
     with _lock:
         conn = _conn()
         cur = conn.execute("SELECT summary_cursor FROM monitor_settings WHERE id = 1").fetchone()
@@ -941,7 +941,7 @@ def reserve_monitor_summary_slots() -> dict:
             row = conn.execute("SELECT summary_slots, summary_cursor FROM monitor_settings "
                                "WHERE id = 1").fetchone()
             slots = (llm_gateway.normalize_summary_slots(_json_list(row["summary_slots"]),
-                                                         _DEFAULT_SLOTS)
+                                                         _DEFAULT_SLOTS, preserve_unknown=True)
                      if row else [dict(x) for x in _DEFAULT_SLOTS])
             cursor = int(row["summary_cursor"] or 0) % len(slots) if row else 0
             next_cursor = (cursor + 1) % len(slots)
@@ -962,11 +962,11 @@ def get_monitor_capture_models() -> list[str]:
         "SELECT capture_models FROM monitor_settings WHERE id = 1").fetchone()
     return llm_gateway.normalize_capture_models(
         _json_list(row["capture_models"]) if row else list(llm_gateway.MODEL_KEYS),
-        _CAPTURE_LEGACY)
+        _CAPTURE_LEGACY, preserve_unknown=True)
 
 
 def set_monitor_capture_models(value) -> list[str]:
-    models = llm_gateway.normalize_capture_models(value, _CAPTURE_LEGACY)
+    models = llm_gateway.normalize_capture_models(value, _CAPTURE_LEGACY, preserve_unknown=True)
     with _lock:
         cur = _conn().execute("UPDATE monitor_settings SET capture_models = ?, updated_at = ? "
                               "WHERE id = 1", (json.dumps(models), _now()))

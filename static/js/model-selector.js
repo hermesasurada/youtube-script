@@ -31,6 +31,13 @@
     if (!root) return;
     const versions = state.versions || [];
     const efforts = state.efforts || [];
+    const levelsFor = (model, selected) => {
+      const hit = versions.find(v => v.value === model);
+      const allowed = hit && hit.reasoning;
+      let result = allowed ? efforts.filter(e => allowed.includes(e.value)) : efforts;
+      if (selected && !result.some(e => e.value === selected)) result = result.concat([{value:selected,label:selected+' (기존 설정)'}]);
+      return result;
+    };
     const slotRows = () => {
       const lim = state.limits || { min: 1, max: 5 };
       const list = state.slots || [];
@@ -42,7 +49,7 @@
           + `<select data-msel="slot-model" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 모델">`
           + versions.map(v => option(v.value, v.label, v.value === s.model)).join('') + `</select>`
           + `<select data-msel="slot-effort" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 추론 수준">`
-          + efforts.map(e => option(e.value, e.label, e.value === s.effort)).join('') + `</select>`
+          + levelsFor(s.model, s.effort).map(e => option(e.value, e.label, e.value === s.effort)).join('') + `</select>`
           + `<span class="msel-next">${isNext ? '다음' : ''}</span>`
           + `<button type="button" class="msel-remove" data-msel="slot-remove" data-index="${i}"`
           + `${canRemove ? '' : ' disabled'} aria-label="${i + 1}번 슬롯 빼기" title="슬롯 빼기">×</button></div>`;
@@ -56,7 +63,7 @@
       const models = versions.map(v =>
         option(v.value, v.label, slot === v.slot && (state.version || {})[slot] === v.value)).join('')
         + (state.allowNone ? option(NONE, '사용 안 함', !slot) : '');
-      const levels = efforts.map(e =>
+      const levels = levelsFor((state.version || {})[slot] || slot, (state.effort || {})[slot]).map(e =>
         option(e.value, e.label, slot && (state.effort || {})[slot] === e.value)).join('');
       const isNext = slot && slot === state.next;
       return `<div class="msel-row${isNext ? ' is-next' : ''}${slot ? '' : ' is-off'}">`

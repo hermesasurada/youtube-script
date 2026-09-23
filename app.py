@@ -2207,13 +2207,13 @@ def _model_label(model_id: str) -> str:
 
 def _monitor_version_options() -> list[dict[str, str]]:
     """모델 선택기에 보일 구체 모델 목록(슬롯·값·표시명)."""
+    selected = [slot["model"] for slot in db.get_monitor_summary_slots()["slots"]]
+    selected += db.get_monitor_capture_models()
     opts = []
-    for slot, choices in llm_gateway.MODEL_VERSION_CHOICES.items():
-        for value in choices:
-            label = "Opus (최신 별칭)" if value == "opus" else _model_label(value)
-            opts.append({"slot": slot, "value": value, "label": label})
-    grok_id = GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok"
-    opts.append({"slot": "grok", "value": "grok", "label": _model_label(grok_id)})
+    for provider, family in (("claude", "opus"), ("codex", "gpt"), ("grok", "grok")):
+        for item in llm_gateway.llm_catalog.options(provider, keys=("grok",) if provider == "grok" else None,
+                                                   selected=[m for m in selected if llm_gateway.model_family(m) == family]):
+            opts.append(dict(item, slot=family))
     return opts
 
 
@@ -2231,6 +2231,10 @@ def _monitor_model_payload() -> dict:
         "summary_next_index": summary["next_index"],
         "capture_models": db.get_monitor_capture_models(),
         "model_options": _monitor_version_options(),
+        "capture_options": [m for m in _monitor_version_options()
+                            if llm_gateway.llm_catalog.valid(m["value"], capability="vision")
+                            or m["value"] in db.get_monitor_capture_models()],
+        "catalog_revision": llm_gateway.llm_catalog.read()["revision"],
         "reasoning_options": _monitor_reasoning_options(),
         "slot_limits": {"min": llm_gateway.MIN_SUMMARY_SLOTS, "max": llm_gateway.MAX_SUMMARY_SLOTS},
         "model_notes": _monitor_model_notes(),
@@ -2255,14 +2259,7 @@ def _monitor_model_notes() -> list[dict[str, str]]:
 
 
 def _monitor_reasoning_options() -> list[dict[str, str]]:
-    return [
-        {"value": "default", "label": "모델 기본값"},
-        {"value": "low", "label": "낮음"},
-        {"value": "medium", "label": "보통"},
-        {"value": "high", "label": "높음"},
-        {"value": "xhigh", "label": "매우 높음"},
-        {"value": "max", "label": "최대"},
-    ]
+    return llm_gateway.llm_catalog.reasoning_options()
 
 
 def _model_line(label: str, note: str = "") -> str:
@@ -2394,7 +2391,7 @@ def _summary_attempts(model_order=None, reasoning_levels=None, slots=None) -> li
     (model_order)를 현재 버전 설정과 계열별 추론 수준으로 풀어 쓴다.
     """
     if slots:
-        picked = llm_gateway.normalize_summary_slots(slots, [])
+        picked = llm_gateway.normalize_summary_slots(slots, [], preserve_unknown=True)
         return [{"family": llm_gateway.model_family(s["model"]), "model": s["model"],
                  "effort": s["effort"]} for s in picked]
     order = llm_gateway.normalize_model_order(model_order)
@@ -2780,7 +2777,7 @@ def summarize():
         return _json({"error": "유효하지 않은 요약 추론 수준입니다."}, 400)
     # 모니터 요약 슬롯(구체 모델+추론). 있으면 models·reasoning_levels보다 우선한다.
     slots = data.get("slots")
-    if slots is not None and not llm_gateway.is_valid_summary_slots(slots):
+    if slots is not None and not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
         return _json({"error": "유효하지 않은 요약 슬롯입니다."}, 400)
     log.info(
         "summarize start: %s%s",
@@ -3169,10 +3166,10 @@ def channel_model_orders():
     data = request.get_json(force=True) or {}
     slots = data.get("summary_slots")
     capture = data.get("capture")
-    if slots is not None and not llm_gateway.is_valid_summary_slots(slots):
+    if slots is not None and not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
         return _json({"error": f"요약 슬롯은 {llm_gateway.MIN_SUMMARY_SLOTS}~"
                                f"{llm_gateway.MAX_SUMMARY_SLOTS}개, 목록에 있는 모델이어야 합니다."}, 400)
-    if capture is not None and not llm_gateway.is_valid_capture_models(capture):
+    if capture is not None and not llm_gateway.is_valid_capture_models(capture, db.get_monitor_capture_models()):
         return _json({"error": "캡처 순서는 1순위에 모델을 두고, 없음은 맨 뒤에만 둘 수 있습니다."}, 400)
     if slots is None and capture is None:
         return _json({"error": "변경할 요약 슬롯이나 캡처 순서가 없습니다."}, 400)

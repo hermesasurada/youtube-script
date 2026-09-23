@@ -40,3 +40,18 @@ def test_shared_selector_files_match_website_monitor():
             continue                      # wm이 없는 환경에서는 건너뛴다
         with open(os.path.join(here, mine), encoding="utf-8") as a, open(other, encoding="utf-8") as b:
             assert a.read() == b.read(), f"{mine}가 wm 사본과 다르다"
+
+
+def test_catalog_changes_validation_and_preserves_legacy(monkeypatch, tmp_path):
+    c = llm_gateway.llm_catalog
+    monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
+    data = c.seed()
+    data['models'].append(c.entry('gpt-text-only', 'codex', levels=['default', 'low']))
+    c.save(data, 0)
+    assert llm_gateway.is_valid_summary_slots([{'model': 'gpt-text-only', 'effort': 'low'}])
+    assert not llm_gateway.is_valid_summary_slots([{'model': 'gpt-text-only', 'effort': 'high'}])
+    assert not llm_gateway.is_valid_capture_models(['gpt-text-only', 'none', 'none'])
+    legacy = [{'model': 'retired-model', 'effort': 'high'}]
+    assert llm_gateway.normalize_summary_slots(legacy, [], preserve_unknown=True) == legacy
+    assert llm_gateway.is_valid_summary_slots(legacy, existing=legacy)
+    assert not llm_gateway.is_valid_summary_slots(legacy)

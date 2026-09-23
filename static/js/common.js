@@ -1141,11 +1141,7 @@
     slots: [], nextIndex: 0, limits: { min: 1, max: 5 },
     capture: ['opus', 'gpt-6-astra', 'grok'],
     options: [], notes: [], status: '',
-    efforts: [
-      { value: 'default', label: '모델 기본값' }, { value: 'low', label: '낮음' },
-      { value: 'medium', label: '보통' }, { value: 'high', label: '높음' },
-      { value: 'xhigh', label: '매우 높음' }, { value: 'max', label: '최대' },
-    ],
+    efforts: [], captureOptions: [],
     root: null, onSaved: null,
   };
 
@@ -1157,20 +1153,21 @@
     if (Array.isArray(d.capture_models)) _mm.capture = d.capture_models.slice();
     if (d.model_options) _mm.options = d.model_options;
     if (d.reasoning_options) _mm.efforts = d.reasoning_options;
+    if (d.capture_options) _mm.captureOptions = d.capture_options;
     if (d.model_notes) _mm.notes = d.model_notes;
   }
   /** 페이지 캐시에 되써 둘 필드만 추린다(모달을 다시 열 때 최신 상태로 그리게). */
   function mmFields(d) {
     const out = {};
     ['summary_slots', 'summary_next_index', 'slot_limits', 'capture_models',
-     'model_options', 'reasoning_options', 'model_notes']
+     'model_options', 'capture_options', 'reasoning_options', 'model_notes']
       .forEach(k => { if (d && d[k] !== undefined) out[k] = d[k]; });
     return out;
   }
 
   // 캡처 순차 폴백: 1순위는 비울 수 없고 '없음' 뒤는 모두 '없음'.
   function mmCaptureChoices(order, index) {
-    const models = _mm.options.map(o => o.value);
+    const models = (_mm.captureOptions.length ? _mm.captureOptions : _mm.options).map(o => o.value);
     if (index > 0 && order.slice(0, index).includes(MM_NONE)) return [MM_NONE];
     return index === 0 ? models : models.concat(MM_NONE);
   }
@@ -1207,7 +1204,11 @@
       },
     }, {
       onSlotModel(i, value) {
-        mmSave('slots', () => { _mm.slots[i] = { ..._mm.slots[i], model: value }; });
+        mmSave('slots', () => { const option = _mm.options.find(o => o.value === value);
+          const previous = _mm.slots[i];
+          const effort = option && option.reasoning && !option.reasoning.includes(previous.effort) ? 'default' : previous.effort;
+          _mm.slots[i] = { ...previous, model: value, effort };
+          if (effort !== previous.effort) _mm.status = '모델에 맞게 추론 수준을 기본값으로 변경했습니다'; });
       },
       onSlotEffort(i, value) {
         mmSave('slots', () => { _mm.slots[i] = { ..._mm.slots[i], effort: value }; });
@@ -1232,7 +1233,9 @@
   /** 변경을 적용하고 바로 저장한다. 실패하면 적용 전 상태로 되돌린다. */
   async function mmSave(kind, mutate) {
     const snapshot = JSON.stringify([_mm.slots, _mm.capture]);
+    _mm.status = '';
     mutate();
+    const adjustment = _mm.status;
     _mm.status = '저장 중…';
     mmRender();
     _mm.root.querySelectorAll('select, button').forEach(el => { el.disabled = true; });
@@ -1244,7 +1247,7 @@
       const d = await r.json();
       if (d.error) throw new Error(d.error);
       mmLoad(d);
-      _mm.status = '저장됨';
+      _mm.status = adjustment || '저장됨';
       if (_mm.onSaved) _mm.onSaved(d);
     } catch (e) {
       [_mm.slots, _mm.capture] = JSON.parse(snapshot);

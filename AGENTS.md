@@ -35,3 +35,9 @@
 - `_summarize_ordered`의 GPT/Grok 경로는 누출이 있으면 같은 모델에 교정 지시(`_SCRIPT_RETRY_NOTE`)를 붙여 1회 재요청하고, 그래도 남으면 실패로 처리해 다음 모델로 넘긴다. Claude 스트리밍 경로는 `_warn_script_mix` 경고 로그만 남긴다.
 - 규칙을 바꾸면 기존 요약 전체(`SUMMARY_DIR`)로 오탐을 다시 보정할 것(2026-09-12 기준 1,061건 중 오탐 0).
 - whisper 반복 붕괴 판정(`_looks_collapsed`)은 같은 문장의 **연속 횟수(50회)** 와 **연속 시간(120초, `_COLLAPSE_MIN_SECS`)** 두 기준 중 하나면 붕괴다. 세그먼트가 30초씩 길게 나오면 10분이 27회에 불과해 횟수만으로는 못 잡는다(2026-09-15 CNBC 12분 영상: 654초 연속 → 컨텍스트 제한 재전사로 정상화). 붕괴가 그대로 저장되면 파싱 단계의 중복 제거 때문에 본문이 몇 줄로 줄어든 채 '정상 완료'로 보인다.
+
+## Shared LLM catalog
+
+- Model lists, display names and supported reasoning levels come from `~/projects/hermes-llm-log/llm_catalog.py` and `~/.hermes/data/llm_catalog.json`; manage them through the portal model-management page. Do not add independent UI option lists.
+- Service selections, slot counts, routing and fallback order remain local. Preserve saved selections during catalog outages or model deactivation. New discoveries are candidates until manually enabled.
+- Keep actual historical model IDs unchanged. Catalog readers must not depend on portal availability or trigger inference.

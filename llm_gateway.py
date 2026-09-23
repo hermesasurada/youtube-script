@@ -6,6 +6,13 @@ and guarantees child cleanup when a streaming client disconnects.
 
 from __future__ import annotations
 
+
+# Shared metadata; service execution policy remains local.
+import sys as _catalog_sys
+from pathlib import Path as _CatalogPath
+_catalog_sys.path.insert(0, str(_CatalogPath.home() / "projects/hermes-llm-log"))
+import llm_catalog
+
 import glob
 import json
 import os
@@ -260,21 +267,21 @@ def resolve_codex_bin() -> str:
 MODEL_KEYS = ("opus", "gpt", "grok")
 NONE_KEY = "none"
 SLOT_COUNT = len(MODEL_KEYS)
-REASONING_LEVELS = ("default", "low", "medium", "high", "xhigh", "max")
+REASONING_LEVELS = tuple(llm_catalog.LEVEL_LABELS)
 DEFAULT_SUMMARY_REASONING = {"opus": "default", "gpt": "high", "grok": "default"}
 
 # 슬롯별로 고를 수 있는 구체 모델. "opus"는 Claude CLI의 최신 Opus 별칭이다
 # (2026-09-23 현재 claude-opus-5-5로 풀린다). Grok은 CLI 기본 모델을 따라가므로 없다.
 MODEL_VERSION_CHOICES = {
-    "opus": ("opus", "claude-opus-5-5"),
-    "gpt": ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna"),
+    "opus": llm_catalog.Choices("claude"),
+    "gpt": llm_catalog.Choices("codex"),
 }
 
 
 # ── 요약 슬롯(2026-09-23) ──────────────────────────────────────────────
 # 요약 순번은 계열 목록이 아니라 슬롯 목록이다. 슬롯 하나 = {"model": 구체 모델,
 # "effort": 추론 수준}. 같은 계열이 여러 슬롯에 들어갈 수 있다(GPT Sol·Luna 등).
-SUMMARY_MODEL_CHOICES = MODEL_VERSION_CHOICES["opus"] + MODEL_VERSION_CHOICES["gpt"] + ("grok",)
+SUMMARY_MODEL_CHOICES = llm_catalog.ExecutorChoices(("claude", "codex"), aliases=("grok",))
 MIN_SUMMARY_SLOTS = 1
 MAX_SUMMARY_SLOTS = 5
 CAPTURE_SLOTS = 3
@@ -282,6 +289,9 @@ CAPTURE_SLOTS = 3
 
 def model_family(model: str) -> str:
     """구체 모델 → 계열 키(opus/gpt/grok). 옛 저장값의 계열 키도 그대로 받는다."""
+    registered = llm_catalog.resolve(model)
+    if registered and registered['provider'] in ('claude', 'codex', 'grok'):
+        return {'claude': 'opus', 'codex': 'gpt', 'grok': 'grok'}[registered['provider']]
     m = str(model or "").strip().lower()
     if m.startswith("gpt"):
         return "gpt"
@@ -290,7 +300,7 @@ def model_family(model: str) -> str:
     return "opus"
 
 
-def normalize_summary_slots(value, defaults: list[dict]) -> list[dict]:
+def normalize_summary_slots(value, defaults: list[dict], preserve_unknown=False) -> list[dict]:
     """슬롯 목록 정규화: 알 수 없는 모델은 버리고, 추론 수준은 없으면 default.
     1개 미만이면 기본값, 5개를 넘으면 앞에서 자른다."""
     out: list[dict] = []
@@ -298,7 +308,7 @@ def normalize_summary_slots(value, defaults: list[dict]) -> list[dict]:
         if not isinstance(raw, dict):
             continue
         model = str(raw.get("model") or "").strip()
-        if model not in SUMMARY_MODEL_CHOICES:
+        if model not in SUMMARY_MODEL_CHOICES and not (preserve_unknown and model and not model.startswith("-")):
             continue
         effort = str(raw.get("effort") or "default").strip().lower()
         out.append({"model": model,
@@ -308,16 +318,15 @@ def normalize_summary_slots(value, defaults: list[dict]) -> list[dict]:
     return out[:MAX_SUMMARY_SLOTS]
 
 
-def is_valid_summary_slots(value) -> bool:
+def is_valid_summary_slots(value, existing=()) -> bool:
     if not isinstance(value, list) or not (MIN_SUMMARY_SLOTS <= len(value) <= MAX_SUMMARY_SLOTS):
         return False
-    return all(isinstance(s, dict)
-               and s.get("model") in SUMMARY_MODEL_CHOICES
-               and str(s.get("effort") or "default").lower() in REASONING_LEVELS
+    return all(isinstance(s, dict) and (s in existing or (s.get("model") in SUMMARY_MODEL_CHOICES
+               and llm_catalog.valid(s.get("model"), str(s.get("effort") or "default").lower(), selectable=True)))
                for s in value)
 
 
-def normalize_capture_models(value, legacy: dict[str, str]) -> list[str]:
+def normalize_capture_models(value, legacy: dict[str, str], preserve_unknown=False) -> list[str]:
     """캡처 순차 폴백 3칸 — 구체 모델 또는 none. 옛 계열 키(gpt 등)는 legacy로 바꾼다.
     1순위는 비울 수 없고, none 뒤는 모두 none이다."""
     raw = value if isinstance(value, list) else []
@@ -330,6 +339,8 @@ def normalize_capture_models(value, legacy: dict[str, str]) -> list[str]:
             out.append(key)
         elif key in legacy:
             out.append(legacy[key])
+        elif preserve_unknown and key and not key.startswith("-"):
+            out.append(key)
     while len(out) < CAPTURE_SLOTS:
         out.append(NONE_KEY)
     if out[0] == NONE_KEY:
@@ -340,7 +351,7 @@ def normalize_capture_models(value, legacy: dict[str, str]) -> list[str]:
     return out
 
 
-def is_valid_capture_models(value) -> bool:
+def is_valid_capture_models(value, existing=()) -> bool:
     if not isinstance(value, list) or len(value) != CAPTURE_SLOTS:
         return False
     if value[0] == NONE_KEY:
@@ -349,7 +360,7 @@ def is_valid_capture_models(value) -> bool:
     for item in value:
         if item == NONE_KEY:
             seen_none = True
-        elif seen_none or item not in SUMMARY_MODEL_CHOICES:
+        elif seen_none or (item not in existing and (item not in SUMMARY_MODEL_CHOICES or not llm_catalog.valid(item, capability='vision', selectable=True))):
             return False
     return True
 
