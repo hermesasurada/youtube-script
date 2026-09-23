@@ -1861,13 +1861,13 @@ def _reindex_summary(save_path: str) -> None:
 # 외국어 제목 영상은 목록·요약 팝업에서 무슨 내용인지 바로 안 읽힌다.
 # 제목만 한국어로 옮겨 두고(원문은 그대로 병기), 화면에서 함께 보여준다.
 
-TITLE_TR_MODEL   = os.environ.get("TITLE_TR_MODEL", "claude-sonnet-5")
+# 제목 번역 전용 모델 — GPT-6 Luna, 추론은 기본값(플래그 없음)(2026-09-23 사용자 지시).
+# 예전에는 요약 슬롯을 돌며 Claude는 sonnet-5·추론 low였다. Luna가 실패한 묶음만
+# 요약 슬롯 순번으로 넘긴다(각 슬롯 모델, 추론 기본값) — 다음 틱까지 미뤄지지 않게.
+TITLE_TR_MODEL   = os.environ.get("TITLE_TR_MODEL", "gpt-6-luna")
 TITLE_TR_BATCH   = 40            # 한 번 호출에 묶는 제목 수
 TITLE_TR_TIMEOUT = 240
-# 추론 수준은 모델과 무관하게 low 고정(2026-09-21 사용자 지시). 모델 순번은
-# 요약과 같이 돌지만 추론까지 따라가면 grok(high)이 제목 한 묶음에 49초를 쓴다.
-# 제목 번역은 판단이 아니라 옮기기라 낮은 추론으로 충분하다.
-TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "low")
+TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "default")
 
 _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역한다.
 
@@ -1913,29 +1913,31 @@ def _parse_title_json(out: str, n: int) -> list[str] | None:
 
 
 def _title_tr_order(first_id: int = 0) -> tuple[tuple[str, str], ...]:
-    """제목 번역 순번 — 요약 슬롯을 그대로 돈다(계열, 모델) 목록.
+    """제목 번역 순번 — (계열, 모델) 목록. TITLE_TR_MODEL이 늘 먼저다.
 
-    요약은 항목마다 1차를 정하지만 번역은 묶음으로 부르므로, 묶음 첫 항목의
-    rowid로 순서를 돌린다. 같은 묶음을 다시 시도해도 순서가 같다. Claude 슬롯은
-    슬롯 모델과 무관하게 TITLE_TR_MODEL로 번역한다(예외 규칙에 표시).
+    폴백은 요약 슬롯이다. 번역은 묶음으로 부르므로 묶음 첫 항목의 rowid로
+    슬롯 순서를 돌린다 — 같은 묶음을 다시 시도해도 순서가 같다.
     """
+    primary = (llm_gateway.model_family(TITLE_TR_MODEL), TITLE_TR_MODEL)
     try:
         slots = db.get_monitor_summary_slots()["slots"]
     except Exception:
         slots = [{"model": m} for m in (CLAUDE_MODEL, GPT_MODEL, "grok")]
     pairs = [(llm_gateway.model_family(x["model"]), x["model"]) for x in slots]
     offset = (max(1, int(first_id or 1)) - 1) % len(pairs)
-    return tuple(pairs[offset:] + pairs[:offset])
+    rest = [p for p in pairs[offset:] + pairs[:offset] if p != primary]
+    return (primary, *dict.fromkeys(rest))
 
 
 def _title_tr_with_claude(prompt: str, label: str, model: str | None = None) -> tuple[str, str]:
     effort = TITLE_TR_REASONING
-    command = [_resolve_claude_bin(), "-p", "--model", TITLE_TR_MODEL,
+    claude_model = model or _claude_model()
+    command = [_resolve_claude_bin(), "-p", "--model", claude_model,
                "--output-format", "json"]
     if effort != "default":
         command += ["--effort", effort]
     command.append(prompt)
-    with llm_gateway.llm_track("claude", TITLE_TR_MODEL, purpose="title",
+    with llm_gateway.llm_track("claude", claude_model, purpose="title",
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
         r = llm_gateway.run_command(command, timeout=TITLE_TR_TIMEOUT)
@@ -2012,7 +2014,7 @@ def _title_tr_with_gpt(prompt: str, label: str, model: str | None = None) -> tup
 
 
 _TITLE_TR_PROVIDERS = {
-    "opus": _title_tr_with_claude,   # TITLE_TR_MODEL이 실제 모델을 정한다
+    "opus": _title_tr_with_claude,
     "grok": _title_tr_with_grok,
     "gpt": _title_tr_with_gpt,
 }
@@ -2021,8 +2023,7 @@ _TITLE_TR_PROVIDERS = {
 def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | None:
     """제목 묶음을 번역. 실패하면 None(다음 기회에 다시 시도).
 
-    요약과 같은 모델 순번을 쓴다 — 예전에는 제목만 늘 sonnet이 옮겨서, 같은
-    영상을 요약은 Opus·GPT·Grok이 하고 제목만 다른 모델이 맡는 상태였다.
+    TITLE_TR_MODEL(GPT-6 Luna)이 먼저 옮기고, 실패하면 요약 슬롯 순번으로 넘긴다.
     """
     if not titles:
         return []
@@ -2250,8 +2251,8 @@ def _monitor_model_notes() -> list[dict[str, str]]:
          "detail": "캡처는 추론 수준을 쓰지 않는다 — 같은 프레임을 low·high로 판정해 보니 "
                    "유지·소제목 배정이 모두 같았고 시간만 늘었다(2026-09-23)."},
         {"rule": "제목 번역",
-         "detail": f"요약과 같은 순번을 돌되 Claude는 {_model_label(TITLE_TR_MODEL)}, "
-                   f"추론은 {TITLE_TR_REASONING}로 고정한다."},
+         "detail": f"요약 순번과 무관하게 {_model_label(TITLE_TR_MODEL)} · 추론 기본값으로 고정. "
+                   "실패한 묶음만 요약 슬롯 순번으로 넘긴다."},
         {"rule": "Grok 문체 보정",
          "detail": "Grok 요약에만 한국어 문체 보정 지시를 앞에 붙인다."},
         {"rule": "문자 누출",

@@ -7,7 +7,7 @@
      order:    [slot|null, ...]      요약 라운드로빈 순번(null = 사용 안 함)
      version:  {slot: value}         슬롯별로 고른 구체 모델
      effort:   {slot: value}         슬롯별 추론 수준
-     next:     slot|null             '다음' 표시(모르면 null)
+     next:     slot|null             다음 차례 — 번호 배지를 강조(모르면 null)
      versions: [{slot, value, label}]  모델 드롭다운 항목
      efforts:  [{value, label}]
      allowNone: bool                 요약 행에 '사용 안 함'을 둘지
@@ -50,7 +50,6 @@
           + versions.map(v => option(v.value, v.label, v.value === s.model)).join('') + `</select>`
           + `<select data-msel="slot-effort" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 추론 수준">`
           + levelsFor(s.model, s.effort).map(e => option(e.value, e.label, e.value === s.effort)).join('') + `</select>`
-          + `<span class="msel-next">${isNext ? '다음' : ''}</span>`
           + `<button type="button" class="msel-remove" data-msel="slot-remove" data-index="${i}"`
           + `${canRemove ? '' : ' disabled'} aria-label="${i + 1}번 슬롯 빼기" title="슬롯 빼기">×</button></div>`;
       }).join('');
@@ -69,8 +68,7 @@
       return `<div class="msel-row${isNext ? ' is-next' : ''}${slot ? '' : ' is-off'}">`
         + `<span class="msel-step">${i + 1}</span>`
         + `<select data-msel="model" data-index="${i}" aria-label="요약 ${i + 1}순번 모델">${models}</select>`
-        + `<select data-msel="effort" data-slot="${esc(slot || '')}"${slot ? '' : ' disabled'} aria-label="요약 ${i + 1}순번 추론 수준">${levels}</select>`
-        + `<span class="msel-next">${isNext ? '다음' : ''}</span></div>`;
+        + `<select data-msel="effort" data-slot="${esc(slot || '')}"${slot ? '' : ' disabled'} aria-label="요약 ${i + 1}순번 추론 수준">${levels}</select></div>`;
     }).join('');
 
     const cap = state.capture;

@@ -2240,15 +2240,39 @@ def test_title_translate_and_query_log_rows(llm_db, monkeypatch):
         else:                                        # 제목 번역 경로(argv 프롬프트)
             env = dict(_CLAUDE_ENV, result='["안녕하세요 세계", "두 번째"]')
         return llm_gateway.ProcessResult(0, json.dumps(env), "")
+    codex_calls = []
+
+    def run_codex_prompt(prompt, **kwargs):
+        codex_calls.append(kwargs)
+        return llm_gateway.ProcessResult(0, '["안녕하세요 세계", "두 번째"]', "")
     monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
+    monkeypatch.setattr(app.llm_gateway, "run_codex_prompt", run_codex_prompt)
     out = app._translate_titles(["Hello world", "Second"])
-    assert out and len(out) == 2
+    assert out == ["안녕하세요 세계", "두 번째"]
+    # 제목 번역은 GPT-6 Luna, 추론 기본값(2026-09-23 사용자 지시).
+    assert codex_calls == [{"model": "gpt-6-luna", "timeout": app.TITLE_TR_TIMEOUT,
+                            "reasoning_effort": "default"}]
     query = app._original_search_query({"title": "스페이스X 스타십"}, "설명")
     assert query == "SpaceX Starship Flight 10 webcast"
     rows = _llm_rows(llm_db)
-    assert [(r["provider"], r["purpose"], r["title"]) for r in rows] == [
-        ("claude", "title", "제목 2건 번역"), ("claude", "query", "스페이스X 스타십")]
-    assert all(r["model"] == "claude-sonnet-5" and r["input_tokens"] == 2 for r in rows)
+    assert [(r["provider"], r["purpose"], r["title"], r["model"], r["reasoning"]) for r in rows] == [
+        ("codex", "title", "제목 2건 번역", "gpt-6-luna", None),
+        ("claude", "query", "스페이스X 스타십", "claude-sonnet-5", None)]
+
+
+def test_title_translation_falls_back_to_summary_slots_after_luna(monkeypatch):
+    order = app._title_tr_order(1)
+    assert order[0] == ("gpt", "gpt-6-luna")
+    assert order.count(("gpt", "gpt-6-luna")) == 1
+    tried = []
+    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "gpt",
+                        lambda p, label, model=None: (tried.append(model) or ("", "quota")))
+    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus",
+                        lambda p, label, model=None: (tried.append(model) or ('["번역"]', "")))
+    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "grok",
+                        lambda p, label, model=None: (tried.append(model) or ("", "down")))
+    assert app._translate_titles(["Hello"], first_id=1) == ["번역"]
+    assert tried[0] == "gpt-6-luna" and len(tried) >= 2
 
 
 def test_keyframe_vision_calls_log_rows(llm_db, monkeypatch):
