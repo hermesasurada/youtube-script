@@ -1167,7 +1167,7 @@
 
   // 캡처 순차 폴백: 1순위는 비울 수 없고 '없음' 뒤는 모두 '없음'.
   function mmCaptureChoices(order, index) {
-    const models = (_mm.captureOptions.length ? _mm.captureOptions : _mm.options).map(o => o.value);
+    const models = _mm.captureOptions.filter(o => o.enabled !== false || o.value === order[index]).map(o => o.value);
     if (index > 0 && order.slice(0, index).includes(MM_NONE)) return [MM_NONE];
     return index === 0 ? models : models.concat(MM_NONE);
   }
@@ -1189,7 +1189,7 @@
   function mmRender() {
     const MS = global.ModelSelector;
     if (!_mm.root || !MS) return;
-    const label = v => v === MM_NONE ? '없음' : ((_mm.options.find(o => o.value === v) || {}).label || v);
+    const label = v => v === MM_NONE ? '없음' : (([..._mm.captureOptions, ..._mm.options].find(o => o.value === v) || {}).label || v);
     MS.render(_mm.root, {
       slots: _mm.slots, nextIndex: _mm.nextIndex, limits: _mm.limits,
       versions: _mm.options, efforts: _mm.efforts,
@@ -1217,7 +1217,8 @@
         if (_mm.slots.length >= _mm.limits.max) return;
         // 아직 안 쓴 모델을 먼저 제안한다(다 쓰였으면 첫 모델).
         const used = new Set(_mm.slots.map(x => x.model));
-        const fresh = _mm.options.find(o => !used.has(o.value)) || _mm.options[0];
+        const fresh = _mm.options.find(o => o.enabled !== false && !used.has(o.value)) || _mm.options.find(o => o.enabled !== false);
+        if (!fresh) return;
         mmSave('slots', () => { _mm.slots.push({ model: fresh.value, effort: 'default' }); });
       },
       onRemoveSlot(i) {
@@ -1227,6 +1228,20 @@
       onCapture(i, value) {
         mmSave('capture', () => { _mm.capture = mmApplyCapture(_mm.capture, i, value); });
       },
+    });
+    _mm.root.querySelectorAll('select[data-msel="capture"],select[data-msel="slot-model"]').forEach(select => {
+      const capture = select.dataset.msel === 'capture';
+      const current = capture ? _mm.capture[Number(select.dataset.index)] : _mm.slots[Number(select.dataset.index)].model;
+      const choices = capture ? _mm.captureOptions : _mm.options;
+      if (![...select.options].some(o => o.value === current)) {
+        const preserved = new Option(current + ' (기존 설정·선택 불가)', current, true, true);
+        preserved.disabled = true;
+        select.prepend(preserved);
+      }
+      [...select.options].forEach(o => {
+        const choice = choices.find(c => c.value === o.value);
+        if (o.value !== MM_NONE && (!choice || choice.enabled === false)) o.disabled = true;
+      });
     });
   }
 

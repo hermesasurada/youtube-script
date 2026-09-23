@@ -55,3 +55,35 @@ def test_catalog_changes_validation_and_preserves_legacy(monkeypatch, tmp_path):
     assert llm_gateway.normalize_summary_slots(legacy, [], preserve_unknown=True) == legacy
     assert llm_gateway.is_valid_summary_slots(legacy, existing=legacy)
     assert not llm_gateway.is_valid_summary_slots(legacy)
+
+
+def test_grok_catalog_options_and_vision_filter(monkeypatch, tmp_path):
+    import app
+    c = llm_gateway.llm_catalog
+    monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
+    data = c.seed()
+    data['models'].append(c.entry('grok-4.7', 'grok', levels=['default']))
+    data['models'].append(c.entry('grok-vision-test', 'grok', levels=['default'], vision=True))
+    c.save(data, 0)
+    monkeypatch.setattr(app.db, 'get_monitor_summary_slots', lambda: {'slots': [], 'next_index': 0})
+    monkeypatch.setattr(app.db, 'get_monitor_capture_models', lambda: ['grok-4.7', 'none', 'none'])
+    payload = app._monitor_model_payload()
+    assert 'grok-4.7' in {x['value'] for x in payload['model_options']}
+    assert 'grok-4.7' not in {x['value'] for x in payload['capture_options']}
+    assert 'grok-vision-test' in {x['value'] for x in payload['capture_options']}
+    assert payload['capture_models'][0] == 'grok-4.7'
+    assert llm_gateway.is_valid_summary_slots([{'model': 'grok-4.7', 'effort': 'default'}])
+    assert not llm_gateway.is_valid_summary_slots([{'model': 'grok-4.7', 'effort': 'high'}])
+    assert llm_gateway.grok_call_model('grok-4.7', 'old-model') == 'grok-4.7'
+
+
+def test_grok_summary_passes_selected_model(monkeypatch):
+    import app
+    from contextlib import nullcontext
+    commands = []
+    monkeypatch.setattr(app, 'GROK_BIN', '/bin/echo')
+    monkeypatch.setattr(llm_gateway, 'llm_track', lambda *a, **kw: nullcontext(None))
+    monkeypatch.setattr(llm_gateway, 'llm_fill', lambda *a, **kw: None)
+    monkeypatch.setattr(llm_gateway, 'run_command', lambda cmd, **kw: commands.append(cmd) or llm_gateway.ProcessResult(0, '요약', '', False))
+    app._summarize_with_grok('test', model='grok-4.7')
+    assert commands[0][commands[0].index('-m') + 1] == 'grok-4.7'

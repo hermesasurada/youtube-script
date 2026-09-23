@@ -572,18 +572,19 @@ JSON 배열로만 답하라(다른 설명 금지):
     def _call_grok(model: str = "grok") -> tuple[list | None, str]:
         """요약과 같은 Grok 폴백. grok CLI는 이미지 첨부 옵션이 없지만 프롬프트의 @경로를
         읽어 비전이 동작한다(TUI가 뜨지 않도록 --prompt-file 단일턴으로 호출)."""
+        selected_model = llm_gateway.grok_call_model(model, GROK_VISION_MODEL)
         grok = llm_gateway.resolve_grok_bin()
         if not (grok and os.path.exists(grok)):
             return None, "grok 실행파일 없음"
-        with llm_gateway.llm_track("grok", GROK_VISION_MODEL or None, purpose="vision",
+        with llm_gateway.llm_track("grok", selected_model or None, purpose="vision",
                                    title=title, backend="cli") as call:
             tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
             try:
                 tf.write(prompt)
                 tf.close()
                 cmd = [grok, "--prompt-file", tf.name, "--output-format", "json"]
-                if GROK_VISION_MODEL:
-                    cmd += ["-m", GROK_VISION_MODEL]
+                if selected_model:
+                    cmd += ["-m", selected_model]
                 r = llm_gateway.run_command(cmd, timeout=VISION_TIMEOUT)
             except Exception as e:
                 llm_gateway.llm_fill(call, fail=e)

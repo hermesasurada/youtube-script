@@ -38,6 +38,8 @@
 
 ## Shared LLM catalog
 
+- 요약 선택기는 지원 실행기(Claude·Codex·Grok)의 중앙 카탈로그 text 모델을, 캡처 선택기는 vision 모델만 조회한다. Grok 구체 모델 ID도 허용하고 요약·제목 번역·캡처 호출에 전달한다. 비활성/미등록 기존 설정은 보존하되 신규 선택은 막는다. 비전 목록이 비어도 전체 요약 목록으로 대체하지 않는다.
+
 - Model lists, display names and supported reasoning levels come from `~/projects/hermes-llm-log/llm_catalog.py` and `~/.hermes/data/llm_catalog.json`; manage them through the portal model-management page. Do not add independent UI option lists.
 - Service selections, slot counts, routing and fallback order remain local. Preserve saved selections during catalog outages or model deactivation. New discoveries are candidates until manually enabled.
 - Keep actual historical model IDs unchanged. Catalog readers must not depend on portal availability or trigger inference.

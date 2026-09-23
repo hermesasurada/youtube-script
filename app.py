@@ -1952,8 +1952,11 @@ def _title_tr_with_claude(prompt: str, label: str, model: str | None = None) -> 
 def _title_tr_with_grok(prompt: str, label: str, model: str | None = None) -> tuple[str, str]:
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
+    selected_model = llm_gateway.grok_call_model(model, GROK_MODEL)
     effort = TITLE_TR_REASONING
-    with llm_gateway.llm_track("grok", GROK_MODEL or None, purpose="title",
+    if effort not in llm_gateway.llm_catalog.levels(model or "grok"):
+        effort = "default"
+    with llm_gateway.llm_track("grok", selected_model or None, purpose="title",
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
         tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
@@ -1961,8 +1964,8 @@ def _title_tr_with_grok(prompt: str, label: str, model: str | None = None) -> tu
             tf.write(prompt)
             tf.close()
             cmd = [GROK_BIN, "--prompt-file", tf.name, "--output-format", "json"]
-            if GROK_MODEL:
-                cmd += ["-m", GROK_MODEL]
+            if selected_model:
+                cmd += ["-m", selected_model]
             if effort != "default":
                 cmd += ["--reasoning-effort", effort]
             r = llm_gateway.run_command(cmd, timeout=TITLE_TR_TIMEOUT)
@@ -2205,13 +2208,13 @@ def _model_label(model_id: str) -> str:
     return mid or "?"
 
 
-def _monitor_version_options() -> list[dict[str, str]]:
+def _monitor_version_options(capability="text") -> list[dict[str, str]]:
     """모델 선택기에 보일 구체 모델 목록(슬롯·값·표시명)."""
     selected = [slot["model"] for slot in db.get_monitor_summary_slots()["slots"]]
     selected += db.get_monitor_capture_models()
     opts = []
     for provider, family in (("claude", "opus"), ("codex", "gpt"), ("grok", "grok")):
-        for item in llm_gateway.llm_catalog.options(provider, keys=("grok",) if provider == "grok" else None,
+        for item in llm_gateway.llm_catalog.options(provider, capability=capability,
                                                    selected=[m for m in selected if llm_gateway.model_family(m) == family]):
             opts.append(dict(item, slot=family))
     return opts
@@ -2231,9 +2234,8 @@ def _monitor_model_payload() -> dict:
         "summary_next_index": summary["next_index"],
         "capture_models": db.get_monitor_capture_models(),
         "model_options": _monitor_version_options(),
-        "capture_options": [m for m in _monitor_version_options()
-                            if llm_gateway.llm_catalog.valid(m["value"], capability="vision")
-                            or m["value"] in db.get_monitor_capture_models()],
+        "capture_options": [m for m in _monitor_version_options("vision")
+                            if llm_gateway.llm_catalog.valid(m["value"], capability="vision")],
         "catalog_revision": llm_gateway.llm_catalog.read()["revision"],
         "reasoning_options": _monitor_reasoning_options(),
         "slot_limits": {"min": llm_gateway.MIN_SUMMARY_SLOTS, "max": llm_gateway.MAX_SUMMARY_SLOTS},
@@ -2339,7 +2341,7 @@ _GROK_STYLE_NOTE = """[문체 보정 — 아래 규칙은 본 지시문보다 �
 
 
 def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default",
-                         title: str | None = None) -> tuple[str, str]:
+                         title: str | None = None, model: str | None = None) -> tuple[str, str]:
     """Claude 실패 시 폴백: Grok CLI 단일턴 요약. (요약 텍스트, 오류사유).
 
     긴 전사 프롬프트는 argv 대신 --prompt-file(임시파일)로 전달(ARG_MAX 회피).
@@ -2347,7 +2349,8 @@ def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default",
     """
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
-    with llm_gateway.llm_track("grok", GROK_MODEL or None, purpose="summary", title=title,
+    selected_model = llm_gateway.grok_call_model(model, GROK_MODEL)
+    with llm_gateway.llm_track("grok", selected_model or None, purpose="summary", title=title,
                                reasoning=None if reasoning_effort == "default" else reasoning_effort,
                                backend="cli") as call:
         tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
@@ -2355,8 +2358,8 @@ def _summarize_with_grok(prompt: str, *, reasoning_effort: str = "default",
             tf.write(_GROK_STYLE_NOTE + prompt)
             tf.close()
             cmd = [GROK_BIN, "--prompt-file", tf.name, "--output-format", "json"]
-            if GROK_MODEL:
-                cmd += ["-m", GROK_MODEL]
+            if selected_model:
+                cmd += ["-m", selected_model]
             if reasoning_effort != "default":
                 cmd += ["--reasoning-effort", reasoning_effort]
             r = llm_gateway.run_command(cmd, timeout=GROK_TIMEOUT)
@@ -2542,13 +2545,13 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
             if key == "gpt":
                 return _summarize_with_gpt(p, reasoning_effort=effort, title=title,
                                            model=slot_model)
-            return _summarize_with_grok(p, reasoning_effort=effort, title=title)
+            return _summarize_with_grok(p, reasoning_effort=effort, title=title, model=slot_model)
         body, err = _call(prompt)
         if key == "gpt":
             label = _model_label(slot_model)
         else:
             # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.
-            label = _model_label(GROK_MODEL or llm_gateway.resolve_grok_default_model() or "grok")
+            label = _model_label(llm_gateway.grok_call_model(slot_model, GROK_MODEL) or llm_gateway.resolve_grok_default_model() or "grok")
         # 한자·이질 문자 누출 게이트: 같은 모델에 한 번만 재요청하고, 그래도 섞이면 실패로
         # 보고 다음 모델로 넘긴다(2026-09-12 사용자 지적: All-In 요약의 主张).
         if body:

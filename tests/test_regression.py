@@ -1276,18 +1276,25 @@ def test_item_distill_overrides_channel_setting():
         conn.execute("DELETE FROM channels WHERE channel_id = 'UC_DTEST'")
 
 
-def test_monitor_model_options_follow_grok_cli_default(monkeypatch):
+def test_monitor_model_options_follow_catalog(monkeypatch, tmp_path):
+    catalog = app.llm_gateway.llm_catalog
+    monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
+    data = catalog.seed()
+    next(m for m in data['models'] if m['key'] == 'grok')['label'] = '중앙 Grok 별칭'
+    catalog.save(data, 0)
     monkeypatch.setattr(app.llm_gateway, "resolve_grok_default_model", lambda: "grok-4.6")
     monkeypatch.setattr(app, "GROK_MODEL", "")
     payload = app.app.test_client().get("/channels").get_json()
     labels = {o["value"]: o["label"] for o in payload["model_options"]}
-    assert labels["grok"] == "Grok 4.6"
-    assert labels["opus"] == "Opus (최신 별칭)"
-    assert labels["claude-opus-5-5"] == "Opus 5.5"
-    assert labels["gpt-6-sol"] == "GPT 6 Sol"
+    for key in ("grok", "opus", "claude-opus-5-5", "gpt-6-sol"):
+        assert labels[key] == catalog.label(key)
+    assert labels["grok"] != "Grok 4.6"
 
 
-def test_monitor_summary_slots_and_capture_persist():
+def test_monitor_summary_slots_and_capture_persist(monkeypatch, tmp_path):
+    catalog = app.llm_gateway.llm_catalog
+    monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
+    catalog.save(catalog.seed(), 0)
     db.init()
     client = app.app.test_client()
     try:

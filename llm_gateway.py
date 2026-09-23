@@ -281,7 +281,15 @@ MODEL_VERSION_CHOICES = {
 # ── 요약 슬롯(2026-09-23) ──────────────────────────────────────────────
 # 요약 순번은 계열 목록이 아니라 슬롯 목록이다. 슬롯 하나 = {"model": 구체 모델,
 # "effort": 추론 수준}. 같은 계열이 여러 슬롯에 들어갈 수 있다(GPT Sol·Luna 등).
-SUMMARY_MODEL_CHOICES = llm_catalog.ExecutorChoices(("claude", "codex"), aliases=("grok",))
+SUMMARY_MODEL_CHOICES = llm_catalog.ExecutorChoices(("claude", "codex", "grok"))
+
+
+def grok_call_model(model=None, fallback=""):
+    """선택한 카탈로그 호출 ID를 사용하고 옛 CLI 기본 별칭은 유지한다."""
+    if not model or model == "grok":
+        return fallback
+    entry = llm_catalog.resolve(model, "grok")
+    return entry["model"] if entry else model
 MIN_SUMMARY_SLOTS = 1
 MAX_SUMMARY_SLOTS = 5
 CAPTURE_SLOTS = 3
