@@ -1122,6 +1122,40 @@ def test_no_speech_verdict_is_permanent():
     assert not channel_monitor._META_PERMANENT_RE.search(plain)
 
 
+def test_server_restart_job_loss_is_not_same_failure_stop(monkeypatch):
+    """서버 재시작으로 잡이 사라진 실패는 문구가 같아도 재시도한다(예산 안에서).
+
+    (2026-09-23 OWu2kjKrRTA: 반복 붕괴 재전사 도중 배포 재시작에 걸려 '동일 실패
+    반복'으로 skipped가 됐다 — 영상 탓이 아니었다.)
+    """
+    lost = "전사 잡 소실(서버 재시작) — 재시도 필요"
+    v = {"id": 7, "yt_id": "x", "title": "t", "url": "https://youtu.be/x", "channel_id": "manual",
+         "attempt_count": 1, "last_fail_reason": lost}
+    calls = []
+    monkeypatch.setattr(channel_monitor.db, "queue_claim_one", lambda: v)
+    monkeypatch.setattr(channel_monitor.db, "reserve_monitor_summary_slots",
+                        lambda: {"slots": [{"model": "grok-4.7", "effort": "default"}]})
+    monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda fams: (True, "grok", ""))
+    monkeypatch.setattr(channel_monitor, "_get_prompt", lambda: "p")
+    monkeypatch.setattr(channel_monitor, "process_video",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError(lost)))
+    monkeypatch.setattr(channel_monitor.db, "queue_set_status",
+                        lambda *a, **k: calls.append(("status", a)))
+    monkeypatch.setattr(channel_monitor.db, "queue_defer",
+                        lambda *a, **k: calls.append(("defer", a)) or "deferred")
+    monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
+    monkeypatch.setattr(channel_monitor, "notify", lambda *a: None)
+    channel_monitor._drain_main_one()
+    assert [c[0] for c in calls] == ["defer"]
+    # 영상 쪽 실패가 같은 문구로 반복되면 종전대로 멈춘다
+    v["last_fail_reason"] = "전사 error: 전사 내용이 비어 있습니다: 33자"
+    calls.clear()
+    monkeypatch.setattr(channel_monitor, "process_video",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError(v["last_fail_reason"])))
+    channel_monitor._drain_main_one()
+    assert calls and calls[0][0] == "status" and calls[0][1][1] == "skipped"
+
+
 def test_capture_download_retry_trigger_covers_empty_file():
     """캡처 영상 다운로드 폴백은 403만이 아니라 빈 파일·포맷 없음도 탄다.
 

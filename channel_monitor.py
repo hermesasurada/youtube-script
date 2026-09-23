@@ -337,6 +337,12 @@ _META_PERMANENT_RE = re.compile(
 # 다운로드 단계에서야 드러나는 '아직 방송 전' 신호(수동 추가 건은 사전 메타 확인이 없다)
 _LIVE_PENDING_RE = re.compile(
     r"Premieres in|live event will begin|This live event|is upcoming|Scheduled for", re.I)
+# 서버(yt 앱)가 재시작돼 진행 중이던 작업이 사라진 신호. 영상 탓이 아니라 몇 번을
+# 겪어도 문구가 같으므로 '동일 실패 반복' 판정에서 뺀다 — 재시도 예산(5회)은 그대로
+# 쓴다(2026-09-23: 긴 재전사 도중 배포 재시작에 세 번 걸려 skipped로 굳었다).
+_SERVER_RESTART_RE = re.compile(
+    r"잡 소실\(서버 재시작\)|Connection aborted|RemoteDisconnected|Connection refused"
+    r"|Max retries exceeded")
 
 
 def _defer_policy(reason: str) -> tuple[bool, int, int, str]:
@@ -798,7 +804,8 @@ def _drain_main_one() -> None:
         # 오디오 whisper 2회를 매 시도마다 반복). 자연 실패는 자·초·길이가 조금씩
         # 달라 완전 일치가 드물다.
         prev = (v.get("last_fail_reason") or "").strip()
-        if prev and prev == reason.strip() and (v.get("attempt_count") or 0) >= 1:
+        if (prev and prev == reason.strip() and (v.get("attempt_count") or 0) >= 1
+                and not _SERVER_RESTART_RE.search(reason)):
             db.queue_set_status(v["id"], "skipped", f"동일 실패 반복 — 재시도 중단: {reason}")
             log(f"[drain] 동일 실패 반복 → 재시도 중단: {reason[:110]}")
             notify(
