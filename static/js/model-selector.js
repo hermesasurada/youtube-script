@@ -11,6 +11,7 @@
      versions: [{slot, value, label}]  모델 드롭다운 항목
      efforts:  [{value, label}]
      allowNone: bool                 요약 행에 '사용 안 함'을 둘지
+     tag:      string                요약 머리 옆 꼬리표(기본 '라운드로빈')
      hint, status, notes: [{rule, detail}], extra: html
    }
    슬롯 모드(yt): order 대신 slots: [{model, effort}], nextIndex, limits: {min, max}.
@@ -77,7 +78,7 @@
 
     root.innerHTML = `<div class="msel">`
       + `<section class="msel-block"><div class="msel-head"><strong>요약</strong>`
-      + `<span class="msel-tag">라운드로빈</span><span class="msel-status" data-msel-status>${esc(state.status || '')}</span></div>`
+      + `<span class="msel-tag">${esc(state.tag || '라운드로빈')}</span><span class="msel-status" data-msel-status>${esc(state.status || '')}</span></div>`
       + rows + (state.hint ? `<p class="msel-hint">${esc(state.hint)}</p>` : '') + `</section>`
       + (state.extra || '') + notes + `</div>`;
 
