@@ -149,8 +149,14 @@ SYSTEM_PROMPT = """유튜브 영상 전사문을 한국어로 번역한다.
 # 앞 청크에서 쓴 영문 고유명사 — 긴 영상에서 같은 사람·회사 표기가 청크마다 흔들리지 않게
 # 다음 청크에 목록으로 물려준다(직전 꼬리 240자만으로는 앞부분 표기를 모른다).
 GLOSSARY_MAX = 40
-_NAME_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Za-z0-9&'.-]*[a-z][A-Za-z0-9&'-]*"
-                      r"(?:\s+[A-Z][A-Za-z0-9&'.-]*[A-Za-z0-9])*")
+# 영문 고유명사: 대문자가 하나 이상 든 3자 이상 낱말(NVIDIA·NASA·xAI·OpenAI·iPhone), 대문자로
+# 시작하는 낱말이 이어지면 한 이름(David Friedberg). 가운뎃점·쉼표로 나열된 이름은 따로 센다.
+_NAME_RE = re.compile(r"(?<![A-Za-z0-9])(?=[A-Za-z0-9&'.-]*[A-Z])[A-Za-z][A-Za-z0-9&'.-]*[A-Za-z0-9]"
+                      r"(?:[ \t]+[A-Z][A-Za-z0-9&'.-]*[A-Za-z0-9])*")
+# 이름이 아닌 흔한 약어·단위는 목록 자리를 차지하지 않게 뺀다.
+_GLOSSARY_SKIP = frozenset("""AI AGI API ASIC CEO CFO COO CTO CPU GPU TPU LLM IPO ETF EPS GDP CPI SaaS
+    ARR KPI ROI USD KRW EV FSD HBM RAG MoE CoT URL PDF USB MW GW TW kWh MWh GWh AM PM OK TV PC IT
+    Q1 Q2 Q3 Q4 FY YoY QoQ""".split())
 
 
 def proper_noun_glossary(parts: list[str], limit: int = GLOSSARY_MAX) -> list[str]:
@@ -159,9 +165,13 @@ def proper_noun_glossary(parts: list[str], limit: int = GLOSSARY_MAX) -> list[st
     first: dict[str, int] = {}
     for text in parts:
         for m in _NAME_RE.finditer(text or ""):
-            name = m.group(0).strip(".'-")
-            if len(name) < 3 or (len(name) > 12 and re.search(r"\d", name)):
-                continue                                  # 너무 짧거나 ID 같은 문자열
+            words = m.group(0).strip(".'-").split()
+            while words and words[0] in _GLOSSARY_SKIP:       # 'CEO David Friedberg' → 'David Friedberg'
+                words.pop(0)
+            name = " ".join(words)
+            if (len(name) < 3 or name in _GLOSSARY_SKIP
+                    or (len(name) > 12 and re.search(r"\d", name))):
+                continue                                  # 너무 짧거나 흔한 약어·ID 같은 문자열
             counts[name] = counts.get(name, 0) + 1
             first.setdefault(name, len(first))
     ranked = sorted(counts, key=lambda n: (-counts[n], first[n]))
@@ -404,7 +414,8 @@ def _translate_chunk_raw(chunk: str, prev_tail: str = "", *, title: str | None =
     user = chunk
     refs = []
     if glossary:
-        refs.append("[앞에서 쓴 고유명사 표기 — 같은 대상은 이 철자를 그대로 쓸 것]\n"
+        refs.append("[앞 청크에서 쓴 고유명사 표기 — 같은 대상이면 이 철자를 따른다. "
+                    "단 이번 원문에 더 분명한 철자가 나오면 원문을 우선한다]\n"
                     + ", ".join(glossary))
     if prev_tail:
         refs.append(f"[직전까지의 번역 끝부분 — 용어와 화자를 잇기 위한 참고. "

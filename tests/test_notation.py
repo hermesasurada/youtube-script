@@ -61,3 +61,36 @@ def test_translation_glossary_carries_names_across_chunks():
     g = tt.proper_noun_glossary(parts)
     assert g[0] == "David Friedberg" and "Chamath Palihapitiya" in g and "Jason Calacanis" in g
     assert tt.proper_noun_glossary(["UCESLZhusAkFfsNsApnjF1 채널"]) == []
+
+
+def test_ambiguous_names_need_a_direct_particle():
+    """Astra 검토(2026-09-26): 회사명 말고도 쓰이는 이름은 문맥이 분명할 때만 바꾼다."""
+    for text in ("아마존 열대우림", "아마존의 열대우림", "애플 파이", "블록체인 오라클 문제", "3 테슬라 자석"):
+        assert notation.normalize(text) == text
+    assert notation.normalize("아마존이 인수했고 애플은 발표했다") == "Amazon이 인수했고 Apple은 발표했다"
+    assert notation.normalize("구글 클라우드") == "Google 클라우드"          # 모호하지 않은 이름은 그대로 적용
+
+
+def test_summary_protection_spans_lines_and_particles_cross_bold():
+    text = '```\n엔비디아\n```\n"여러 줄\n엔비디아 인용"\n엔비디아가 발표'
+    assert notation.normalize_summary(text) == '```\n엔비디아\n```\n"여러 줄\n엔비디아 인용"\nNVIDIA가 발표'
+    assert notation.normalize("**Anthropic**가 발표") == "**Anthropic**이 발표"
+    # 캡처 경로·링크 주소 안의 이름은 파일 경로라 바꾸지 않는다
+    img = '![](res/summary/x/현대차_테슬라.frames/kf_1.jpg) 테슬라/엔비디아 비교'
+    assert notation.normalize_summary(img) == '![](res/summary/x/현대차_테슬라.frames/kf_1.jpg) Tesla/NVIDIA 비교'
+    assert notation.normalize("Starship가 떴다") == "Starship이 떴다"
+    assert notation.normalize("**애플**이") == "**Apple**이"
+
+
+def test_glossary_keeps_all_caps_and_lowercase_led_names():
+    g = tt.proper_noun_glossary(["NVIDIA·NASA·AMD·IBM·xAI·OpenAI 그리고 GPU, CEO David Friedberg"])
+    assert g == ["NVIDIA", "NASA", "AMD", "IBM", "xAI", "OpenAI", "David Friedberg"]
+
+
+def test_footnote_title_rule_matches_viewer_normalization():
+    """화면은 `한글 (English)` 각주 제목을 영어만 남긴다 — 프롬프트도 원어만 쓰게 한다."""
+    root = os.path.dirname(app.__file__)
+    text = open(os.path.join(root, "prompt.txt"), encoding="utf-8").read()
+    assert "`비추력 (specific impulse)`" not in text
+    assert "`flywheel`, `specific impulse`처럼 원어만" in text
+    assert "이번 원문에 더 분명한 철자가 나오면 원문을 우선" in open(tt.__file__, encoding="utf-8").read()
