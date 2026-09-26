@@ -23,6 +23,7 @@ import time
 
 import db
 import document_io
+import notation
 
 # LLM 호출 이력(hermes-llm-log). 모듈이 없거나 기록이 실패해도 번역 본업은 그대로 돈다.
 try:
@@ -103,38 +104,68 @@ MAX_TOKENS    = 6144
 _HANGUL_RE = re.compile(r"[가-힣]")
 _TS_RE     = re.compile(r"^\[\d+:\d+(?::\d+)?\]")
 
-# 요약 프롬프트(prompt.txt)의 표기 규칙을 번역용으로 옮긴 것.
-# 핵심 차이: 여기서는 절대 요약·축약하지 않는다.
+# 요약 프롬프트(prompt.txt)의 표기 규칙을 번역용으로 옮긴 것 — 요약·제목 번역과 같은 기준.
+# 핵심 차이: 여기서는 절대 요약·축약하지 않는다. prompt.txt 표기 규칙을 바꾸면 여기도 맞출 것.
 SYSTEM_PROMPT = """유튜브 영상 전사문을 한국어로 번역한다.
 
 **가장 중요: 요약하지 않는다.** 원문의 모든 문장을 빠짐없이 옮긴다. 임의로 줄이거나
 합치거나 생략하지 말 것. 분량은 원문에 상응해야 한다.
 
 표기 규칙:
-- **제품·서비스·브랜드·회사·모델명은 음차하지 말고 원문 표기를 그대로 쓴다** —
-  NVIDIA, Anthropic, ChatGPT, OpenAI, SpaceX, S&P 500처럼.
-- **인물 이름도 원어를 그대로 쓴다** — "샘 올트먼"이 아니라 **Sam Altman**, "젠슨 황"이 아니라
-  **Jensen Huang**. 한국어 음차로 바꾸지 말 것. 전사기가 음차로만 적었고 원어 철자를
-  확신할 수 없을 때만 음차를 남긴다.
-- 회사·기관명도 같다 — "엔비디아"가 아니라 **NVIDIA**, "오픈에이아이"가 아니라 **OpenAI**.
+- **회사·브랜드·제품·모델·기관명은 음차하지 말고 원문 표기를 그대로 쓴다** —
+  NVIDIA, Google, Tesla, Apple, YouTube, Anthropic, ChatGPT, OpenAI, SpaceX, NASA, S&P 500처럼.
+  한글 표기가 흔한 이름(엔비디아, 구글, 테슬라, 유튜브)도 원문으로 쓴다.
   한국 기업·기관은 한국어 표기를 쓴다(삼성전자, 금융위원회).
+- Neocloud는 뉴클라우드·네오클라우드로 음차하지 않고 항상 Neocloud로 쓴다.
+- **인물 이름도 원어를 그대로 쓴다** — "샘 올트먼"이 아니라 **Sam Altman**, "젠슨 황"이 아니라
+  **Jensen Huang**. 예외는 한글 표기가 완전히 굳어진 일론 머스크뿐이다. 지명은 널리 알려진
+  곳(실리콘밸리, 뉴욕, 캘리포니아)만 한글로 쓰고 낯선 곳은 원문 철자로 둔다.
+- **이름이 애매하면 맥락으로 실제 대상을 특정한 뒤 표기한다.** 전사기는 발음이 비슷한 이름을
+  자주 혼동한다. 전사 안의 영문 철자가 음차보다 우선이고(빈도가 아니라 철자가 근거),
+  형제 제품의 작명 계열(Sol·Terra·Luna 계열의 "Soul" → Sol)과 회사–제품 관계(경쟁 LLM
+  문맥의 "그록"은 xAI의 Grok, 칩 회사 Groq 아님)를 함께 본다. 그래도 확신이 없으면 전사에
+  적힌 철자를 그대로 둔다(임의로 음역해 한글로 확정하지 말 것).
+- 영문 이름 뒤 조사는 철자가 아니라 한국어로 읽은 끝소리에 맞춘다(Anthropic이, Google은, OpenAI가).
 - 전문용어는 널리 쓰이는 한국어 용어가 있으면 그것을 쓰고, 없으면 원문을 유지한다.
   처음 나올 때만 괄호로 원문을 병기한다 — 추론(inference).
+- **사전에 없는 한자 조어를 만들지 않는다** — 영어 용어를 `비-`·`무-`+한자어로 압축해 가짜
+  전문용어를 지어내지 말 것(zero data retention → "데이터 비누지" ✗, "데이터 무보존(ZDR)" ○).
+  뜻이 불분명한 조어가 되느니 원어를 그대로 두거나 뜻이 드러나는 구로 풀어 쓴다.
 - **영어 관용구·업계 은어·약어는 음차하거나 직역하지 말고 뜻이 통하는 한국어로 풀어 쓴다.**
   원문 표현을 살릴 필요가 있으면 풀어 쓴 뒤 괄호에 병기한다.
   예: "5000억 달러 오버 또는 언더?"가 아니라 **"5000억 달러를 넘을까요, 못 넘을까요?"**,
   "종료 ARR"이 아니라 **"연말 기준 ARR(exit ARR)"**, "언더를 택했다"가 아니라
   **"넘지 못한다는 쪽에 걸었다"**. 한국어로 옮겼을 때 뜻이 통하지 않는 표현은 그대로 두지 않는다.
   다만 발화자의 어조·강조는 유지한다(요약이 아니라 번역이므로 문장을 없애지는 않는다).
+- 연결어미(-고/-며/-지만/-면서) 바로 뒤에 쉼표를 찍지 않는다(`했고, 그래서` → `했고 그래서`).
 - 숫자·단위·금액은 원문 값을 그대로 유지한다. 임의로 환산하지 않는다.
-- 맥락상 어느 대상인지 헷갈리는 이름은 주변 내용을 근거로 판단한다. 확신이 없으면
-  원문 표기를 그대로 둔다(임의로 고치지 말 것).
 
 형식 규칙:
 - `[mm:ss]` 형태의 타임스탬프는 원문에 있던 위치에 그대로 유지한다.
 - 줄바꿈 구조를 원문과 동일하게 유지한다.
 - 구어체의 말더듬·중복(`the the`, `you know`)은 자연스럽게 다듬되 내용은 보존한다.
 - 번역문만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다."""
+
+# 앞 청크에서 쓴 영문 고유명사 — 긴 영상에서 같은 사람·회사 표기가 청크마다 흔들리지 않게
+# 다음 청크에 목록으로 물려준다(직전 꼬리 240자만으로는 앞부분 표기를 모른다).
+GLOSSARY_MAX = 40
+_NAME_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Za-z0-9&'.-]*[a-z][A-Za-z0-9&'-]*"
+                      r"(?:\s+[A-Z][A-Za-z0-9&'.-]*[A-Za-z0-9])*")
+
+
+def proper_noun_glossary(parts: list[str], limit: int = GLOSSARY_MAX) -> list[str]:
+    """번역된 청크들에서 원문 표기로 남은 고유명사(대문자로 시작, 소문자 포함)를 자주 쓴 순으로."""
+    counts: dict[str, int] = {}
+    first: dict[str, int] = {}
+    for text in parts:
+        for m in _NAME_RE.finditer(text or ""):
+            name = m.group(0).strip(".'-")
+            if len(name) < 3 or (len(name) > 12 and re.search(r"\d", name)):
+                continue                                  # 너무 짧거나 ID 같은 문자열
+            counts[name] = counts.get(name, 0) + 1
+            first.setdefault(name, len(first))
+    ranked = sorted(counts, key=lambda n: (-counts[n], first[n]))
+    return ranked[:limit]
 
 
 def log(msg: str) -> None:
@@ -259,11 +290,24 @@ def _looks_degenerate(out: str, chunk: str, finish: str) -> bool:
     return longest > 3000
 
 
-def translate_chunk(chunk: str, prev_tail: str = "", *, title: str | None = None) -> str:
+def translate_chunk(chunk: str, prev_tail: str = "", *, title: str | None = None,
+                    glossary: list[str] | None = None) -> str:
+    """한 청크 번역. 회사·브랜드명 원문 표기와 영문 이름 뒤 조사는 결정적으로 한 번 더 맞춘다."""
+    return notation.normalize(_translate_chunk_raw(chunk, prev_tail, title=title, glossary=glossary))
+
+
+def _translate_chunk_raw(chunk: str, prev_tail: str = "", *, title: str | None = None,
+                         glossary: list[str] | None = None) -> str:
     user = chunk
+    refs = []
+    if glossary:
+        refs.append("[앞에서 쓴 고유명사 표기 — 같은 대상은 이 철자를 그대로 쓸 것]\n"
+                    + ", ".join(glossary))
     if prev_tail:
-        user = (f"[직전까지의 번역 끝부분 — 용어와 화자를 잇기 위한 참고. "
-                f"다시 번역하지 말 것]\n{prev_tail}\n\n[여기부터 번역]\n{chunk}")
+        refs.append(f"[직전까지의 번역 끝부분 — 용어와 화자를 잇기 위한 참고. "
+                    f"다시 번역하지 말 것]\n{prev_tail}")
+    if refs:
+        user = "\n\n".join(refs) + f"\n\n[여기부터 번역]\n{chunk}"
     out, finish = _call(user, 0.3, 1.05, title=title)
     if _looks_degenerate(out, chunk, finish):
         # 폭주는 샘플링 운에 좌우되므로, 온도를 낮추고 반복 페널티를 올려 한 번 더.
@@ -331,7 +375,8 @@ def translate_file(md_path: str, yt_id: str = "", *, title: str | None = None) -
         tail = parts[-1][-CTX_TAIL_CHARS:] if parts else ""
         t0 = time.time()
         try:
-            out = translate_chunk(chunks[i], tail, title=f"{title} [청크 {i + 1}/{len(chunks)}]")
+            out = translate_chunk(chunks[i], tail, title=f"{title} [청크 {i + 1}/{len(chunks)}]",
+                                  glossary=proper_noun_glossary(parts))
         except Exception as e:                        # noqa: BLE001
             db.set_translation_state(yt_id, md_path, dest, "failed", len(parts),
                                      len(chunks), str(e)[:300])

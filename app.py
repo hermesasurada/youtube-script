@@ -58,6 +58,7 @@ except ImportError:
 import db
 import document_io
 import humanize_korean
+import notation
 import keyframe_report
 import llm_gateway
 import original_video
@@ -1872,8 +1873,9 @@ TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "default")
 _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역한다.
 
 규칙:
-- 고유명사는 원문 철자 그대로 둔다 — 기업·제품·모델·코드명·행사·매체명(NVIDIA, ChatGPT, Hugging Face, Jalapeño, GPT-5.6 Sol, Neutron, S&P 500)과 인명(Sam Altman, Jensen Huang, Bill Ackman, Paul Graham, Lutnick). 음차하지 않는다(제이미 다이먼 ×, 로켓랩 ×, 허깅페이스 ×). 원문 철자 뒤에 괄호로 한글을 덧붙이지도 않는다.
-  예외는 한글 표기가 완전히 굳어진 극소수뿐이다: 일론 머스크, 실리콘밸리, 엔비디아, 구글, 애플, 아마존, 마이크로소프트, 테슬라, 유튜브. 같은 사람·회사는 어느 제목에서든 같은 표기를 쓴다.
+- 고유명사는 원문 철자 그대로 둔다 — 기업·제품·모델·코드명·행사·매체·기관명(NVIDIA, Google, Tesla, Apple, YouTube, ChatGPT, Hugging Face, Jalapeño, GPT-5.6 Sol, Neutron, S&P 500, NASA)과 인명(Sam Altman, Jensen Huang, Mark Zuckerberg, Bill Ackman, Paul Graham, Lutnick). 음차하지 않는다(제이미 다이먼 ×, 마크 저커버그 ×, 엔비디아 ×, 구글 ×, 나사 ×, 로켓랩 ×, 허깅페이스 ×). 한글 표기가 흔한 회사·브랜드도 원문으로 쓴다. 원문 철자 뒤에 괄호로 한글을 덧붙이지도 않는다.
+  인명 예외는 한글 표기가 완전히 굳어진 일론 머스크뿐이다. 지명은 널리 알려진 곳이면 한글(실리콘밸리, 캘리포니아, 뉴욕, 인도)로 쓰고 낯선 곳은 원문 철자로 둔다. 직함은 CEO·CFO처럼 원문 약어 그대로 둔다(최고경영자 ×). 같은 사람·회사는 어느 제목에서든 같은 표기를 쓴다(지명도 같다).
+- 영문 이름 뒤 조사는 철자가 아니라 한국어로 읽은 끝소리에 맞춘다: Anthropic이·Anthropic과(Anthropic가 ×, Anthropic와 ×), Google은·Google로, OpenAI가·OpenAI와, NVIDIA는.
 - Neocloud는 뉴클라우드·네오클라우드로 음차하지 않고 항상 원문 표기 Neocloud를 유지한다.
 - 고유명사가 아닌 부분은 남김없이 한국어로 옮긴다. 제목 앞머리나 부제를 영어로 남겨 두지 않는다("Making Cities Awesome: …" → "도시를 멋지게 만들기: …", "Tariffs, DOGE & …" → "관세, DOGE, …"). 단 시리즈·프로그램명(The a16z Show, YC Paper Club, Lex Fridman Podcast, The Circuit, Sovereignty Bootcamp)은 그대로 둔다.
 - 사전 뜻을 그대로 옮긴 딱딱한 직역을 피하고 한국어 영상 제목처럼 읽히게 쓴다. 자주 쓰는 표현은 이렇게 옮긴다: fireside chat → 대담(노변담화 ×), All-Hands → 전사 미팅, Explained → 해부 또는 총정리, Inside X → X 내부/들여다보기, JUST RECORDED → [방금 공개], Special Address → 특별 연설, Keynote → 기조연설, Full Interview → 인터뷰 전체, Recap → 정리, How to: X → X하는 법(앞머리 "How to:"는 지운다).
@@ -1889,6 +1891,10 @@ _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역�
 
 def _preserve_title_terms(source: str, translated: str) -> str:
     """제목 번역 모델이 사용자 지정 원어 표기를 음차해도 결정적으로 복원한다."""
+    # 흔한 한글 표기 회사·브랜드명 → 원문, 영문 이름 뒤 조사 교정(2026-09-26 A안).
+    # 원래 한국어인 제목은 번역이 아니라 원문이므로 건드리지 않는다.
+    if not re.search(r"[가-힣]", source or ""):
+        translated = notation.normalize(translated or "")
     if re.search(r"\bneoclouds?\b", source or "", re.I):
         translated = re.sub(r"(?:뉴|네오)\s*클라우드(?:들)?", "Neocloud", translated or "")
     # fireside chat → '노변담화'는 사전 직역이라 제목에 어색하다(2026-09-11 지시). '대담'으로.
@@ -2139,8 +2145,12 @@ def _clean_summary(text: str) -> str:
 
 def _prepare_summary_body(text: str) -> str:
     """저장·송출 직전: CLI 군더더기 제거 후 im-not-ai 결정적 윤문."""
-    cleaned = _clean_summary(text)
-    return humanize_korean.humanize_summary(cleaned)
+    return _polish_summary(_clean_summary(text))
+
+
+def _polish_summary(cleaned: str) -> str:
+    """결정적 윤문 + 회사·브랜드명 원문 표기·영문 이름 뒤 조사 교정(notation)."""
+    return notation.normalize_summary(humanize_korean.humanize_summary(cleaned))
 
 
 # 요약 생성용 시스템 프롬프트: 출력 전용 강제(도구/파일/승인 언급 금지).
@@ -2538,7 +2548,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
                                           final if final is not None else "".join(chunks))
 
             cleaned = _clean_summary(final if final is not None else "".join(chunks))
-            body = humanize_korean.humanize_summary(cleaned)
+            body = _polish_summary(cleaned)
             if not error_msg and body:
                 label = _model_label(used_model or slot_model)
                 if body != cleaned and client_has_output:
@@ -2740,7 +2750,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         return
 
     cleaned = _clean_summary(final if final is not None else "".join(chunks))
-    body = humanize_korean.humanize_summary(cleaned)
+    body = _polish_summary(cleaned)
     if not body:
         yield from _yield_grok("Claude 빈 응답")
         return
