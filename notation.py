@@ -15,11 +15,10 @@ import re
 # 한글 표기 → 원문. 끝소리가 같아야 한다(조사를 건드리지 않으려고).
 # '메타'는 메타데이터·메타 분석과 겹쳐서 넣지 않는다.
 BRANDS_KO_TO_EN = {
-    "엔비디아": "NVIDIA", "구글": "Google", "테슬라": "Tesla", "애플": "Apple",
-    "아마존": "Amazon", "마이크로소프트": "Microsoft", "유튜브": "YouTube",
+    "엔비디아": "NVIDIA", "구글": "Google", "마이크로소프트": "Microsoft", "유튜브": "YouTube",
     "오픈AI": "OpenAI", "오픈에이아이": "OpenAI", "앤트로픽": "Anthropic",
     "앤스로픽": "Anthropic", "스페이스X": "SpaceX", "스페이스엑스": "SpaceX",
-    "넷플릭스": "Netflix", "인텔": "Intel", "퀄컴": "Qualcomm", "오라클": "Oracle",
+    "넷플릭스": "Netflix", "인텔": "Intel", "퀄컴": "Qualcomm",
     "브로드컴": "Broadcom", "팔란티어": "Palantir", "코어위브": "CoreWeave",
     "딥마인드": "DeepMind", "챗GPT": "ChatGPT", "챗지피티": "ChatGPT",
     "허깅페이스": "Hugging Face", "로켓랩": "Rocket Lab",
@@ -37,29 +36,19 @@ _TAIL_WORDS = (
 _TAIL = (r"(?=(?:" + "|".join(sorted(map(re.escape, _TAIL_WORDS), key=len, reverse=True))
          + r")?(?![가-힣]))")
 
-# 회사명 말고도 흔히 쓰는 말(아마존 열대우림, 애플 파이, 블록체인 오라클, 자속밀도 단위 테슬라).
-# 이 이름들은 조사나 문장부호가 바로 붙을 때만 바꾸고, 띄어 쓴 뒤 다른 낱말이 오면 두며,
-# 숫자 바로 뒤(3 테슬라)도 둔다. 판단이 필요한 나머지는 프롬프트에 맡긴다.
-AMBIGUOUS = frozenset({"아마존", "애플", "오라클", "테슬라"})
-
-
-def _particle_only(words) -> str:
-    return (r"(?=(?:" + "|".join(sorted(map(re.escape, words), key=len, reverse=True))
-            + r")(?![가-힣])|[.,·/!?)\]}:;'\"”’]|\*\*|$)")
-
-
-# 속격 '의'도 회사가 아닌 쪽으로 흔히 쓰이는 이름(아마존의 열대우림, 블록체인 오라클의 한계).
-NO_GENITIVE = frozenset({"아마존", "오라클"})
+# 회사명 말고도 흔히 쓰이는 이름(아마존 열대우림, 애플 파이, 블록체인 오라클, 자속밀도 단위
+# 테슬라)은 조사가 붙어도 뜻이 갈려서(아마존은 열대우림이다) 자동 치환하지 않는다.
+# 문맥을 보는 모델이 프롬프트 규칙으로 원문 표기를 맡는다(Astra 재검토, 2026-09-26).
+AMBIGUOUS_NOT_REPLACED = ("아마존", "애플", "오라클", "테슬라")
 
 
 def _brand_re(names, tail, extra_lookbehind=""):
-    return re.compile(r"(?<![가-힣A-Za-z_])" + extra_lookbehind + "("
+    # 앞에 밑줄 하나(파일명 `a_엔비디아`)면 두고, 밑줄 볼드 `__엔비디아__`는 바꾼다.
+    return re.compile(r"(?<![가-힣A-Za-z])(?<![^_]_)" + extra_lookbehind + "("
                       + "|".join(sorted(map(re.escape, names), key=len, reverse=True)) + ")" + tail)
 
 
-_BRAND_RE = _brand_re([n for n in BRANDS_KO_TO_EN if n not in AMBIGUOUS], _TAIL)
-_AMBIGUOUS_RE = _brand_re(AMBIGUOUS - NO_GENITIVE, _particle_only(_TAIL_WORDS), r"(?<![0-9]\s)(?<![0-9])")
-_NO_GENITIVE_RE = _brand_re(NO_GENITIVE, _particle_only([w for w in _TAIL_WORDS if w != "의"]))
+_BRAND_RE = _brand_re(BRANDS_KO_TO_EN, _TAIL)
 
 # 영문 이름 → 한국어 발음의 끝소리. 'none'=받침 없음, 'rieul'=ㄹ 받침, 'other'=그 밖의 받침.
 FINAL_SOUND = {
@@ -81,8 +70,10 @@ _PARTICLE_RE = re.compile(
 # 인용은 줄을 넘어도 보호하되, 짝 없는 따옴표가 글 전체를 삼키지 않게 길이를 제한한다.
 # 마크다운 링크·이미지 주소와 경로·파일명(캡처 폴더 `…_테슬라.frames/`)도 보호한다.
 _PROTECT_CORE = (r"<!--[\s\S]*?-->|```[\s\S]*?```|<[^>]+>|`[^`\n]+`|https?://[^\s)>\]]+"
-                 r"|\]\([^)\n]*\)|[^\s()\[\]<>\"']*_[^\s()\[\]<>\"']*"
-                 r"|[^\s()\[\]<>\"']*/[^\s()\[\]<>\"']*\.[A-Za-z0-9]{2,5}\b"
+                 r"|\]\([^)\n]*\)"
+                 # 경로·파일명: 밑줄이나 슬래시가 있고 확장자로 끝나는 조각이 든 토큰.
+                 # 확장자가 없는 `__볼드__`·`테슬라/엔비디아`는 보호하지 않는다.
+                 r"|(?=[^\s()\[\]<>\"']*[_/])[^\s()\[\]<>\"']*\.[A-Za-z][A-Za-z0-9]{1,5}\b[^\s()\[\]<>\"']*"
                  r"|“[^”]{0,400}”|\"[^\"]{0,400}\"")
 _PROTECT = re.compile("(" + _PROTECT_CORE + ")")
 # 요약: 원문 제목(H1)과 메타정보 표 행도 원문 그대로 둔다.
@@ -111,9 +102,7 @@ def _apply(text: str, fn, protect: re.Pattern = _PROTECT) -> str:
 
 
 def _brands(s: str) -> str:
-    s = _BRAND_RE.sub(lambda m: BRANDS_KO_TO_EN[m.group(1)], s)
-    s = _AMBIGUOUS_RE.sub(lambda m: BRANDS_KO_TO_EN[m.group(1)], s)
-    return _NO_GENITIVE_RE.sub(lambda m: BRANDS_KO_TO_EN[m.group(1)], s)
+    return _BRAND_RE.sub(lambda m: BRANDS_KO_TO_EN[m.group(1)], s)
 
 
 def _particles(s: str) -> str:

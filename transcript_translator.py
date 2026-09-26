@@ -338,14 +338,14 @@ def _collapse_repeats(text: str) -> str:
 _HAN_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 
 
-def han_leaks(text: str, source: str = "") -> list[str]:
-    """번역문에 새로 생긴 한자·가나 조각.
+def _leak_spans(text: str, source: str = "") -> list[tuple[int, int]]:
+    """번역문에 새로 생긴 한자·가나 조각의 위치.
 
     정상으로 보는 것 — 원문에 이미 있던 조각(중국어 인명·지명 병기), 한글 뒤 괄호
     병기(반(反)), 한글 사이에 끼지 않은 한 글자(前 CEO·對중국). 두 글자 이상이거나
     한 글자라도 한글 사이에 끼면(민粹주의) 누출이다(app._script_leaks와 같은 기준).
     """
-    found: list[str] = []
+    spans: list[tuple[int, int]] = []
     for m in _HAN_RE.finditer(text or ""):
         run, a, b = m.group(0), m.start(), m.end()
         if run in (source or ""):
@@ -357,8 +357,50 @@ def han_leaks(text: str, source: str = "") -> list[str]:
             continue
         if len(run) == 1 and not (_HANGUL_RE.match(before or " ") and _HANGUL_RE.match(after or " ")):
             continue
-        found.append(run)
-    return found
+        spans.append((a, b))
+    return spans
+
+
+def han_leaks(text: str, source: str = "") -> list[str]:
+    """번역문에 새로 생긴 한자·가나 조각(`_leak_spans` 기준)."""
+    return [text[a:b] for a, b in _leak_spans(text, source)]
+
+
+def _only_leaks_replaced(orig: str, new: str, spans: list[tuple[int, int]]) -> bool:
+    """교정본이 감지한 한자 구간만 바꿨는지 — 그 밖의 글자는 한 글자도 달라지면 안 된다.
+
+    교정 모델이 숫자·영문 이름·연도를 바꿔도(Boeing 2004 → Airbus 2024) 한자만 없으면
+    통과하던 구멍을 막는다(Astra 검토, 2026-09-26). 누출 구간과 거기 붙은 한글 글자, 경계의
+    띄어쓰기만 바뀔 수 있고, 대체어는 한자가 없어야 하며 원래 조각 길이에 비례해야 한다.
+    """
+    orig, new = orig.rstrip(), new.rstrip()
+    if not spans:
+        return orig == new
+    # 한자에 붙은 한글 글자(噬菌체·关心的하는·精简된)는 대체어와 함께 다듬어질 수 있다.
+    # 숫자·영문·문장부호는 넓히지 않으므로 이름·연도·금액은 그대로 지켜진다.
+    grown: list[tuple[int, int]] = []
+    for a, b in spans:
+        while a > 0 and _HANGUL_RE.match(orig[a - 1]):
+            a -= 1
+        while b < len(orig) and _HANGUL_RE.match(orig[b]):
+            b += 1
+        gloss = re.match(r"\([가-힣 ]+\)", orig[b:])       # 现在我们(지금 우리는)의 괄호 풀이
+        if gloss:
+            b += gloss.end()
+        if grown and a <= grown[-1][1]:
+            grown[-1] = (grown[-1][0], max(b, grown[-1][1]))
+        else:
+            grown.append((a, b))
+    parts, pos = [], 0
+    for a, b in grown:
+        keep = orig[pos:a]
+        parts.append(re.escape(keep.rstrip()) + r"\s*" if keep.strip() else r"\s*")
+        limit = max(12, (b - a) * 4)
+        parts.append(r"([^\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{0,%d}?)" % limit)
+        pos = b
+    tail = orig[pos:]
+    parts.append(r"\s*" + re.escape(tail.lstrip()) if tail.strip() else r"\s*")
+    return re.fullmatch("".join(parts), new, re.S) is not None
 
 
 _LEAK_REPAIR_SYSTEM = """한국어 번역문 교정기다. 입력 줄들에는 중국어·일본어 문자가 잘못 섞여 있다.
@@ -368,7 +410,7 @@ _LEAK_REPAIR_SYSTEM = """한국어 번역문 교정기다. 입력 줄들에는 �
 
 
 def _repair_leaks(out: str, chunk: str, *, title: str | None = None) -> str:
-    """한자가 섞인 줄만 골라 한 번 교정한다. 교정 결과가 깨끗하고 분량을 지킨 줄만 받는다.
+    """한자가 섞인 줄만 골라 한 번 교정한다. 교정 결과가 깨끗하고 한자 구간만 바뀐 줄만 받는다.
 
     청크 전체 재번역보다 싸고, 멀쩡한 줄을 건드리지 않는다. 호출이 실패해도 번역은 그대로 둔다.
     """
@@ -394,9 +436,8 @@ def _repair_leaks(out: str, chunk: str, *, title: str | None = None) -> str:
     for n, i in enumerate(bad):
         new = got.get(n + 1)
         orig = lines[i]
-        ts = _TS_RE.match(orig.strip())
-        if (new and not han_leaks(new, chunk) and len(new) >= len(orig) * 0.7
-                and (not ts or new.strip().startswith(ts.group(0)))):
+        # 한자 구간 밖이 한 글자라도 달라지면(숫자·이름·타임스탬프 포함) 원래 줄을 둔다.
+        if new and not han_leaks(new, chunk) and _only_leaks_replaced(orig, new, _leak_spans(orig, chunk)):
             lines[i] = new
             n_ok += 1
     log(f"  ✎ 한자 교정 {n_ok}/{len(bad)}줄 ({', '.join(tokens)[:60]})")

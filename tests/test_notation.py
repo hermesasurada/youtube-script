@@ -7,8 +7,8 @@ import transcript_translator as tt
 
 
 def test_common_korean_brand_spellings_become_original():
-    assert notation.normalize("엔비디아가 발표했고 구글은 테슬라의 차를 샀다") == \
-        "NVIDIA가 발표했고 Google은 Tesla의 차를 샀다"
+    assert notation.normalize("엔비디아가 발표했고 구글은 인텔의 칩을 샀다") == \
+        "NVIDIA가 발표했고 Google은 Intel의 칩을 샀다"
     assert notation.normalize("오픈AI와의 계약, 마이크로소프트 제품") == "OpenAI와의 계약, Microsoft 제품"
     # 다른 낱말의 일부는 건드리지 않는다
     assert notation.normalize("애플리케이션, 구글링, 아마존강") == "애플리케이션, 구글링, 아마존강"
@@ -63,12 +63,13 @@ def test_translation_glossary_carries_names_across_chunks():
     assert tt.proper_noun_glossary(["UCESLZhusAkFfsNsApnjF1 채널"]) == []
 
 
-def test_ambiguous_names_need_a_direct_particle():
-    """Astra 검토(2026-09-26): 회사명 말고도 쓰이는 이름은 문맥이 분명할 때만 바꾼다."""
-    for text in ("아마존 열대우림", "아마존의 열대우림", "애플 파이", "블록체인 오라클 문제", "3 테슬라 자석"):
+def test_ambiguous_names_are_left_to_the_model():
+    """Astra 재검토(2026-09-26): 회사명 말고도 쓰이는 이름은 조사가 붙어도 뜻이 갈려 치환하지 않는다."""
+    for text in ("아마존 열대우림", "아마존은 열대우림이다", "애플 파이", "블록체인 오라클은 외부 데이터를",
+                 "자속밀도의 단위는 테슬라다", "테슬라가 발표했다"):
         assert notation.normalize(text) == text
-    assert notation.normalize("아마존이 인수했고 애플은 발표했다") == "Amazon이 인수했고 Apple은 발표했다"
     assert notation.normalize("구글 클라우드") == "Google 클라우드"          # 모호하지 않은 이름은 그대로 적용
+    assert notation.normalize("Amazon가 인수") == "Amazon이 인수"            # 이미 영문이면 조사는 고친다
 
 
 def test_summary_protection_spans_lines_and_particles_cross_bold():
@@ -76,10 +77,14 @@ def test_summary_protection_spans_lines_and_particles_cross_bold():
     assert notation.normalize_summary(text) == '```\n엔비디아\n```\n"여러 줄\n엔비디아 인용"\nNVIDIA가 발표'
     assert notation.normalize("**Anthropic**가 발표") == "**Anthropic**이 발표"
     # 캡처 경로·링크 주소 안의 이름은 파일 경로라 바꾸지 않는다
-    img = '![](res/summary/x/현대차_테슬라.frames/kf_1.jpg) 테슬라/엔비디아 비교'
-    assert notation.normalize_summary(img) == '![](res/summary/x/현대차_테슬라.frames/kf_1.jpg) Tesla/NVIDIA 비교'
+    img = '![](res/summary/x/현대차_엔비디아.frames/kf_1.jpg) 구글/엔비디아 비교 <img src="a_엔비디아.jpg">'
+    assert notation.normalize_summary(img) == \
+        '![](res/summary/x/현대차_엔비디아.frames/kf_1.jpg) Google/NVIDIA 비교 <img src="a_엔비디아.jpg">'
+    assert notation.normalize("x_현대차_엔비디아.frames/kf_1.jpg a_엔비디아_b") == "x_현대차_엔비디아.frames/kf_1.jpg a_엔비디아_b"
+    # 밑줄 볼드도 별표 볼드와 똑같이 처리한다
+    assert notation.normalize("__Anthropic__가 __엔비디아__가") == "__Anthropic__이 __NVIDIA__가"
     assert notation.normalize("Starship가 떴다") == "Starship이 떴다"
-    assert notation.normalize("**애플**이") == "**Apple**이"
+    assert notation.normalize("**구글**이") == "**Google**이"
 
 
 def test_glossary_keeps_all_caps_and_lowercase_led_names():

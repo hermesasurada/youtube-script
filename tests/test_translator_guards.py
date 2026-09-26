@@ -74,3 +74,24 @@ def test_chunk_flow_retries_loop_then_repairs_leak(monkeypatch):
     out = tt._translate_chunk_raw(SRC, title="t")
     assert calls == ["translate", "translate", "repair"]
     assert out == "[00:00] 오하이오 데이터센터를 건설하는 것입니다"
+
+
+def test_repair_leaks_rejects_changes_outside_the_leak(monkeypatch):
+    """Astra 재검토(2026-09-26): 교정본이 한자 밖의 사실(이름·연도·금액)을 바꾸면 버린다."""
+    out = "[01:31]顺便说一下, Boeing이 2004년에 10억 달러를 투자했습니다"
+    monkeypatch.setattr(tt, "_call", lambda *a, **k: (
+        "1\t[01:31]참고로, Airbus가 2024년에 90억 달러를 투자했습니다", "stop"))
+    assert tt._repair_leaks(out, SRC) == out
+    # 한자 구간만 바꾸고 경계 띄어쓰기만 다듬은 교정은 받는다
+    monkeypatch.setattr(tt, "_call", lambda *a, **k: (
+        "1\t[01:31] 참고로, Boeing이 2004년에 10억 달러를 투자했습니다", "stop"))
+    assert tt._repair_leaks(out, SRC) == "[01:31] 참고로, Boeing이 2004년에 10억 달러를 투자했습니다"
+    assert tt._only_leaks_replaced("민粹주의가 퍼졌다", "민중주의가 퍼졌다", tt._leak_spans("민粹주의가 퍼졌다"))
+    assert not tt._only_leaks_replaced("민粹주의가 퍼졌다", "민중주의가 사라졌다", tt._leak_spans("민粹주의가 퍼졌다"))
+    # 한자에 붙은 한글 어미·괄호 풀이는 함께 다듬어도 된다(운영 번역본 실제 교정 사례)
+    for orig, new in (("더精简된 팀을 통한 비용 절감.", "더 간결한 팀을 통한 비용 절감."),
+                      ("그리고现在我们(지금 우리는) 다른 누출을", "그리고 지금 우리는 다른 누출을")):
+        assert tt._only_leaks_replaced(orig, new, tt._leak_spans(orig))
+    assert not tt._only_leaks_replaced("Boeing은 2004년铺设했다", "Boeing은 2024년 부설했다",
+                                       tt._leak_spans("Boeing은 2004년铺设했다"))
+
