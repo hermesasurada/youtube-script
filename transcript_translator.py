@@ -370,37 +370,63 @@ def _only_leaks_replaced(orig: str, new: str, spans: list[tuple[int, int]]) -> b
     """교정본이 감지한 한자 구간만 바꿨는지 — 그 밖의 글자는 한 글자도 달라지면 안 된다.
 
     교정 모델이 숫자·영문 이름·연도를 바꿔도(Boeing 2004 → Airbus 2024) 한자만 없으면
-    통과하던 구멍을 막는다(Astra 검토, 2026-09-26). 누출 구간과 거기 붙은 한글 글자, 경계의
-    띄어쓰기만 바뀔 수 있고, 대체어는 한자가 없어야 하며 원래 조각 길이에 비례해야 한다.
+    통과하던 구멍을 막는다(Astra 검토, 2026-09-26). 누출 구간과 그 뒤에 붙은 한글 어미·괄호
+    풀이, 경계의 띄어쓰기만 바뀔 수 있고, 대체어는 한자가 없어야 하며 원래 조각 길이에
+    비례해야 한다. 대체어가 뜻을 제대로 옮겼는지(증가 → 감소)는 코드로 판정하지 못한다.
     """
     orig, new = orig.rstrip(), new.rstrip()
     if not spans:
         return orig == new
-    # 한자에 붙은 한글 글자(噬菌체·关心的하는·精简된)는 대체어와 함께 다듬어질 수 있다.
-    # 숫자·영문·문장부호는 넓히지 않으므로 이름·연도·금액은 그대로 지켜진다.
-    grown: list[tuple[int, int]] = []
+    # 한자 뒤에 붙은 한글 어미(噬菌체·关心的하는·精简된)는 대체어와 함께 다듬어질 수 있다.
+    # 앞쪽은 넓히지 않는다 — 앞에 붙은 말은 대개 별개 낱말(10억 달러增加 → '달러')이라
+    # 넓히면 단위·명사가 바뀌어도 통과한다. 예외는 가나 — 외래어 음차가 한글 음절과
+    # 쪼개져 섞인다(세クター → 섹터). 숫자·영문·문장부호는 넓히지 않는다.
+    grown: list[list] = []                     # [시작, 끝, 누출 글자 수]
     for a, b in spans:
-        while a > 0 and _HANGUL_RE.match(orig[a - 1]):
-            a -= 1
+        leak_len = b - a
+        if re.fullmatch(r"[\u3040-\u30ff]+", orig[a:b]):
+            while a > 0 and _HANGUL_RE.match(orig[a - 1]):
+                a -= 1
         while b < len(orig) and _HANGUL_RE.match(orig[b]):
             b += 1
         gloss = re.match(r"\([가-힣 ]+\)", orig[b:])       # 现在我们(지금 우리는)의 괄호 풀이
         if gloss:
             b += gloss.end()
         if grown and a <= grown[-1][1]:
-            grown[-1] = (grown[-1][0], max(b, grown[-1][1]))
+            grown[-1][1] = max(b, grown[-1][1])
+            grown[-1][2] += leak_len
         else:
-            grown.append((a, b))
+            grown.append([a, b, leak_len])
     parts, pos = [], 0
-    for a, b in grown:
+    for a, b, _ in grown:
         keep = orig[pos:a]
         parts.append(re.escape(keep.rstrip()) + r"\s*" if keep.strip() else r"\s*")
-        limit = max(12, (b - a) * 4)
+        limit = max(8, (b - a) * 3)
         parts.append(r"([^\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{0,%d}?)" % limit)
         pos = b
     tail = orig[pos:]
     parts.append(r"\s*" + re.escape(tail.lstrip()) if tail.strip() else r"\s*")
-    return re.fullmatch("".join(parts), new, re.S) is not None
+    m = re.fullmatch("".join(parts), new, re.S)
+    if m is None:
+        return False
+    # 대체어에는 누출 부분을 옮긴 한국어가 실제로 있어야 한다 — 구간을 지우기만 하면
+    # (10억 달러增加했다 → 10억 달러.) 원문 밖은 그대로여도 뜻이 사라진다(Astra 재검토).
+    # 그래서 대체어의 한글 수가 그 구간에 원래 붙어 있던 한글(괄호 풀이 제외)보다 많아야 한다.
+    def hangul(t: str) -> int:
+        return len(_HANGUL_RE.findall(t))
+    # 대체어가 원래 구간에 없던 숫자·영문·문장부호를 새로 들여오면(增加했다 → 2배 증가했다,
+    # 증가했다. 추가 문장) 사실이나 문장이 끼어든 것이라 버린다.
+    def facts(t: str) -> set[str]:
+        return set(re.findall(r"[0-9]+|[A-Za-z]+|[.?!。]", t))   # 문장부호: 문장 덧붙이기 차단
+    def ok(g: str, a: int, b: int, leak_len: int) -> bool:
+        if not facts(g) <= facts(orig[a:b]):
+            return False
+        base = hangul(re.sub(r"\([가-힣 ]+\)", "", orig[a:b]))
+        # 한글 사이에 낀 한자 한 글자(바뀌었希고)는 지우기만 해도 된다 — 뜻 없는 잡음이다.
+        if leak_len == 1 and hangul(g) == base:
+            return True
+        return hangul(g) > base
+    return all(ok(g, a, b, n) for g, (a, b, n) in zip(m.groups(), grown))
 
 
 _LEAK_REPAIR_SYSTEM = """한국어 번역문 교정기다. 입력 줄들에는 중국어·일본어 문자가 잘못 섞여 있다.

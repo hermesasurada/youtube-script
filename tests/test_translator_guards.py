@@ -94,4 +94,22 @@ def test_repair_leaks_rejects_changes_outside_the_leak(monkeypatch):
         assert tt._only_leaks_replaced(orig, new, tt._leak_spans(orig))
     assert not tt._only_leaks_replaced("Boeing은 2004년铺设했다", "Boeing은 2024년 부설했다",
                                        tt._leak_spans("Boeing은 2004년铺设했다"))
+    # 누출 구간을 지우기만 한 교정은 뜻이 사라지므로 버린다
+    for bad_fix in ("매출이 10억 달러.", "매출이 10억 달러 .", "매출이 10억 달러  ."):
+        assert not tt._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
+                                           tt._leak_spans("매출이 10억 달러增加했다."))
+    assert tt._only_leaks_replaced("매출이 10억 달러增加했다.", "매출이 10억 달러 증가했다.",
+                                   tt._leak_spans("매출이 10억 달러增加했다."))
+    # 대체어로 원래 없던 숫자·영문을 끼워 넣는 것도 사실 변조다
+    for bad_fix in ("매출이 10억 달러 2배 증가했다.", "매출이 10억 달러 USD 증가했다."):
+        assert not tt._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
+                                           tt._leak_spans("매출이 10억 달러增加했다."))
+    # 앞말은 넓히지 않는다(단위 바꿔치기 차단). 단 가나는 한글 음절과 쪼개져 섞이므로 예외,
+    # 한글 사이 한 글자 잡음은 지우기만 해도 된다 — 운영 번역본 실측 교정 사례
+    cases = (("매출이 10억 달러增加했다.", "매출이 10억 엔 증가했다.", False),
+             ("산업 세クター에서 동일합니다.", "산업 섹터에서 동일합니다.", True),
+             ("상황이 바뀌었希고, 그들은", "상황이 바뀌었고, 그들은", True),
+             ("매출이 10억 달러增加했다.", "매출이 10억 달러 증가했다. 추가 문장.", False))
+    for orig, new, want in cases:
+        assert tt._only_leaks_replaced(orig, new, tt._leak_spans(orig)) is want, new
 
