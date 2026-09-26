@@ -227,7 +227,8 @@ def _is_conn_error(msg: str) -> bool:
 
 
 def _call(user: str, temperature: float, rep_penalty: float,
-          *, title: str | None = None) -> tuple[str, str]:
+          *, title: str | None = None, system: str = SYSTEM_PROMPT,
+          purpose: str = "translate") -> tuple[str, str]:
     """활성 백엔드로 한 청크 번역. 연결이 안 되면 짧게 재시도한 뒤 다음 백엔드로 넘어간다.
 
     (한 번의 connection error로 영상 전체가 영구 실패 처리된 사례가 있었다)
@@ -239,12 +240,12 @@ def _call(user: str, temperature: float, rep_penalty: float,
         name, base, model = BACKENDS[idx]
         for attempt in range(2):
             try:
-                with _llm_track("local", model, purpose="translate", title=title,
+                with _llm_track("local", model, purpose=purpose, title=title,
                                 reasoning="no-think", backend="http",
                                 host=_llm_host(base)) as call:
                     r = _client(idx).chat.completions.create(
                         model=model,
-                        messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                        messages=[{"role": "system", "content": system},
                                   {"role": "user", "content": user}],
                         max_tokens=MAX_TOKENS, temperature=temperature,
                         extra_body={"chat_template_kwargs": {"enable_thinking": False},
@@ -275,19 +276,121 @@ def _call(user: str, temperature: float, rep_penalty: float,
     return out, (r.choices[0].finish_reason or "")
 
 
+REPEAT_MIN_LINE = 15      # 이보다 짧은 줄("네.", "맞아요.")은 원래 반복될 수 있다
+REPEAT_LOOP = 5           # 같은 긴 줄이 이만큼 나오면 반복 루프
+
+
+def _repeat_count(text: str) -> int:
+    """같은 줄(앞뒤 공백·타임스탬프 제외, REPEAT_MIN_LINE자 이상)이 가장 많이 나온 횟수."""
+    counts: dict[str, int] = {}
+    for line in (text or "").splitlines():
+        key = _TS_RE.sub("", line.strip()).strip()
+        if len(key) >= REPEAT_MIN_LINE:
+            counts[key] = counts.get(key, 0) + 1
+    return max(counts.values(), default=0)
+
+
 def _looks_degenerate(out: str, chunk: str, finish: str) -> bool:
     """같은 말을 max_tokens까지 반복하는 폭주를 걸러낸다.
 
     번역문은 원문과 분량이 비슷해야 하므로, 출력이 원문의 2.5배를 넘거나
     한 줄이 비정상적으로 길면 정상 번역이 아니다(실제로 'happened happened…'가
-    5만 자 넘게 생성된 적이 있다).
+    5만 자 넘게 생성된 적이 있다). 분량 기준 아래에서도 같은 긴 줄이 되풀이되며
+    뒷부분 내용과 타임스탬프를 잃는 루프가 있어(2026-09-26 A/B: 4천 자 청크에서
+    '대규모로 컴퓨터를 구축해야 하고…' 164줄) 줄 반복도 본다. 원문 자체가 반복된
+    경우(whisper 반복)는 번역이 그대로 따라간 것이라 폭주가 아니다.
     """
     if len(out) > len(chunk) * 2.5:
         return True
     if finish == "length" and len(out) > len(chunk) * 1.6:
         return True
+    if _repeat_count(out) >= REPEAT_LOOP and _repeat_count(chunk) < 3:
+        return True
     longest = max((len(l) for l in out.splitlines()), default=0)
     return longest > 3000
+
+
+def _collapse_repeats(text: str) -> str:
+    """연속으로 되풀이된 같은 긴 줄을 한 줄로 줄인다(재시도도 루프일 때의 마지막 정리)."""
+    kept: list[str] = []
+    prev = None
+    for line in text.splitlines():
+        key = _TS_RE.sub("", line.strip()).strip()
+        if len(key) >= REPEAT_MIN_LINE and key == prev:
+            continue
+        kept.append(line)
+        prev = key
+    return "\n".join(kept)
+
+
+# 번역문에 섞인 중국어·일본어 문자. 운영 번역본 조사(2026-09-26): 최근 60편 581청크 중
+# 132청크에 '那里的'·'顺便说一下'·'铺设'처럼 모델이 중국어로 미끄러진 조각이 있었다.
+_HAN_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
+
+
+def han_leaks(text: str, source: str = "") -> list[str]:
+    """번역문에 새로 생긴 한자·가나 조각.
+
+    정상으로 보는 것 — 원문에 이미 있던 조각(중국어 인명·지명 병기), 한글 뒤 괄호
+    병기(반(反)), 한글 사이에 끼지 않은 한 글자(前 CEO·對중국). 두 글자 이상이거나
+    한 글자라도 한글 사이에 끼면(민粹주의) 누출이다(app._script_leaks와 같은 기준).
+    """
+    found: list[str] = []
+    for m in _HAN_RE.finditer(text or ""):
+        run, a, b = m.group(0), m.start(), m.end()
+        if run in (source or ""):
+            continue
+        before = text[a - 1] if a > 0 else ""
+        before2 = text[a - 2] if a > 1 else ""
+        after = text[b] if b < len(text) else ""
+        if before == "(" and _HANGUL_RE.match(before2 or " "):
+            continue
+        if len(run) == 1 and not (_HANGUL_RE.match(before or " ") and _HANGUL_RE.match(after or " ")):
+            continue
+        found.append(run)
+    return found
+
+
+_LEAK_REPAIR_SYSTEM = """한국어 번역문 교정기다. 입력 줄들에는 중국어·일본어 문자가 잘못 섞여 있다.
+각 줄에서 그 문자 부분만 뜻이 같은 자연스러운 한국어로 바꾸고, 나머지는 한 글자도 바꾸지 않는다
+(타임스탬프·영문 고유명사·숫자·어순 그대로). 입력과 똑같이 `번호<TAB>문장` 형식으로,
+같은 줄 수만 출력한다. 설명을 붙이지 않는다."""
+
+
+def _repair_leaks(out: str, chunk: str, *, title: str | None = None) -> str:
+    """한자가 섞인 줄만 골라 한 번 교정한다. 교정 결과가 깨끗하고 분량을 지킨 줄만 받는다.
+
+    청크 전체 재번역보다 싸고, 멀쩡한 줄을 건드리지 않는다. 호출이 실패해도 번역은 그대로 둔다.
+    """
+    lines = out.splitlines()
+    bad = [i for i, l in enumerate(lines) if han_leaks(l, chunk)]
+    if not bad:
+        return out
+    tokens = sorted({t for i in bad for t in han_leaks(lines[i], chunk)})
+    user = (f"섞인 문자: {', '.join(tokens)[:200]}\n\n"
+            + "\n".join(f"{n + 1}\t{lines[i]}" for n, i in enumerate(bad)))
+    try:
+        fixed, _ = _call(user, 0.2, 1.0, title=f"{title} (한자 교정)" if title else None,
+                         system=_LEAK_REPAIR_SYSTEM, purpose="repair")
+    except Exception as e:                            # noqa: BLE001
+        log(f"  ⚠ 한자 교정 호출 실패 — 원문 유지: {e}")
+        return out
+    got: dict[int, str] = {}
+    for line in fixed.splitlines():
+        m = re.match(r"^\s*(\d+)\t(.*)$", line)
+        if m:
+            got[int(m.group(1))] = m.group(2)
+    n_ok = 0
+    for n, i in enumerate(bad):
+        new = got.get(n + 1)
+        orig = lines[i]
+        ts = _TS_RE.match(orig.strip())
+        if (new and not han_leaks(new, chunk) and len(new) >= len(orig) * 0.7
+                and (not ts or new.strip().startswith(ts.group(0)))):
+            lines[i] = new
+            n_ok += 1
+    log(f"  ✎ 한자 교정 {n_ok}/{len(bad)}줄 ({', '.join(tokens)[:60]})")
+    return "\n".join(lines)
 
 
 def translate_chunk(chunk: str, prev_tail: str = "", *, title: str | None = None,
@@ -311,13 +414,17 @@ def _translate_chunk_raw(chunk: str, prev_tail: str = "", *, title: str | None =
     out, finish = _call(user, 0.3, 1.05, title=title)
     if _looks_degenerate(out, chunk, finish):
         # 폭주는 샘플링 운에 좌우되므로, 온도를 낮추고 반복 페널티를 올려 한 번 더.
-        log(f"  ↻ 폭주 감지({len(out):,}자, finish={finish}) — 재시도")
+        log(f"  ↻ 폭주 감지({len(out):,}자, 줄 반복 {_repeat_count(out)}회, finish={finish}) — 재시도")
         out2, finish2 = _call(user, 0.15, 1.15, title=f"{title} (재시도)" if title else None)
         if not _looks_degenerate(out2, chunk, finish2):
-            return out2
-        log(f"  ⚠ 재시도도 비정상({len(out2):,}자) — 짧은 쪽을 채택")
-        return out2 if len(out2) < len(out) else out
-    return out
+            out = out2
+        else:
+            # 둘 다 비정상이면 반복이 적은 쪽, 같으면 짧은 쪽. 원문이 반복이 아니면 연속 반복 줄을 접는다.
+            out = min((out, out2), key=lambda t: (_repeat_count(t), len(t)))
+            log(f"  ⚠ 재시도도 비정상({len(out2):,}자) — 반복 적은 쪽 채택")
+            if _repeat_count(chunk) < 3:
+                out = _collapse_repeats(out)
+    return _repair_leaks(out, chunk, title=title)
 
 
 def out_path_for(md_path: str) -> str:
