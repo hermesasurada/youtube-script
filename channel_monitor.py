@@ -47,7 +47,7 @@ BASE       = os.environ.get("YTS_BASE", "http://127.0.0.1:5001")
 MIN_DUR    = int(os.environ.get("MONITOR_MIN_DURATION", "180"))   # 3분 이하 제외(채널별 오버라이드 가능)
 POLL_SEC   = int(os.environ.get("MONITOR_POLL_SEC", "6"))         # /result 폴링 간격
 MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "18000"))  # 건당 전사 상한(5h) — 4시간대 장편(Acquired 등) 수용
-SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "900"))
+SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "1800"))  # 요약 재요청까지 고려해 30분 대기
 KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
 # 403 차단은 저녁 시간대(15~23시)에 몰리는 경우가 있어 3회보다 넉넉한
 # 5회 예산을 둔다. 짧은 일시 장애는 20분 간격으로 빠르게 따라잡는다.
