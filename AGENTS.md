@@ -1,5 +1,7 @@
 # youtube-script project decisions
 
+- 기관·프로젝트·임무명도 낯선 영문 약어이면 첫 등장 단락 뒤에 풀네임과 짧은 각주를 붙인다. 본문에 역할 설명이 있거나 전사의 음차를 영문으로 교정한 경우에도 생략하지 않는다(CADRE 사례). 풀네임 추측 금지·명시적 제외 목록 우선·용어당 1회 규칙은 유지한다.
+
 - 이미 발행된 요약의 버튼은 `발행됨`이며, 누르면 `블로그에서 보기`/`지금 내용으로 수정` 메뉴(`YS.openBlogMenu`)를 띄운다. 메뉴 머리에는 게시 시각(`blog_published_at`, 분 단위)을 두고 수정 항목에는 마지막 수정 시각을 둬 바로 견줄 수 있게 한다(버튼 tooltip에도 게시 시각). 수정은 발행 이후 내용이 바뀌었거나(요약 파일 mtime·`summary_notes.updated_at`) 발행 당시 렌더 버전(`items.blog_render_ver`, DB v20)이 현재 `app.BLOG_RENDER_VERSION`과 다를 때 활성화되고(`_blog_state`, 1초 여유), 서버는 `/history/publish-blog`에 `mode="update"`로 기존 `blog_post_id`의 제목·본문을 덮어쓴다. URL은 유지되고 `blog_published_at`만 갱신돼 판정이 초기화된다. 발행시각 기록이 없는 옛 글은 수정 가능으로 본다.
 - 수동 큐 등록은 같은 채널을 **지난번에 넣은 캡처·증류 설정**을 기본값으로 따른다(`db.last_queue_prefs_for_channel`). 캡처는 그 채널 최근 큐 항목의 명시값, 증류는 `items.distill`(요약 화면에서 바꾼 최종 상태)을 먼저 보고 없으면 큐 값, 그래도 없으면 모니터 채널 기본(`channels.capture/distill`) 순이다. `/queue/preview`가 `prefs`로 내려주면 추가 폼의 칩이 그대로 맞춰지고 근거 문구를 보여 준다(그 자리에서 바꿔도 된다). 폼을 거치지 않는 호출을 위해 `/queue/items` POST도 값이 없으면 서버에서 같은 규칙으로 채운다. 이력이 없으면 종전처럼 둘 다 켜짐.
 
