@@ -381,9 +381,8 @@ def _only_leaks_replaced(orig: str, new: str, spans: list[tuple[int, int]]) -> b
     # 앞쪽은 넓히지 않는다 — 앞에 붙은 말은 대개 별개 낱말(10억 달러增加 → '달러')이라
     # 넓히면 단위·명사가 바뀌어도 통과한다. 예외는 가나 — 외래어 음차가 한글 음절과
     # 쪼개져 섞인다(세クター → 섹터). 숫자·영문·문장부호는 넓히지 않는다.
-    grown: list[list] = []                     # [시작, 끝, 누출 글자 수]
+    grown: list[list[int]] = []                # [시작, 끝]
     for a, b in spans:
-        leak_len = b - a
         if re.fullmatch(r"[\u3040-\u30ff]+", orig[a:b]):
             while a > 0 and _HANGUL_RE.match(orig[a - 1]):
                 a -= 1
@@ -394,11 +393,10 @@ def _only_leaks_replaced(orig: str, new: str, spans: list[tuple[int, int]]) -> b
             b += gloss.end()
         if grown and a <= grown[-1][1]:
             grown[-1][1] = max(b, grown[-1][1])
-            grown[-1][2] += leak_len
         else:
-            grown.append([a, b, leak_len])
+            grown.append([a, b])
     parts, pos = [], 0
-    for a, b, _ in grown:
+    for a, b in grown:
         keep = orig[pos:a]
         parts.append(re.escape(keep.rstrip()) + r"\s*" if keep.strip() else r"\s*")
         limit = max(8, (b - a) * 3)
@@ -418,15 +416,13 @@ def _only_leaks_replaced(orig: str, new: str, spans: list[tuple[int, int]]) -> b
     # 증가했다. 추가 문장) 사실이나 문장이 끼어든 것이라 버린다.
     def facts(t: str) -> set[str]:
         return set(re.findall(r"[0-9]+|[A-Za-z]+|[.?!。]", t))   # 문장부호: 문장 덧붙이기 차단
-    def ok(g: str, a: int, b: int, leak_len: int) -> bool:
+    def ok(g: str, a: int, b: int) -> bool:
         if not facts(g) <= facts(orig[a:b]):
             return False
         base = hangul(re.sub(r"\([가-힣 ]+\)", "", orig[a:b]))
-        # 한글 사이에 낀 한자 한 글자(바뀌었希고)는 지우기만 해도 된다 — 뜻 없는 잡음이다.
-        if leak_len == 1 and hangul(g) == base:
-            return True
+        # 한 글자도 의미가 있을 수 있다(자산再평가). 잡음으로 추정해 삭제하지 않는다.
         return hangul(g) > base
-    return all(ok(g, a, b, n) for g, (a, b, n) in zip(m.groups(), grown))
+    return all(ok(g, a, b) for g, (a, b) in zip(m.groups(), grown))
 
 
 _LEAK_REPAIR_SYSTEM = """한국어 번역문 교정기다. 입력 줄들에는 중국어·일본어 문자가 잘못 섞여 있다.

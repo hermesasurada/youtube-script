@@ -105,11 +105,22 @@ def test_repair_leaks_rejects_changes_outside_the_leak(monkeypatch):
         assert not tt._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
                                            tt._leak_spans("매출이 10억 달러增加했다."))
     # 앞말은 넓히지 않는다(단위 바꿔치기 차단). 단 가나는 한글 음절과 쪼개져 섞이므로 예외,
-    # 한글 사이 한 글자 잡음은 지우기만 해도 된다 — 운영 번역본 실측 교정 사례
+    # 한 글자도 의미가 있는지 판정할 수 없으므로 단순 삭제는 거부한다.
     cases = (("매출이 10억 달러增加했다.", "매출이 10억 엔 증가했다.", False),
              ("산업 세クター에서 동일합니다.", "산업 섹터에서 동일합니다.", True),
-             ("상황이 바뀌었希고, 그들은", "상황이 바뀌었고, 그들은", True),
+             ("상황이 바뀌었希고, 그들은", "상황이 바뀌었고, 그들은", False),
              ("매출이 10억 달러增加했다.", "매출이 10억 달러 증가했다. 추가 문장.", False))
     for orig, new, want in cases:
         assert tt._only_leaks_replaced(orig, new, tt._leak_spans(orig)) is want, new
 
+
+def test_single_han_deletion_is_rejected_but_translation_is_accepted(monkeypatch):
+    original = "[00:00] 자산再평가가 필요합니다."
+    source = "Asset revaluation is required."
+    for fixed, expected in (
+        ("[00:00] 자산평가가 필요합니다.", original),
+        ("[00:00] 자산 평가가 필요합니다.", original),
+        ("[00:00] 자산재평가가 필요합니다.", "[00:00] 자산재평가가 필요합니다."),
+    ):
+        monkeypatch.setattr(tt, "_call", lambda *a, result=fixed, **k: ("1\t" + result, "stop"))
+        assert tt._repair_leaks(original, source) == expected
