@@ -1357,6 +1357,35 @@ def test_monitor_summary_slots_persist_and_capture_setting_is_gone(monkeypatch, 
                                       {"model": "grok", "effort": "default"}])
 
 
+def test_duplicate_slots_raise_start_share_but_fallback_skips_repeats(monkeypatch, tmp_path):
+    """같은 모델을 여러 슬롯에 두면 시작 비중이 늘고(2026-09-27 사용자 지시), 실패 폴백은
+    방금 실패한 모델을 다시 부르지 않는다."""
+    catalog = app.llm_gateway.llm_catalog
+    monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
+    catalog.save(catalog.seed(), 0)
+    db.init()
+    client = app.app.test_client()
+    slots = [{"model": "gpt-6-sol", "effort": "high"},
+             {"model": "claude-opus-5-5", "effort": "medium"},
+             {"model": "gpt-6-sol", "effort": "high"}]
+    try:
+        r = client.patch("/channels/model-orders", json={"summary_slots": slots})
+        assert r.status_code == 200 and r.get_json()["summary_slots"] == slots
+        starts = [db.reserve_monitor_summary_slots()["primary"]["model"] for _ in range(6)]
+        assert starts.count("gpt-6-sol") == 4 and starts.count("claude-opus-5-5") == 2
+        rotated = db.reserve_monitor_summary_slots()["slots"]        # sol, opus, sol
+        assert [a["model"] for a in app._summary_attempts(slots=rotated)] == ["gpt-6-sol", "claude-opus-5-5"]
+        # 같은 모델·다른 추론도 폴백에서는 한 번만(모델 장애는 추론 수준과 무관)
+        mixed = [{"model": "grok", "effort": "high"}, {"model": "grok", "effort": "low"}]
+        assert app._summary_attempts(slots=mixed) == [{"family": "grok", "model": "grok", "effort": "high"}]
+    finally:
+        db.set_monitor_summary_slots([{"model": "opus", "effort": "default"},
+                                      {"model": "gpt-6-astra", "effort": "high"},
+                                      {"model": "grok", "effort": "default"}])
+        with db._lock:                                   # 순환 위치도 원래대로(다음 테스트 격리)
+            db._conn().execute("UPDATE monitor_settings SET summary_cursor = 0 WHERE id = 1")
+
+
 def test_monitor_summary_slot_round_robin_rotates_and_wraps():
     db.init()
     try:

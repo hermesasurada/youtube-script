@@ -1167,7 +1167,7 @@
     MS.render(_mm.root, {
       slots: _mm.slots, nextIndex: _mm.nextIndex, limits: _mm.limits,
       versions: _mm.options, efforts: _mm.efforts,
-      hint: '영상마다 시작 슬롯을 한 칸씩 넘기고, 실패하면 다음 슬롯이 받는다. 같은 모델을 여러 슬롯에 둘 수 있다.',
+      hint: '영상마다 시작 슬롯을 한 칸씩 넘기고, 실패하면 다음 슬롯이 받는다. 같은 모델을 여러 슬롯에 두면 그만큼 자주 먼저 쓰인다(실패 폴백에서는 같은 모델을 다시 부르지 않는다).',
       status: _mm.status, notes: _mm.notes,
     }, {
       onSlotModel(i, value) {

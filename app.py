@@ -2431,8 +2431,18 @@ def _summary_attempts(model_order=None, reasoning_levels=None, slots=None) -> li
     """
     if slots:
         picked = llm_gateway.normalize_summary_slots(slots, [], preserve_unknown=True)
-        return [{"family": llm_gateway.model_family(s["model"]), "model": s["model"],
-                 "effort": s["effort"]} for s in picked]
+        # 같은 모델을 여러 슬롯에 두는 건 '시작 비중'을 높이려는 것이다(2026-09-27 사용자 지시).
+        # 실패 폴백에서는 방금 실패한 모델을 다시 부르지 않게 첫 등장만 남긴다
+        # (예: Sol·Opus·Sol → Sol 실패 시 Opus, 그다음 Sol을 또 부르지 않는다).
+        seen: set[str] = set()
+        out = []
+        for s in picked:
+            if s["model"] in seen:
+                continue
+            seen.add(s["model"])
+            out.append({"family": llm_gateway.model_family(s["model"]), "model": s["model"],
+                        "effort": s["effort"]})
+        return out
     order = llm_gateway.normalize_model_order(model_order)
     reasoning = llm_gateway.normalize_reasoning_levels(reasoning_levels)
     versions = _model_versions()
