@@ -22,8 +22,9 @@ _MARK = "\\*"
 def _keys(label: str) -> list[str]:
     label = _TAG_RE.sub("", label).strip()
     base = re.sub(r"\s*\([^()]*\)\s*$", "", label).strip()
+    no_paren = re.sub(r"\s*\([^()]*\)", "", label).strip()     # 'KV (Key-Value) 캐시' → 'KV 캐시'
     paren = re.search(r"\(([^()]+)\)\s*$", label)
-    parts = [base, label] + (paren.group(1).split("/") if paren else [])
+    parts = [base, no_paren, label] + (paren.group(1).split("/") if paren else [])
     out = []
     for k in parts:
         k = k.strip().lower()
@@ -89,14 +90,32 @@ def _star_positions(line: str) -> list[int]:
     return [m.start() for m in re.finditer(re.escape(_MARK), line)]
 
 
-def _matches(before: str, key_list: list[str]) -> bool:
-    low = _compact(_plain(before))[0][-90:]
+_TAIL_OK = re.compile(r"\s*(\([^()\n]{0,60}\))?\s*[\"'”’」』)\]]*\s*")
+
+
+def _paren_after(after: str) -> str:
+    """표식 바로 뒤의 괄호 병기 내용('트랜스포머\\*(transformer)'의 transformer)."""
+    m = re.match(r"\s*\(([^()\n]{1,60})\)", _plain(after))
+    return m.group(1) if m else ""
+
+
+def _matches(before: str, key_list: list[str], after: str = "") -> bool:
+    """표식 바로 앞이 이 용어인가 — 용어와 표식 사이에는 괄호 병기·따옴표·(걷어낸) 볼드
+    닫힘만 허용한다(예전엔 35자까지 허용해 'PR은 … 무너져**\\*'도 PR 짝으로 봤다)."""
+    plain = _plain(before)[-120:]
+    comp, pos = _compact(plain)
     for k in key_list:
         ck = _ckey(k)
-        at = low.rfind(ck)
-        if ck and at >= 0 and len(low) - (at + len(ck)) <= 35:
-            return True
-    return False
+        if not ck:
+            continue
+        at = comp.rfind(ck)
+        while at >= 0:
+            end = pos[at + len(ck) - 1] + 1
+            if _TAIL_OK.fullmatch(plain[end:]):
+                return True
+            at = comp.rfind(ck, 0, at)
+    inside = _ckey(_paren_after(after))
+    return bool(inside) and any(_ckey(k) and _ckey(k) in inside for k in key_list)
 
 
 def _is_name_star(before: str) -> bool:
@@ -129,6 +148,7 @@ def fix(md: str) -> tuple[str, dict]:
     orphans: list[tuple[int, int]] = []            # 단위 안에서 짝을 못 찾은 표식
     unmatched_notes: list[tuple[list[str], list[int]]] = []   # (키, 찾아볼 줄들)
     used_note = [False] * len(all_keys)
+    force_drop: list[tuple[int, int]] = []         # 자리가 틀린 표식(다른 짝 찾지 않고 지움)
     note_idx = 0
     i = 0
     while i < len(lines):
@@ -154,7 +174,8 @@ def fix(md: str) -> tuple[str, dict]:
                 free_notes = []
                 for k in idxs:                       # 1) 글자로 맞는 짝
                     hit = next((st for st in free_stars
-                                if _matches(lines[st[0]][:st[1]], all_keys[k])), None)
+                                if _matches(lines[st[0]][:st[1]], all_keys[k],
+                                            lines[st[0]][st[1] + len(_MARK):])), None)
                     if hit:
                         free_stars.remove(hit); used_note[k] = True
                     else:
@@ -162,12 +183,23 @@ def fix(md: str) -> tuple[str, dict]:
                 # 2) 남은 수가 같으면 순서대로 짝짓는다. 다만 다른 각주와 글자가 맞는 표식은
                 #    그쪽 짝이므로(앞 단락 각주의 용어가 여기 다시 나온 경우) 빼고 센다.
                 foreign = [st for st in free_stars
-                           if any(_matches(lines[st[0]][:st[1]], ks) for ks in all_keys)]
+                           if any(_matches(lines[st[0]][:st[1]], ks, lines[st[0]][st[1] + len(_MARK):])
+                                  for ks in all_keys)]
                 unknown = [st for st in free_stars if st not in foreign]
                 if unknown and free_notes and len(unknown) == len(free_notes):
-                    for k in free_notes:
-                        used_note[k] = True
-                    unknown, free_notes = [], []
+                    # 순서로 짝지은 각주의 용어가 이 단위 본문에 실제로 있으면 표식이 엉뚱한 자리에
+                    # 붙은 것이다(DHH: 'PR' 각주의 표식이 볼드 문장 끝 '무너져**\\*'에 붙음).
+                    # 그 표식은 지우고 용어 첫 등장 뒤에 다시 단다(아래 4단계).
+                    moved = []
+                    for st, k in zip(unknown, free_notes):
+                        if any(_locate(lines[li], all_keys[k]) >= 0 for li in unit_lines):
+                            moved.append((st, k))
+                        else:
+                            used_note[k] = True
+                    unknown = [st for st, _ in moved]
+                    free_notes = [k for _, k in moved]
+                    force_drop.extend(unknown)
+                    unknown = []
                 free_stars = foreign + unknown
                 orphans.extend(free_stars)
                 for k in free_notes:
@@ -191,10 +223,12 @@ def fix(md: str) -> tuple[str, dict]:
 
     # 3) 단위 밖 짝: 남은 표식을 아직 안 쓴 각주와 글자로 맞춰 본다. 끝까지 없으면 지운다.
     drop: dict[int, list[int]] = {}
+    for (li, col) in force_drop:
+        drop.setdefault(li, []).append(col)
     for (li, col) in orphans:
-        before = lines[li][:col]
+        before, after = lines[li][:col], lines[li][col + len(_MARK):]
         hit = next((k for k, ks in enumerate(all_keys)
-                    if not used_note[k] and _matches(before, ks)), None)
+                    if not used_note[k] and _matches(before, ks, after)), None)
         if hit is not None:
             used_note[hit] = True
             unmatched_notes = [x for x in unmatched_notes if x[0] != hit]
@@ -220,8 +254,15 @@ def fix(md: str) -> tuple[str, dict]:
             best = _locate(line, all_keys[k])
             if best < 0:
                 continue
-            tail = re.match(r"(\*\*)?(\s*\([^()\n]{1,60}\))?(\*\*)?", line[best:])
-            end = best + (tail.end() if tail else 0)
+            opened = line.rfind("(", 0, best)
+            close = line.find(")", best)
+            if opened >= 0 and line.rfind(")", 0, best) < opened and 0 <= close - best <= 60:
+                end = close + 1                     # '트랜스포머(transformer)' → 괄호 뒤
+                tail = re.match(r"(\*\*)?", line[end:])
+                end += tail.end() if tail else 0
+            else:
+                tail = re.match(r"(\*\*)?(\s*\([^()\n]{1,60}\))?(\*\*)?", line[best:])
+                end = best + (tail.end() if tail else 0)
             if line[end:end + len(_MARK)] != _MARK:
                 lines[li] = line[:end] + _MARK + line[end:]
                 stats["added"] += 1
