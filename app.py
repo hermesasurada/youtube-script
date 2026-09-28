@@ -59,6 +59,7 @@ import db
 import document_io
 import humanize_korean
 import notation
+import term_marks
 import keyframe_report
 import llm_gateway
 import original_video
@@ -2149,8 +2150,13 @@ def _prepare_summary_body(text: str) -> str:
 
 
 def _polish_summary(cleaned: str) -> str:
-    """결정적 윤문 + 회사·브랜드명 원문 표기·영문 이름 뒤 조사 교정(notation)."""
-    return notation.normalize_summary(humanize_korean.humanize_summary(cleaned))
+    """결정적 윤문 + 회사·브랜드명 원문 표기·영문 이름 뒤 조사 교정(notation)
+    + 각주 표식과 각주 행의 짝 맞추기(term_marks)."""
+    body = notation.normalize_summary(humanize_korean.humanize_summary(cleaned))
+    try:
+        return term_marks.fix(body)[0]
+    except Exception:  # noqa: BLE001 — 교정 실패가 요약 저장을 막으면 안 된다
+        return body
 
 
 # 요약 생성용 시스템 프롬프트: 출력 전용 강제(도구/파일/승인 언급 금지).
