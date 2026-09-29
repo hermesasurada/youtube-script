@@ -1135,11 +1135,13 @@
      화면은 공통 렌더러(ModelSelector, static/js/model-selector.js — wm과 같은 파일)가
      그리고, 여기서는 상태·저장만 맡는다.
      요약: 슬롯 1~5개(슬롯마다 구체 모델+추론 수준, 같은 계열 여러 번 가능), 라운드로빈.
-     캡처는 따로 고르지 않는다 — 그 영상을 요약한 모델이 맡는다(서버 app._capture_order). */
+     캡처는 따로 고르지 않는다 — 그 영상을 요약한 모델이 맡는다(서버 app._capture_order).
+     제목 번역: 모델+추론 한 칸(2026-09-29 사용자 지시). 실패한 묶음은 요약 슬롯 순번으로 넘어간다. */
   const _mm = {
     slots: [], nextIndex: 0, limits: { min: 1, max: 5 },
     options: [], notes: [], status: '',
     efforts: [],
+    titleModel: '', titleEffort: 'default',
     root: null, onSaved: null,
   };
 
@@ -1151,14 +1153,36 @@
     if (d.model_options) _mm.options = d.model_options;
     if (d.reasoning_options) _mm.efforts = d.reasoning_options;
     if (d.model_notes) _mm.notes = d.model_notes;
+    if (d.title_model) _mm.titleModel = d.title_model;
+    if (d.title_effort) _mm.titleEffort = d.title_effort;
   }
   /** 페이지 캐시에 되써 둘 필드만 추린다(모달을 다시 열 때 최신 상태로 그리게). */
   function mmFields(d) {
     const out = {};
     ['summary_slots', 'summary_next_index', 'slot_limits',
-     'model_options', 'reasoning_options', 'model_notes']
+     'model_options', 'reasoning_options', 'model_notes', 'title_model', 'title_effort']
       .forEach(k => { if (d && d[k] !== undefined) out[k] = d[k]; });
     return out;
+  }
+
+  /** 제목 번역 행 — 공통 디자인(.msel-block/.msel-row)으로 그리는 yt 고유 블록. */
+  function mmTitleBlock() {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const opt = (v, label, cur, dis) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(label)}</option>`;
+    const choices = _mm.options.filter(o => o.provider !== 'local');
+    let models = choices.map(o => opt(o.value, o.label, _mm.titleModel, o.enabled === false)).join('');
+    if (!choices.some(o => o.value === _mm.titleModel)) models = opt(_mm.titleModel, _mm.titleModel + ' (기존 설정·선택 불가)', _mm.titleModel, true) + models;
+    const hit = choices.find(o => o.value === _mm.titleModel);
+    let levels = hit && hit.reasoning ? _mm.efforts.filter(e => hit.reasoning.includes(e.value)) : _mm.efforts;
+    if (!levels.some(e => e.value === _mm.titleEffort)) levels = levels.concat([{ value: _mm.titleEffort, label: _mm.titleEffort + ' (기존 설정)' }]);
+    return `<section class="msel-block">`
+      + `<div class="msel-head"><strong>제목 번역</strong><span class="msel-tag">먼저 받음</span></div>`
+      + `<div class="msel-row" style="grid-template-columns:minmax(0,1fr) 104px">`
+      + `<select id="mmTitleModel" aria-label="제목 번역 모델">${models}</select>`
+      + `<select id="mmTitleEffort" aria-label="제목 번역 추론 수준">${levels.map(e => opt(e.value, e.label, _mm.titleEffort)).join('')}</select></div>`
+      + `<p class="msel-hint">외국어 제목을 한국어로 옮기는 모델. 실패한 묶음만 요약 슬롯 순번으로 넘긴다(추론 기본값).</p>`
+      + `</section>`;
   }
 
   function mmRender() {
@@ -1168,7 +1192,7 @@
       slots: _mm.slots, nextIndex: _mm.nextIndex, limits: _mm.limits,
       versions: _mm.options, efforts: _mm.efforts,
       hint: '영상마다 시작 슬롯을 한 칸씩 넘기고, 실패하면 다음 슬롯이 받는다. 같은 모델을 여러 슬롯에 두면 그만큼 자주 먼저 쓰인다(실패 폴백에서는 같은 모델을 다시 부르지 않는다).',
-      status: _mm.status, notes: _mm.notes,
+      status: _mm.status, notes: _mm.notes, extra: mmTitleBlock(),
     }, {
       onSlotModel(i, value) {
         mmSave(() => { const option = _mm.options.find(o => o.value === value);
@@ -1206,18 +1230,29 @@
         if (!choice || choice.enabled === false) o.disabled = true;
       });
     });
+    const tModel = _mm.root.querySelector('#mmTitleModel');
+    const tEffort = _mm.root.querySelector('#mmTitleEffort');
+    if (tModel) tModel.onchange = () => mmSave(() => {
+      const hit = _mm.options.find(o => o.value === tModel.value);
+      _mm.titleModel = tModel.value;
+      if (hit && hit.reasoning && !hit.reasoning.includes(_mm.titleEffort)) {
+        _mm.titleEffort = 'default';
+        _mm.status = '모델에 맞게 추론 수준을 기본값으로 변경했습니다';
+      }
+    });
+    if (tEffort) tEffort.onchange = () => mmSave(() => { _mm.titleEffort = tEffort.value; });
   }
 
   /** 변경을 적용하고 바로 저장한다. 실패하면 적용 전 상태로 되돌린다. */
   async function mmSave(mutate) {
-    const snapshot = JSON.stringify(_mm.slots);
+    const snapshot = JSON.stringify([_mm.slots, _mm.titleModel, _mm.titleEffort]);
     _mm.status = '';
     mutate();
     const adjustment = _mm.status;
     _mm.status = '저장 중…';
     mmRender();
     _mm.root.querySelectorAll('select, button').forEach(el => { el.disabled = true; });
-    const body = { summary_slots: _mm.slots };
+    const body = { summary_slots: _mm.slots, title_model: _mm.titleModel, title_effort: _mm.titleEffort };
     try {
       const r = await fetch('/channels/model-orders', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -1228,7 +1263,7 @@
       _mm.status = adjustment || '저장됨';
       if (_mm.onSaved) _mm.onSaved(d);
     } catch (e) {
-      _mm.slots = JSON.parse(snapshot);
+      [_mm.slots, _mm.titleModel, _mm.titleEffort] = JSON.parse(snapshot);
       _mm.status = '저장 실패';
       alert('모델 설정 저장 실패: ' + e.message);
     } finally {

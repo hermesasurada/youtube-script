@@ -2341,11 +2341,11 @@ def test_title_translation_falls_back_to_summary_slots_after_luna(monkeypatch):
     assert order.count(("gpt", "gpt-6-luna")) == 1
     tried = []
     monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "gpt",
-                        lambda p, label, model=None: (tried.append(model) or ("", "quota")))
+                        lambda p, label, model=None, effort="default": (tried.append(model) or ("", "quota")))
     monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus",
-                        lambda p, label, model=None: (tried.append(model) or ('["번역"]', "")))
+                        lambda p, label, model=None, effort="default": (tried.append(model) or ('["번역"]', "")))
     monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "grok",
-                        lambda p, label, model=None: (tried.append(model) or ("", "down")))
+                        lambda p, label, model=None, effort="default": (tried.append(model) or ("", "down")))
     assert app._translate_titles(["Hello"], first_id=1) == ["번역"]
     assert tried[0] == "gpt-6-luna" and len(tried) >= 2
 
@@ -2458,3 +2458,41 @@ def test_model_label_alias_uses_last_confirmed_model(monkeypatch):
     assert app._model_label("opus") == "Opus"                 # 아직 확인된 모델 없음
     app._model_label("claude-opus-5-5")                         # 실제 응답으로 확인
     assert app._model_label("opus") == "Opus 5.5"
+
+
+def test_title_translation_model_is_configurable(monkeypatch, tmp_path):
+    """제목 번역 모델·추론을 설정에서 고른다(2026-09-29 사용자 지시). 저장 전엔 환경 기본값."""
+    catalog = app.llm_gateway.llm_catalog
+    monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
+    catalog.save(catalog.seed(), 0)
+    db.init()
+    client = app.app.test_client()
+    try:
+        db.set_title_model("", "")
+        payload = client.get("/channels").get_json()
+        assert (payload["title_model"], payload["title_effort"]) == (app.TITLE_TR_MODEL, app.TITLE_TR_REASONING)
+        before = db.get_monitor_summary_slots()["slots"]
+        r = client.patch("/channels/model-orders",
+                         json={"title_model": "claude-opus-5-5", "title_effort": "low"})
+        assert r.status_code == 200
+        assert (r.get_json()["title_model"], r.get_json()["title_effort"]) == ("claude-opus-5-5", "low")
+        assert db.get_monitor_summary_slots()["slots"] == before          # 요약 슬롯은 그대로
+        assert app._title_tr_order(1)[0] == ("opus", "claude-opus-5-5")
+        # 거부: 모르는 모델, 모델이 못 받는 추론, 로컬 모델(제목 번역 러너 없음), 형식 오류
+        for bad in ({"title_model": "gpt-9"}, {"title_model": "grok", "title_effort": "extreme"},
+                    {"title_model": "qwen3.8-27b", "title_effort": "default"}):
+            assert client.patch("/channels/model-orders", json=bad).status_code == 400
+        assert client.patch("/channels/model-orders", data="[1]",
+                            content_type="application/json").status_code == 400
+        assert db.get_title_model() == {"model": "claude-opus-5-5", "effort": "low"}
+        # 1순위만 설정 추론으로, 폴백은 추론 기본값
+        tried = []
+        for fam in ("gpt", "opus", "grok"):
+            monkeypatch.setitem(app._TITLE_TR_PROVIDERS, fam,
+                                lambda p, label, model=None, effort="default":
+                                (tried.append((model, effort)) or ("", "down")))
+        assert app._translate_titles(["Hello"], first_id=1) is None
+        assert tried[0] == ("claude-opus-5-5", "low")
+        assert all(e == "default" for _, e in tried[1:]) and len(tried) >= 2
+    finally:
+        db.set_title_model("", "")

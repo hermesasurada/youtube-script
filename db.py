@@ -379,6 +379,15 @@ def init() -> None:
                 c.execute("UPDATE monitor_settings SET summary_slots = ? WHERE id = 1",
                           (json.dumps(_slots_from_legacy(row)),))
             c.execute("PRAGMA user_version = 23")
+        if ver < 24:
+            # v24: 제목 번역 모델을 설정 팝업에서 고른다(2026-09-29 사용자 지시).
+            # 빈 값 = 환경변수 기본(TITLE_TR_MODEL·TITLE_TR_REASONING) — 동작을 바꾸지 않는다.
+            mcols = {r[1] for r in c.execute("PRAGMA table_info(monitor_settings)").fetchall()}
+            if "title_model" not in mcols:
+                c.execute("ALTER TABLE monitor_settings ADD COLUMN title_model TEXT NOT NULL DEFAULT ''")
+            if "title_effort" not in mcols:
+                c.execute("ALTER TABLE monitor_settings ADD COLUMN title_effort TEXT NOT NULL DEFAULT ''")
+            c.execute("PRAGMA user_version = 24")
 
 
 def get_summary_notes(md_path: str) -> dict:
@@ -924,6 +933,31 @@ def set_monitor_summary_slots(value) -> dict:
                          "summary_slots, updated_at) VALUES (1, ?, ?, ?, ?)",
                          (order, order, json.dumps(slots), _now()))
     return get_monitor_summary_slots()
+
+
+def get_title_model() -> dict:
+    """저장된 제목 번역 모델·추론(없으면 빈 문자열 — 호출측이 환경변수 기본값을 쓴다)."""
+    try:
+        row = _conn().execute(
+            "SELECT title_model, title_effort FROM monitor_settings WHERE id = 1").fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    return {"model": (row["title_model"] if row else "") or "",
+            "effort": (row["title_effort"] if row else "") or ""}
+
+
+def set_title_model(model: str, effort: str) -> dict:
+    with _lock:
+        conn = _conn()
+        if conn.execute("SELECT 1 FROM monitor_settings WHERE id = 1").fetchone():
+            conn.execute("UPDATE monitor_settings SET title_model = ?, title_effort = ?, updated_at = ? "
+                         "WHERE id = 1", (model, effort, _now()))
+        else:
+            order = json.dumps(list(llm_gateway.MODEL_KEYS))
+            conn.execute("INSERT INTO monitor_settings (id, summary_models, capture_models, "
+                         "summary_slots, title_model, title_effort, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
+                         (order, order, json.dumps([dict(x) for x in _DEFAULT_SLOTS]), model, effort, _now()))
+    return get_title_model()
 
 
 def reserve_monitor_summary_slots() -> dict:

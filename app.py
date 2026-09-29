@@ -1870,6 +1870,17 @@ TITLE_TR_MODEL   = os.environ.get("TITLE_TR_MODEL", "gpt-6-luna")
 TITLE_TR_BATCH   = 40            # 한 번 호출에 묶는 제목 수
 TITLE_TR_TIMEOUT = 240
 TITLE_TR_REASONING = os.environ.get("TITLE_TR_REASONING", "default")
+# 설정 팝업에서 고른 값이 있으면 그것이 위 기본값을 대신한다(2026-09-29 사용자 지시).
+
+
+def _title_tr_setting() -> tuple[str, str]:
+    """제목 번역 1순위 (모델, 추론) — 저장값, 없으면 환경변수 기본값."""
+    try:
+        saved = db.get_title_model()
+    except Exception:
+        saved = {}
+    return (saved.get("model") or TITLE_TR_MODEL,
+            saved.get("effort") or TITLE_TR_REASONING)
 
 _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역한다.
 
@@ -1920,12 +1931,13 @@ def _parse_title_json(out: str, n: int) -> list[str] | None:
 
 
 def _title_tr_order(first_id: int = 0) -> tuple[tuple[str, str], ...]:
-    """제목 번역 순번 — (계열, 모델) 목록. TITLE_TR_MODEL이 늘 먼저다.
+    """제목 번역 순번 — (계열, 모델) 목록. 설정의 제목 번역 모델이 늘 먼저다.
 
     폴백은 요약 슬롯이다. 번역은 묶음으로 부르므로 묶음 첫 항목의 rowid로
     슬롯 순서를 돌린다 — 같은 묶음을 다시 시도해도 순서가 같다.
     """
-    primary = (llm_gateway.model_family(TITLE_TR_MODEL), TITLE_TR_MODEL)
+    model = _title_tr_setting()[0]
+    primary = (llm_gateway.model_family(model), model)
     try:
         slots = db.get_monitor_summary_slots()["slots"]
     except Exception:
@@ -1936,8 +1948,8 @@ def _title_tr_order(first_id: int = 0) -> tuple[tuple[str, str], ...]:
     return (primary, *dict.fromkeys(rest))
 
 
-def _title_tr_with_claude(prompt: str, label: str, model: str | None = None) -> tuple[str, str]:
-    effort = TITLE_TR_REASONING
+def _title_tr_with_claude(prompt: str, label: str, model: str | None = None,
+                        effort: str = "default") -> tuple[str, str]:
     claude_model = model or _claude_model()
     command = [_resolve_claude_bin(), "-p", "--model", claude_model,
                "--output-format", "json"]
@@ -1958,11 +1970,11 @@ def _title_tr_with_claude(prompt: str, label: str, model: str | None = None) -> 
     return stdout, ""
 
 
-def _title_tr_with_grok(prompt: str, label: str, model: str | None = None) -> tuple[str, str]:
+def _title_tr_with_grok(prompt: str, label: str, model: str | None = None,
+                        effort: str = "default") -> tuple[str, str]:
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
     selected_model = llm_gateway.grok_call_model(model, GROK_MODEL)
-    effort = TITLE_TR_REASONING
     if effort not in llm_gateway.llm_catalog.levels(model or "grok"):
         effort = "default"
     with llm_gateway.llm_track("grok", selected_model or None, purpose="title",
@@ -1996,8 +2008,8 @@ def _title_tr_with_grok(prompt: str, label: str, model: str | None = None) -> tu
     return stdout, ""
 
 
-def _title_tr_with_gpt(prompt: str, label: str, model: str | None = None) -> tuple[str, str]:
-    effort = TITLE_TR_REASONING
+def _title_tr_with_gpt(prompt: str, label: str, model: str | None = None,
+                        effort: str = "default") -> tuple[str, str]:
     gpt_model = model or _gpt_model()
     with llm_gateway.llm_track("codex", gpt_model, purpose="title",
                                title=label, backend="cli",
@@ -2030,7 +2042,8 @@ _TITLE_TR_PROVIDERS = {
 def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | None:
     """제목 묶음을 번역. 실패하면 None(다음 기회에 다시 시도).
 
-    TITLE_TR_MODEL(GPT-6 Luna)이 먼저 옮기고, 실패하면 요약 슬롯 순번으로 넘긴다.
+    설정의 제목 번역 모델(기본 GPT-6 Luna)이 그 추론 수준으로 먼저 옮기고, 실패하면
+    요약 슬롯 순번으로 넘긴다(폴백은 추론 기본값).
     """
     if not titles:
         return []
@@ -2038,11 +2051,12 @@ def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | No
     prompt = _TITLE_TR_PROMPT + body
     label = f"제목 {len(titles)}건 번역"
     stdout = ""
-    for name, slot_model in _title_tr_order(first_id):
+    first_effort = _title_tr_setting()[1]
+    for idx, (name, slot_model) in enumerate(_title_tr_order(first_id)):
         call = _TITLE_TR_PROVIDERS.get(name)
         if not call:
             continue
-        stdout, err = call(prompt, label, slot_model)
+        stdout, err = call(prompt, label, slot_model, first_effort if idx == 0 else "default")
         if not err and stdout.strip():
             parsed = _parse_title_json(stdout, len(titles))
             if parsed is not None:
@@ -2281,6 +2295,8 @@ def _monitor_model_payload() -> dict:
         "reasoning_options": _monitor_reasoning_options(),
         "slot_limits": {"min": llm_gateway.MIN_SUMMARY_SLOTS, "max": llm_gateway.MAX_SUMMARY_SLOTS},
         "model_notes": _monitor_model_notes(),
+        "title_model": _title_tr_setting()[0],
+        "title_effort": _title_tr_setting()[1],
     }
 
 
@@ -2291,9 +2307,6 @@ def _monitor_model_notes() -> list[dict[str, str]]:
          "detail": "그 영상을 요약한 모델이 캡처도 맡고, 실패하면 요약 슬롯 순서로 넘긴다. "
                    "추론 수준은 쓰지 않는다 — 같은 프레임을 low·high로 판정해 보니 "
                    "유지·소제목 배정이 모두 같았고 시간만 늘었다(2026-09-23)."},
-        {"rule": "제목 번역",
-         "detail": f"요약 순번과 무관하게 {_model_label(TITLE_TR_MODEL)} · 추론 기본값으로 고정. "
-                   "실패한 묶음만 요약 슬롯 순번으로 넘긴다."},
         {"rule": "Grok 문체 보정",
          "detail": "Grok 요약에만 한국어 문체 보정 지시를 앞에 붙인다."},
         {"rule": "문자 누출",
@@ -3218,15 +3231,31 @@ def channels_list():
 @app.route("/channels/model-orders", methods=["PATCH"])
 def channel_model_orders():
     """자동모니터의 요약 슬롯(1~5개, 모델+추론)을 저장한다. 캡처는 요약 모델을 따른다."""
-    data = request.get_json(force=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json({"error": "설정 형식이 잘못됐습니다."}, 400)
     slots = data.get("summary_slots")
-    if slots is None:
+    has_title = "title_model" in data or "title_effort" in data
+    if slots is None and not has_title:
         return _json({"error": "변경할 요약 슬롯이 없습니다."}, 400)
-    if not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
+    if slots is not None and not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
         return _json({"error": f"요약 슬롯은 {llm_gateway.MIN_SUMMARY_SLOTS}~"
                                f"{llm_gateway.MAX_SUMMARY_SLOTS}개, 목록에 있는 모델이어야 합니다."}, 400)
+    if has_title:
+        cur_model, cur_effort = _title_tr_setting()
+        t_model = str(data.get("title_model") or cur_model).strip()
+        t_effort = str(data.get("title_effort") or "default").strip().lower()
+        unchanged = (t_model, t_effort) == (cur_model, cur_effort)
+        entry = llm_gateway.llm_catalog.resolve(t_model) or {}
+        # 제목 번역 러너는 Claude·GPT·Grok뿐 — 로컬 모델은 목록에 있어도 받지 않는다.
+        if not unchanged and not (entry.get("provider") in ("claude", "codex", "grok")
+                                  and llm_gateway.llm_catalog.valid(t_model, t_effort, selectable=True)):
+            return _json({"error": "제목 번역 모델·추론 조합이 목록에 없습니다."}, 400)
     try:
-        db.set_monitor_summary_slots(slots)
+        if has_title:
+            db.set_title_model(t_model, t_effort)
+        if slots is not None:
+            db.set_monitor_summary_slots(slots)
         return _json({"ok": True, **_monitor_model_payload()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
