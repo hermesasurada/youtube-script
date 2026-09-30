@@ -48,6 +48,35 @@ try:
 except Exception:  # noqa: BLE001 — 모듈이 없어도 본업은 돈다
     llm_log = None
 
+# CLI 최소 구성(2026-09-30 사용자 지시): 요약·제목 번역·검색어처럼 텍스트 전용 호출은 CLI 자체
+# 시스템 프롬프트·도구 정의를 걷어낸다(hermes-llm-log/cli_minimal.py). 이미지 판독(keyframe
+# Claude는 파일 읽기 도구로 이미지를 연다)에는 붙이지 않는다. 없거나 실패하면 빈 인자 = 예전 구성.
+try:
+    import cli_minimal as _cli_minimal
+except Exception:  # noqa: BLE001
+    _cli_minimal = None
+
+
+def claude_minimal_args(extra_system: str = "") -> list:
+    """claude -p 최소 구성 인자. extra_system은 교체한 시스템 프롬프트 뒤에 붙인다
+    (예전 --append-system-prompt 자리). 빈 목록이면 호출측은 예전 구성을 그대로 쓴다."""
+    try:
+        args = _cli_minimal.claude_args() if _cli_minimal is not None else []
+        if args and extra_system:
+            i = args.index("--system-prompt") + 1
+            args[i] = args[i] + "\n\n" + extra_system
+        return args
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def codex_minimal_args() -> list:
+    try:
+        return _cli_minimal.codex_args() if _cli_minimal is not None else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 LLM_LOG_SERVICE = "yt"
 
 
@@ -476,6 +505,8 @@ def run_codex_prompt(
             command += ["-c", f"model_reasoning_effort={effort}"]
         for path in images:
             command += ["-i", path]
+        if not images:                     # 이미지 첨부 호출은 예전 구성 그대로
+            command += codex_minimal_args()
         command.append("-")
         result = run_command(command, input_text=prompt, timeout=timeout)
         final = ""

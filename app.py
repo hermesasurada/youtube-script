@@ -819,7 +819,8 @@ def _original_search_query(meta: dict, description: str) -> str:
         try:
             result = llm_gateway.run_command(
                 [_resolve_claude_bin(), "-p", "--model", ORIGINAL_QUERY_MODEL,
-                 "--output-format", "json", "--allowedTools", ""],
+                 "--output-format", "json", "--allowedTools", ""]
+                + llm_gateway.claude_minimal_args(),
                 input_text=prompt,
                 timeout=ORIGINAL_QUERY_TIMEOUT,
             )
@@ -1952,7 +1953,7 @@ def _title_tr_with_claude(prompt: str, label: str, model: str | None = None,
                         effort: str = "default") -> tuple[str, str]:
     claude_model = model or _claude_model()
     command = [_resolve_claude_bin(), "-p", "--model", claude_model,
-               "--output-format", "json"]
+               "--output-format", "json"] + llm_gateway.claude_minimal_args()
     if effort != "default":
         command += ["--effort", effort]
     command.append(prompt)
@@ -2177,6 +2178,12 @@ def _polish_summary(cleaned: str) -> str:
 _SUMMARY_SYS = ("요청된 마크다운 요약 결과 본문만 그대로 출력한다. "
                 "파일을 생성·저장하지 말고, 도구를 사용하거나 저장 여부·권한·승인을 "
                 "언급하거나 묻지 말 것. 메타 코멘트 없이 결과만 출력한다.")
+
+
+def _summary_system_args() -> list:
+    """요약 호출의 시스템 프롬프트 인자. 최소 구성이면 CLI 기본 프롬프트를 교체하고 그 뒤에
+    _SUMMARY_SYS를 붙이며(도구·MCP도 끔), 최소 구성을 못 쓰면 예전처럼 기본 프롬프트 뒤에 덧붙인다."""
+    return llm_gateway.claude_minimal_args(_SUMMARY_SYS) or ["--append-system-prompt", _SUMMARY_SYS]
 
 
 _CLAUDE_TIERS = ("opus", "sonnet", "haiku", "fable")
@@ -2509,7 +2516,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
                 "--include-partial-messages",
                 "--model", slot_model,
                 "--allowedTools", "",
-                "--append-system-prompt", _SUMMARY_SYS,
+                *_summary_system_args(),
                 "--verbose",
             ]
             if effort != "default":
@@ -2717,7 +2724,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         "--include-partial-messages",
         "--model", _claude_model(),
         "--allowedTools", "",
-        "--append-system-prompt", _SUMMARY_SYS,
+        *_summary_system_args(),
         "--verbose",
     ]
     chunks: list[str] = []
