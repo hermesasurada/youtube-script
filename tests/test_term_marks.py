@@ -93,3 +93,17 @@ def test_label_with_inner_parenthetical_matches_body_term():
     md = _doc("생성에 쓰일 **KV 캐시**\\*도 만든다.\n\n" + NOTE.format("KV (Key-Value) 캐시"))
     out, st = tm.fix(md)
     assert out == md and st["removed"] == 0
+
+
+def test_captions_are_never_footnote_targets():
+    """키프레임 캡션(<div class="kf-strip">…<figcaption>)은 각주 대상이 아니다(2026-09-10·10-01 사용자
+    지시). 각주 용어가 캡션에만 있어도 캡션에 별표를 넣지 않는다."""
+    import term_marks
+    md = ('## 3. 핵심 내용\n\n### 밸류에이션 [00:00]\n\n'
+          '<div class="kf-strip"><figure><img src="/sframe/x/kf_1.jpg" alt=""><figcaption><b>02:13</b> '
+          '선행 PER 17배로 2015년 이후 최저</figcaption></figure></div>\n\n'
+          '선행 PER은 역사적 저점 수준이다.\n\n'
+          '<p class="term-note">* <strong>PER</strong> 주가수익비율</p>\n')
+    out, _ = term_marks.fix(md)
+    cap = out[out.index('<figcaption>'):out.index('</figcaption>')]
+    assert '*' not in cap.replace('<b>02:13</b>', '')
