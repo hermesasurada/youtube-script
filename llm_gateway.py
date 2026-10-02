@@ -245,12 +245,15 @@ def resolve_claude_bin() -> str:
     found = shutil.which("claude")
     if found:
         return found
-    pattern = os.path.expanduser(
-        "~/Library/Application Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude"
-    )
-    candidates = [path for path in glob.glob(pattern) if os.path.exists(path)]
+    base = os.path.expanduser("~/Library/Application Support/Claude/claude-code")
+    # 2026-10-02: 앱 업데이트로 번들 경로에 해시 폴더가 한 단계 늘었다(<ver>/<hash>/claude.app) — 두 구조 모두 찾는다.
+    candidates = [path for pattern in ("*/claude.app/Contents/MacOS/claude", "*/*/claude.app/Contents/MacOS/claude")
+                  for path in glob.glob(os.path.join(base, pattern)) if os.path.exists(path)]
     if candidates:
         return max(candidates, key=os.path.getmtime)
+    native = os.path.expanduser("~/.local/bin/claude")   # 독립 설치판(launchd PATH엔 ~/.local/bin이 없다)
+    if os.path.exists(native):
+        return native
     return env or "claude"
 
 
