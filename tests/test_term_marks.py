@@ -107,3 +107,43 @@ def test_captions_are_never_footnote_targets():
     out, _ = term_marks.fix(md)
     cap = out[out.index('<figcaption>'):out.index('</figcaption>')]
     assert '*' not in cap.replace('<b>02:13</b>', '')
+
+
+def _note(label):
+    return f'<p class="term-note">* <strong>{label}</strong> — 설명</p>'
+
+
+def test_notes_piled_at_end_move_to_marked_paragraph():
+    """'초지능 협약' 사례: 대담 섹션 용어의 각주가 마지막 섹션 뒤에 몰려 있으면 옮긴다."""
+    import term_marks
+    md = ('## 3. 핵심 내용\n\n### 대담 [06:45]\n\n안전은 OpenShell\\*로 격려하고 BlueField\\* 칩이 감시한다.\n\n'
+          '머스크는 에너지를 강조했다.\n\n### 전망 [09:46]\n\n담론 경쟁은 줄어든다.\n\n'
+          f'<div class="term-notes">\n{_note("OpenShell")}\n{_note("BlueField")}\n</div>\n')
+    out, st = term_marks.fix(md)
+    assert st["relocated"] == 2
+    talk, outlook = out.split("### 전망")
+    assert "OpenShell</strong>" in talk and "BlueField</strong>" in talk
+    assert "term-notes" not in outlook
+    assert talk.index("term-notes") < talk.index("머스크는")          # 그 단락 바로 뒤
+    assert term_marks.fix(out)[0] == out                              # 두 번 돌려도 같다
+
+
+def test_note_stays_when_term_appears_in_its_section():
+    """각주가 놓인 소제목(제목 포함)에 용어가 나오면 표식이 뒤에 있어도 옮기지 않는다('행동주의')."""
+    import term_marks
+    md = ('## 3. 핵심 내용\n\n### 행동주의 시절 [02:03]\n\nTCI는 이사회에 서한을 보냈다.\n\n'
+          f'<div class="term-notes">\n{_note("행동주의")}\n</div>\n\n'
+          '### 투자 기준 [10:17]\n\n행동주의\\*보다 해자가 중요하다.\n')
+    out, st = term_marks.fix(md)
+    assert st["relocated"] == 0 and out == md
+
+
+def test_moved_note_joins_existing_block_after_paragraph():
+    import term_marks
+    md = ('## 3. 핵심 내용\n\n### A\n\nHBM4\\*와 CoWoS\\*가 병목이다.\n\n'
+          f'<div class="term-notes">\n{_note("HBM4")}\n</div>\n\n### B\n\n결론이다.\n\n'
+          f'<div class="term-notes">\n{_note("CoWoS")}\n</div>\n')
+    out, st = term_marks.fix(md)
+    assert st["relocated"] == 1
+    a, b = out.split("### B")
+    assert a.count("term-notes") == 1 and "CoWoS</strong>" in a and "term-note" not in b

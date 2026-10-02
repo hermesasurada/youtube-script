@@ -9,6 +9,7 @@
   - 표식이 없는 각주는 그 용어가 본문에 처음 나온 곳 뒤에 표식을 붙인다(괄호 병기·볼드
     닫힘 뒤). 용어가 본문에 없으면(다른 표기) 각주만 둔다.
   - 이스케이프 없이 용어 뒤에 붙은 단독 `*`는 표식으로 보고 `\\*`로 바꾼다.
+  - 용어와 다른 소제목 아래 놓인 각주는 용어가 처음 표식된 단락 바로 뒤로 옮긴다.
 """
 from __future__ import annotations
 
@@ -131,7 +132,7 @@ def fix(md: str) -> tuple[str, dict]:
     뒤에 두므로). 단위 안에서 글자로 맞는 것부터, 남은 표식·각주 수가 같으면 순서대로
     짝짓는다(본문은 한글 '리소그래피', 각주는 영문 'lithography'인 경우).
     """
-    stats = {"removed": 0, "added": 0, "escaped": 0, "unplaced": 0}
+    stats = {"removed": 0, "added": 0, "escaped": 0, "unplaced": 0, "relocated": 0}
     if not md or "## 3." not in md:
         return md, stats
     head, core = md.split("## 3.", 1)
@@ -270,7 +271,123 @@ def fix(md: str) -> tuple[str, dict]:
             break
         if not placed:
             stats["unplaced"] += 1
+    lines, stats["relocated"] = _relocate_notes(lines)
     return head + "## 3." + "\n".join(lines), stats
+
+
+_NOTE_P_RE = re.compile(r'<p class="term-note">.*?</p>', re.S)
+
+
+def _relocate_notes(lines: list[str]) -> tuple[list[str], int]:
+    """다른 소제목 아래로 간 각주를 용어가 처음 표식된 단락 바로 뒤로 옮긴다(2026-10-02).
+
+    모델이 각주를 글 끝에 몰아 두는 요약이 있다('초지능 협약': 대담 섹션의 OpenShell·
+    BlueField 각주가 마지막 '전망' 섹션 뒤에 붙음). 같은 소제목 안에 있는 각주는 그대로 둔다.
+    표식을 찾지 못한 각주도 그대로 둔다.
+    """
+    section = []                                     # 줄마다 속한 ### 소제목 줄 번호
+    cur = -1
+    for i, l in enumerate(lines):
+        if l.strip().startswith("#"):
+            cur = i
+        section.append(cur)
+    blocks = []                                      # (시작, 끝, [각주 행])
+    i = 0
+    while i < len(lines):
+        if lines[i].strip().startswith("<div") and "term-notes" in lines[i]:
+            j = i
+            while j < len(lines) and "</div>" not in lines[j]:
+                j += 1
+            blocks.append((i, j, _NOTE_P_RE.findall("\n".join(lines[i:j + 1]))))
+            i = j + 1
+            continue
+        i += 1
+    if not blocks:
+        return lines, 0
+
+    def para_end(li: int) -> int:
+        while li + 1 < len(lines) and lines[li + 1].strip() and _body_line(lines[li + 1]):
+            li += 1
+        return li
+
+    def first_mark(keys: list[str]) -> int:
+        for li, l in enumerate(lines):
+            if not _body_line(l):
+                continue
+            for col in _star_positions(l):
+                if _matches(l[:col], keys, l[col + len(_MARK):]):
+                    return li
+        return -1
+
+    def section_lines(start: int) -> list[int]:
+        """각주 묶음이 속한 소제목의 제목 줄과 본문 줄(각주 행 제외)."""
+        head = section[start]
+        out = [head] if head >= 0 else []
+        for k in range(head + 1, len(lines)):
+            if section[k] != head:
+                break
+            if _body_line(lines[k]):
+                out.append(k)
+        return out
+
+    moves = {}                                       # (블록, 행 순번) → 넣을 단락 끝 줄
+    for bi, (start, _end, notes) in enumerate(blocks):
+        own = section_lines(start)
+        for ni, note in enumerate(notes):
+            m = NOTE_RE.search(note)
+            if not m:
+                continue
+            keys = _keys(m.group(1))
+            target = first_mark(keys)
+            # 각주가 놓인 소제목(제목 포함)에 용어가 한 번이라도 나오면 그 자리를 존중한다
+            # — 소제목 주제가 그 용어인데 표식만 뒤쪽 단락에 붙은 경우('행동주의' 사례).
+            if target < 0 or section[target] == section[start] or any(_locate(lines[k], keys) >= 0 for k in own):
+                continue
+            moves[(bi, ni)] = para_end(target)
+    if not moves:
+        return lines, 0
+
+    def following_block(pend: int) -> int:
+        """단락 바로 뒤(빈 줄만 건너) 각주 묶음이 있으면 그 블록 번호."""
+        k = pend + 1
+        while k < len(lines) and not lines[k].strip():
+            k += 1
+        return next((bi for bi, b in enumerate(blocks) if b[0] == k), -1)
+
+    keep = {bi: [n for ni, n in enumerate(b[2]) if (bi, ni) not in moves] for bi, b in enumerate(blocks)}
+    extra = {bi: [] for bi in range(len(blocks))}
+    new_after: dict[int, list[str]] = {}
+    for (bi, ni), pend in sorted(moves.items(), key=lambda x: (x[1], x[0])):
+        note = blocks[bi][2][ni]
+        fb = following_block(pend)
+        if fb >= 0:
+            extra[fb].append(note)
+        else:
+            new_after.setdefault(pend, []).append(note)
+    touched = {bi for bi, _ in moves} | {bi for bi, v in extra.items() if v}
+    starts = {b[0]: bi for bi, b in enumerate(blocks)}
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if i in starts:
+            bi = starts[i]
+            start, end, _ = blocks[bi]
+            if bi not in touched:
+                out.extend(lines[start:end + 1])
+            else:
+                notes = keep[bi] + extra[bi]
+                if notes:
+                    out.extend(['<div class="term-notes">', *notes, "</div>"])
+                elif out and not out[-1].strip() and end + 1 < len(lines) and not lines[end + 1].strip():
+                    i = end + 2                      # 빈 블록과 그 뒤 빈 줄을 함께 뺀다
+                    continue
+            i = end + 1
+            continue
+        out.append(lines[i])
+        if i in new_after:
+            out.extend(["", '<div class="term-notes">', *new_after[i], "</div>"])
+        i += 1
+    return out, len(moves)
 
 
 def _main() -> int:
@@ -284,14 +401,14 @@ def _main() -> int:
     ap.add_argument("--backup-dir")
     args = ap.parse_args()
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "res", "summary")
-    total = {"files": 0, "changed": 0, "removed": 0, "added": 0, "escaped": 0, "unplaced": 0}
+    total = {"files": 0, "changed": 0, "removed": 0, "added": 0, "escaped": 0, "unplaced": 0, "relocated": 0}
     changed = []
     for path in sorted(glob.glob(os.path.join(root, "*", "*.md"))):
         with open(path, encoding="utf-8") as f:
             md = f.read()
         new, st = fix(md)
         total["files"] += 1
-        for k in ("removed", "added", "escaped", "unplaced"):
+        for k in ("removed", "added", "escaped", "unplaced", "relocated"):
             total[k] += st[k]
         if new != md:
             total["changed"] += 1
