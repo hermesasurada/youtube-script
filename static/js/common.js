@@ -1536,5 +1536,22 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
   else document.addEventListener("DOMContentLoaded", _setupKeyframeUI);
   _setupTermNoteUI();                       // 각주 ✕(제외) 버튼 — 위임 리스너라 시점 무관
 
+  // 캡처 이미지 재시도: 원격(Tailscale) 접속에서 여러 장을 한꺼번에 받다가 일부 요청이 서버에
+  // 닿지도 못하고 실패하면 브라우저는 깨진 그림으로 두고 다시 받지 않는다(2026-10-02 '스타십'
+  // 요약: 휴대폰에서 두 번째 캡처 묶음 3장만 요청 기록 없이 깨짐). 실패하면 조금 쉬었다가 3번까지
+  // 다시 받는다. error는 버블링되지 않아 캡처 단계 위임으로 받는다.
+  document.addEventListener("error", (e) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || !/\/sframe\//.test(img.src)) return;
+    const n = Number(img.dataset.retry || 0);
+    if (n >= 3) return;
+    img.dataset.retry = String(n + 1);
+    setTimeout(() => {
+      const u = new URL(img.src, location.href);
+      u.searchParams.set("r", String(n + 1));
+      img.src = u.toString();
+    }, 800 * (n + 1));
+  }, true);
+
   global.YS.setupKeyframeUI = _setupKeyframeUI;
 })(window);
