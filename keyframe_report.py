@@ -35,6 +35,7 @@ MAX_VISUAL_TARGETS = int(os.environ.get("MAX_VISUAL_TARGETS", "12"))
 TARGET_WINDOW   = float(os.environ.get("TARGET_WINDOW", "3"))       # 전사 시각단서 전후 탐색(초)
 TARGET_INTERVAL = float(os.environ.get("TARGET_INTERVAL", "2"))     # 탐색 구간 프레임 간격(초)
 MAX_FRAMES_PER_SECTION = int(os.environ.get("MAX_FRAMES_PER_SECTION", "3"))
+SCENE_SETTLE    = os.environ.get("SCENE_SETTLE", "1") != "0"  # 장면 시작 대신 장면 끝(완성된 화면) 프레임
 VISION_MODEL    = os.environ.get("VISION_MODEL", "opus")   # 캡션 품질 우선(요약과 동일 티어)
 GPT_VISION_MODEL = os.environ.get("GPT_VISION_MODEL", os.environ.get("GPT_MODEL", "gpt-6-astra"))
 # Claude 비전 3회 실패 시 Grok 폴백(요약 폴백과 동일 기조). grok CLI는 이미지 옵션이 없지만
@@ -342,6 +343,49 @@ def _evenly_sample(items: list, count: int) -> list:
     return [items[int(i * step)] for i in range(count)]
 
 
+def _settle_scene_frames(video: str, outdir: str, scene_pairs: list[tuple[float, str]],
+                         dur: float) -> list[tuple[float, str]]:
+    """장면전환 프레임을 '그 장면이 끝나기 직전' 프레임으로 바꾼다(2026-10-02).
+
+    슬라이드형 영상은 새 장면이 제목만 띄운 채 시작하고 그림·표가 하나씩 채워진다(Leo Cui:
+    1300초 제목만 → 1346초 다음 장면 직전에 패널 완성). 장면 점수는 그 채워짐을 못 잡아
+    장면 시작 프레임만 쓰면 대부분 '제목만 있는 화면'이 캡처됐다. 다음 장면 0.7초 전을 쓴다.
+    장면이 2초 미만이면 원래 프레임을 둔다. 실패하면 원래 후보를 그대로 돌려준다.
+    """
+    known = sorted(t for t, _ in scene_pairs if t > 0)
+    ends = []
+    for t, path in scene_pairs:
+        nxt = next((x for x in known if x > t + 0.05), dur if dur > 0 else None)
+        ends.append(nxt - 0.7 if nxt is not None and nxt - t >= 2.0 else None)
+    windows = [e for e in ends if e is not None]
+    if not windows:
+        return scene_pairs
+    expr = "+".join(f"between(t,{e:.3f},{e + 0.12:.3f})" for e in windows)
+    try:
+        r = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
+                            "-vf", f"select='{expr}',showinfo,scale={FRAME_WIDTH}:-2",
+                            "-vsync", "vfr", "-q:v", "3", os.path.join(outdir, "scene_end_%04d.jpg")],
+                           capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        log(f"    [warn] 장면 끝 프레임 추출 {FFMPEG_TIMEOUT}s 타임아웃 — 장면 시작 프레임 사용")
+        return scene_pairs
+    pts = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", r.stderr or "")]
+    files = sorted(g for g in os.listdir(outdir) if g.startswith("scene_end_"))
+    got: dict[float, tuple[float, str]] = {}
+    for ts, f in zip(pts, files):
+        e = next((w for w in windows if w - 0.01 <= ts <= w + 0.13), None)
+        if e is not None and e not in got:             # 창마다 첫 프레임 하나
+            got[e] = (ts, os.path.join(outdir, f))
+    out, settled = [], 0
+    for (t, path), e in zip(scene_pairs, ends):
+        if e is not None and e in got:
+            out.append(got[e]); settled += 1
+        else:
+            out.append((t, path))
+    log(f"    장면 끝 프레임으로 교체 {settled}/{len(scene_pairs)}장")
+    return out
+
+
 def extract_candidates(video: str, outdir: str,
                        target_times: list[float] | None = None) -> list[tuple[float, str]]:
     """전사 목표+균등 간격+장면전환 후보를 합쳐 근접 중복 제거 후 캡한다.
@@ -419,8 +463,10 @@ def extract_candidates(video: str, outdir: str,
     sc = sorted(g for g in os.listdir(outdir) if g.startswith("scene_"))
     if len(times) < len(sc):   # 타임스탬프 누락 → 해당 프레임은 0.0(시작)으로 잘못 배치될 수 있음
         log(f"    [warn] 장면 pts_time {len(times)}개 < 프레임 {len(sc)}장 — 일부 시각 미상(0.0)")
-    for i, f in enumerate(sc):
-        pairs.append((times[i] if i < len(times) else 0.0, os.path.join(outdir, f)))
+    scene_pairs = [(times[i] if i < len(times) else 0.0, os.path.join(outdir, f)) for i, f in enumerate(sc)]
+    if SCENE_SETTLE:
+        scene_pairs = _settle_scene_frames(video, outdir, scene_pairs, dur)
+    pairs.extend(scene_pairs)
     log(f"    장면전환 {len(sc)}장 → 후보 합계 {len(pairs)}장")
 
     # 4) 시간순 정렬 → 근접 중복 제거 → 캡
