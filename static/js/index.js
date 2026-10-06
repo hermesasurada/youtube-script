@@ -2266,6 +2266,7 @@ function _attachSectionEditors(rootEl) {
       YS.applyTitleTranslation(body, _titleKo);
       YS.stripSummaryPopupChrome(body);
       YS.setupStickySummarySections(body);
+      YS.decoratePeople(body);                 // 인명 클릭 소개(토스트)
       YS.attachSummaryNotes(body, _summaryItemId);
       _attachSectionEditors(body);
       body.scrollTop = top;
@@ -2472,6 +2473,7 @@ async function openSummaryModal(itemId, title) {
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
     YS.setupStickySummarySections(bodyEl);                 // 소제목은 해당 h3 섹션 안에서만 고정
+    YS.decoratePeople(bodyEl);                 // 인명 클릭 소개(토스트)
     YS.attachSummaryNotes(bodyEl, itemId);
     _attachSectionEditors(bodyEl);
     bodyEl.scrollTop = 0;
@@ -2524,6 +2526,7 @@ function _setImmersive(on) {
     : '<p class="imm-empty">캡처 이미지가 없습니다.</p>';
   txt.innerHTML = tmp.innerHTML;
   YS.setupStickySummarySections(txt);                      // 몰입형 본문도 같은 섹션 경계 적용
+  YS.decoratePeople(txt);                 // 인명 클릭 소개(토스트)
   YS.attachSummaryNotes(txt, _summaryItemId);
   _attachSectionEditors(txt);
   gal.scrollTop = txt.scrollTop = 0;   // 몰입형 진입 시 항상 맨 위에서 시작

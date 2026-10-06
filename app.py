@@ -60,6 +60,7 @@ import document_io
 import humanize_korean
 import notation
 import term_marks
+import name_fix
 import keyframe_report
 import llm_gateway
 import original_video
@@ -2505,6 +2506,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
                 _reindex_summary(save_path)
             except Exception as e:
                 return "", "저장 실패: " + str(e)
+            name_fix.schedule(save_path, on_change=_reindex_summary)   # 인명 원문 표기·소개(뒤에서)
         return full, ""
 
     for attempt in attempts:
@@ -2804,6 +2806,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
             yield f"event: error\ndata: {json.dumps('저장 실패: ' + str(e))}\n\n"
             return
         _reindex_summary(save_path)
+        name_fix.schedule(save_path, on_change=_reindex_summary)
     yield "event: done\ndata: \n\n"
 
 
@@ -3600,6 +3603,7 @@ def summary_content():
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         original = _original_video_for_item(item)
         return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
+                      "people": name_fix.people_for(abs_path),     # 인명 클릭 소개(토스트)
                       "blog": _blog_state(item),
                       "distill": db.get_item_distill(abs_path),
                       "title_ko": db.get_title_ko(abs_path),

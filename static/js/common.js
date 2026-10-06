@@ -917,7 +917,89 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(_historyRef(ref, 'path')),
     });
-    return r.json();
+    const d = await r.json();
+    _people = Array.isArray(d && d.people) ? d.people : [];   // 인명 소개 토스트용(decoratePeople)
+    return d;
+  }
+
+  /* ── 인명 소개 토스트(2026-10-06) ─────────────────────────────────────
+     서버(name_fix)가 확인한 인물의 이 요약 속 표기(forms)를 찾아 소제목마다 첫 등장만 점선
+     밑줄로 표시하고, 누르면 한두 문장 소개를 띄운다. 소개는 서버 캐시(person_names.db)에서 온다. */
+  let _people = [];
+  const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title';
+  function decoratePeople(root, people) {
+    const list = (people || _people || []).filter(p => p && p.bio && (p.forms || []).length);
+    if (!root || !list.length) return;
+    const forms = [];
+    list.forEach((p, i) => (p.forms || []).forEach(f => { if (f && f.length >= 2) forms.push({ f, i }); }));
+    forms.sort((a, b) => b.f.length - a.f.length);
+    const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(' + forms.map(x => esc(x.f)).join('|') + ')', 'g');
+    const byForm = new Map(forms.map(x => [x.f, x.i]));
+    let seen = new Set();
+    const walk = (node) => {
+      if (node.nodeType === 1) {
+        if (/^H[23]$/.test(node.tagName)) seen = new Set();      // 소제목마다 첫 등장만
+        if (node.matches && node.matches(_PERSON_SKIP)) return;
+        Array.from(node.childNodes).forEach(walk);
+        return;
+      }
+      if (node.nodeType !== 3 || !node.nodeValue) return;
+      const text = node.nodeValue;
+      re.lastIndex = 0;
+      let m, last = 0, frag = null;
+      while ((m = re.exec(text))) {
+        const prev = text[m.index - 1] || ' ', next = text[m.index + m[0].length] || ' ';
+        if (/[가-힣A-Za-z]/.test(prev) || /[A-Za-z]/.test(next)) continue;   // 낱말 안은 건너뜀
+        const i = byForm.get(m[0]);
+        if (seen.has(i)) continue;
+        seen.add(i);
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const span = document.createElement('span');
+        span.className = 'person-name';
+        span.dataset.person = String(i);
+        span.textContent = m[0];
+        frag.appendChild(span);
+        last = m.index + m[0].length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    };
+    walk(root);
+    root._people = list;
+    if (!root._personClick) {
+      root._personClick = true;
+      root.addEventListener('click', (e) => {
+        const el = e.target.closest && e.target.closest('.person-name');
+        if (!el || !root.contains(el)) return;
+        e.preventDefault(); e.stopPropagation();
+        _showPersonToast((root._people || [])[Number(el.dataset.person)], el);
+      });
+    }
+  }
+  function _showPersonToast(p, anchor) {
+    if (!p) return;
+    let t = document.getElementById('ys-person-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'ys-person-toast';
+      t.setAttribute('role', 'status');
+      document.body.appendChild(t);
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#ys-person-toast') && !e.target.closest('.person-name')) t.classList.remove('show');
+      }, true);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') t.classList.remove('show'); });
+    }
+    const name = p.english ? `${escapeHtml(p.english)}${p.korean ? ` <span class="pt-ko">${escapeHtml(p.korean)}</span>` : ''}`
+                           : escapeHtml(p.korean || '');
+    const src = (p.source && /^https?:\/\//.test(p.source)) ? `<a class="pt-src" href="${attrEscape(p.source)}" target="_blank" rel="noopener">출처</a>` : '';
+    t.innerHTML = `<div class="pt-name">${name}</div><div class="pt-bio">${escapeHtml(p.bio || '')}</div>${src}`;
+    t.classList.add('show');
+    clearTimeout(t._hide);
+    t._hide = setTimeout(() => t.classList.remove('show'), 12000);
   }
 
   /* ── 구글 블로거 포스팅용 변환 ────────────────────────────────────────
@@ -1293,6 +1375,7 @@
     apiBookmark,
     apiDeleteItem,
     apiSummaryContent,
+    decoratePeople,
     apiRefreshMeta,
     apiPublishBlog,
     ensureReaderAssets,
@@ -1367,6 +1450,14 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-lb-cap:empty{display:none;}
 .ys-lb-cap b{color:#9db4ff;font-family:ui-monospace,monospace;margin-right:.4rem;}
 .kf-ico{display:none;}  /* 좌측 강조 바가 마커 역할 — 글리프 중복 제거 */
+/* 인명 소개 토스트 */
+.person-name{cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--muted,#999);text-underline-offset:3px;}
+.person-name:hover{text-decoration-style:solid;}
+#ys-person-toast{position:fixed;left:50%;bottom:1.4rem;transform:translate(-50%,1rem);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:10050;max-width:min(560px,calc(100vw - 32px));background:var(--surface,#fff);color:var(--text,#222);border:1px solid var(--border,#ddd);box-shadow:0 8px 28px rgba(0,0,0,.18);border-radius:10px;padding:.8rem 1rem;font-size:14px;line-height:1.55;}
+#ys-person-toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
+#ys-person-toast .pt-name{font-weight:700;margin-bottom:.25rem;}
+#ys-person-toast .pt-ko{font-weight:400;color:var(--muted,#888);margin-left:.35rem;font-size:.92em;}
+#ys-person-toast .pt-src{display:inline-block;margin-top:.35rem;font-size:12px;color:var(--muted,#888);}
 /* 소제목 우측 시각 pill은 표시하지 않는다(2026-09-03 사용자 지시). 요소는 남긴다 —
    목차(_tocLabel)와 시각 이동이 이 값을 읽는다. */
 .kf-time{display:none;margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}

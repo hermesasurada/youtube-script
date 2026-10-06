@@ -841,7 +841,8 @@ def _commit_keyframes(summary_md_path: str, frames_out_dir: str, headings: list[
         os.replace(staging, frames_out_dir)
         staging = ""
         installed = True
-        _augment_summary_md(summary_md_path, headings, kept, url_base)
+        with document_io.summary_lock(summary_md_path):     # 인명 교정과 동시 쓰기 방지
+            _augment_summary_md(summary_md_path, headings, kept, url_base)
     except Exception:
         if installed and os.path.isdir(frames_out_dir):
             shutil.rmtree(frames_out_dir)

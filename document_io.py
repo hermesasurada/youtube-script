@@ -96,3 +96,19 @@ def atomic_write_text(path: str, text: str) -> None:
         except OSError:
             pass
         raise
+
+
+@__import__("contextlib").contextmanager
+def summary_lock(path: str):
+    """요약 파일 읽기-수정-쓰기 직렬화(캡처 주입·인명 교정이 서로 덮어쓰지 않게, 2026-10-06)."""
+    import fcntl
+    import hashlib
+    import tempfile
+    key = hashlib.sha1(os.path.abspath(path).encode()).hexdigest()[:16]
+    lock_path = os.path.join(tempfile.gettempdir(), f"yt-summary-{key}.lock")
+    with open(lock_path, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
