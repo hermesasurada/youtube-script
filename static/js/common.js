@@ -922,24 +922,29 @@
     return d;
   }
 
-  /* ── 인명 소개 토스트(2026-10-06) ─────────────────────────────────────
-     서버(name_fix)가 확인한 인물의 이 요약 속 표기(forms)를 찾아 소제목마다 첫 등장만 점선
-     밑줄로 표시하고, 누르면 한두 문장 소개를 띄운다. 소개는 서버 캐시(person_names.db)에서 온다. */
+  /* ── 인명 소개(2026-10-06) ─────────────────────────────────────────
+     서버(name_fix)가 확인한 인물의 이 요약 속 표기(forms)를 찾아 **글 전체에서 첫 등장 한 번만**
+     점선 밑줄로 표시하고, 누르면 그 낱말 바로 곁에 어두운 소개 창을 띄운다. 창의 '제외'는 그 인물을
+     yt·td 인명 소개에서 모두 뺀다(각주 제외와 같은 방식, 되돌리기 가능). 소개는 서버 캐시에서 온다. */
   let _people = [];
   const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title';
   function decoratePeople(root, people) {
-    const list = (people || _people || []).filter(p => p && p.bio && (p.forms || []).length);
-    if (!root || !list.length) return;
+    if (!root) return;
+    const list = (people || _people || []).filter(p => p && p.bio && (p.forms || []).length);   // 렌더 직후엔 방금 받은 목록
+    root._people = list;
+    const live = list.map((p, i) => ({ p, i })).filter(x => !x.p.excluded);
+    if (!live.length) return;
     const forms = [];
-    list.forEach((p, i) => (p.forms || []).forEach(f => { if (f && f.length >= 2) forms.push({ f, i }); }));
+    live.forEach(({ p, i }) => (p.forms || []).forEach(f => { if (f && f.length >= 2) forms.push({ f, i }); }));
+    if (!forms.length) return;
     forms.sort((a, b) => b.f.length - a.f.length);
     const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp('(' + forms.map(x => esc(x.f)).join('|') + ')', 'g');
     const byForm = new Map(forms.map(x => [x.f, x.i]));
-    let seen = new Set();
+    const seen = new Set(root.querySelectorAll('.person-name').length
+      ? [...root.querySelectorAll('.person-name')].map(e => Number(e.dataset.person)) : []);
     const walk = (node) => {
       if (node.nodeType === 1) {
-        if (/^H[23]$/.test(node.tagName)) seen = new Set();      // 소제목마다 첫 등장만
         if (node.matches && node.matches(_PERSON_SKIP)) return;
         Array.from(node.childNodes).forEach(walk);
         return;
@@ -952,13 +957,14 @@
         const prev = text[m.index - 1] || ' ', next = text[m.index + m[0].length] || ' ';
         if (/[가-힣A-Za-z]/.test(prev) || /[A-Za-z]/.test(next)) continue;   // 낱말 안은 건너뜀
         const i = byForm.get(m[0]);
-        if (seen.has(i)) continue;
+        if (seen.has(i)) continue;                                          // 한 글에서 한 번만
         seen.add(i);
         frag = frag || document.createDocumentFragment();
         frag.appendChild(document.createTextNode(text.slice(last, m.index)));
         const span = document.createElement('span');
         span.className = 'person-name';
         span.dataset.person = String(i);
+        span.dataset.pid = String(list[i].id);
         span.textContent = m[0];
         frag.appendChild(span);
         last = m.index + m[0].length;
@@ -969,37 +975,83 @@
       }
     };
     walk(root);
-    root._people = list;
+    _peopleRoots.add(root);
     if (!root._personClick) {
       root._personClick = true;
       root.addEventListener('click', (e) => {
         const el = e.target.closest && e.target.closest('.person-name');
         if (!el || !root.contains(el)) return;
         e.preventDefault(); e.stopPropagation();
-        _showPersonToast((root._people || [])[Number(el.dataset.person)], el);
+        _showPersonToast(root, Number(el.dataset.person), el);
       });
     }
   }
-  function _showPersonToast(p, anchor) {
+  const _peopleRoots = new Set();          // 같은 요약을 그린 화면들(일반·몰입형) — 제외는 모두에 반영
+  function _unwrapPerson(pid) {
+    document.querySelectorAll(`.person-name[data-pid="${pid}"]`).forEach(el => {
+      const parent = el.parentNode;
+      el.replaceWith(document.createTextNode(el.textContent));
+      parent.normalize();
+    });
+  }
+  async function _setPersonExcluded(p, excluded) {
+    try {
+      const r = await fetch('/people/excluded', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ person_id: p.id, excluded }),
+      });
+      return (await r.json()).ok;
+    } catch (e) { return false; }
+  }
+  function _placePop(t, anchor) {
+    const r = anchor.getBoundingClientRect(), m = 12;
+    t.style.left = '0px'; t.style.top = '0px';
+    const w = t.offsetWidth, h = t.offsetHeight;
+    let left = Math.min(Math.max(m, r.left + r.width / 2 - w / 2), window.innerWidth - w - m);
+    const below = r.bottom + 8 + h <= window.innerHeight - m;
+    const top = below ? r.bottom + 8 : Math.max(m, r.top - 8 - h);
+    t.style.left = left + 'px'; t.style.top = top + 'px';
+    t.classList.toggle('above', !below);
+    t.style.setProperty('--arrow-x', Math.min(Math.max(14, r.left + r.width / 2 - left), w - 14) + 'px');
+  }
+  function _showPersonToast(root, i, anchor) {
+    const p = (root._people || [])[i];
     if (!p) return;
     let t = document.getElementById('ys-person-toast');
     if (!t) {
       t = document.createElement('div');
       t.id = 'ys-person-toast';
-      t.setAttribute('role', 'status');
+      t.setAttribute('role', 'dialog');
       document.body.appendChild(t);
+      const hide = () => t.classList.remove('show');
       document.addEventListener('click', (e) => {
-        if (!e.target.closest('#ys-person-toast') && !e.target.closest('.person-name')) t.classList.remove('show');
+        if (!e.target.closest('#ys-person-toast') && !e.target.closest('.person-name')) hide();
       }, true);
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') t.classList.remove('show'); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+      document.addEventListener('scroll', (e) => { if (!t.contains(e.target)) hide(); }, true);
+      window.addEventListener('resize', hide);
     }
     const name = p.english ? `${escapeHtml(p.english)}${p.korean ? ` <span class="pt-ko">${escapeHtml(p.korean)}</span>` : ''}`
                            : escapeHtml(p.korean || '');
     const src = (p.source && /^https?:\/\//.test(p.source)) ? `<a class="pt-src" href="${attrEscape(p.source)}" target="_blank" rel="noopener">출처</a>` : '';
-    t.innerHTML = `<div class="pt-name">${name}</div><div class="pt-bio">${escapeHtml(p.bio || '')}</div>${src}`;
+    t.innerHTML = `<div class="pt-name">${name}</div><div class="pt-bio">${escapeHtml(p.bio || '')}</div>`
+      + `<div class="pt-foot">${src}<button type="button" class="pt-ex" title="이 인물을 인명 소개에서 뺍니다(yt·td 공통)">✕ 인명 소개 제외</button></div>`;
+    t.querySelector('.pt-ex').onclick = async (e) => {
+      e.stopPropagation();
+      if (!(await _setPersonExcluded(p, true))) return;
+      p.excluded = true;
+      _unwrapPerson(p.id);
+      t.querySelector('.pt-foot').innerHTML = `<span class="pt-done">제외했습니다</span><button type="button" class="pt-undo">되돌리기</button>`;
+      t.querySelector('.pt-undo').onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!(await _setPersonExcluded(p, false))) return;
+        p.excluded = false;
+        _peopleRoots.forEach(r => { if (r.isConnected && r._people) decoratePeople(r, r._people); });
+        t.classList.remove('show');
+      };
+    };
     t.classList.add('show');
-    clearTimeout(t._hide);
-    t._hide = setTimeout(() => t.classList.remove('show'), 12000);
+    _placePop(t, anchor);
   }
 
   /* ── 구글 블로거 포스팅용 변환 ────────────────────────────────────────
@@ -1450,14 +1502,21 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-lb-cap:empty{display:none;}
 .ys-lb-cap b{color:#9db4ff;font-family:ui-monospace,monospace;margin-right:.4rem;}
 .kf-ico{display:none;}  /* 좌측 강조 바가 마커 역할 — 글리프 중복 제거 */
-/* 인명 소개 토스트 */
+/* 인명 소개(어두운 소개 창, 누른 낱말 곁) */
 .person-name{cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--muted,#999);text-underline-offset:3px;}
 .person-name:hover{text-decoration-style:solid;}
-#ys-person-toast{position:fixed;left:50%;bottom:1.4rem;transform:translate(-50%,1rem);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:10050;max-width:min(560px,calc(100vw - 32px));background:var(--surface,#fff);color:var(--text,#222);border:1px solid var(--border,#ddd);box-shadow:0 8px 28px rgba(0,0,0,.18);border-radius:10px;padding:.8rem 1rem;font-size:14px;line-height:1.55;}
-#ys-person-toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
-#ys-person-toast .pt-name{font-weight:700;margin-bottom:.25rem;}
-#ys-person-toast .pt-ko{font-weight:400;color:var(--muted,#888);margin-left:.35rem;font-size:.92em;}
-#ys-person-toast .pt-src{display:inline-block;margin-top:.35rem;font-size:12px;color:var(--muted,#888);}
+#ys-person-toast{position:fixed;left:0;top:0;opacity:0;pointer-events:none;transform:translateY(4px);transition:opacity .14s,transform .14s;z-index:10050;width:max-content;max-width:min(380px,calc(100vw - 24px));background:#1f2329;color:#e8eaed;border:1px solid #343a42;box-shadow:0 10px 30px rgba(0,0,0,.35);border-radius:10px;padding:.7rem .85rem .6rem;font-size:13.5px;line-height:1.55;}
+#ys-person-toast.show{opacity:1;transform:none;pointer-events:auto;}
+#ys-person-toast::before{content:"";position:absolute;left:calc(var(--arrow-x,50%) - 6px);top:-6px;width:10px;height:10px;background:#1f2329;border-left:1px solid #343a42;border-top:1px solid #343a42;transform:rotate(45deg);}
+#ys-person-toast.above::before{top:auto;bottom:-6px;transform:rotate(225deg);}
+#ys-person-toast .pt-name{font-weight:700;margin-bottom:.2rem;color:#fff;}
+#ys-person-toast .pt-ko{font-weight:400;color:#9aa0a6;margin-left:.35rem;font-size:.92em;}
+#ys-person-toast .pt-bio{color:#d5d8dc;}
+#ys-person-toast .pt-foot{display:flex;align-items:center;gap:.6rem;margin-top:.45rem;font-size:12px;}
+#ys-person-toast .pt-src{color:#8ab4f8;text-decoration:none;}
+#ys-person-toast .pt-ex,#ys-person-toast .pt-undo{margin-left:auto;background:transparent;border:1px solid #444b55;color:#b8bec6;border-radius:6px;padding:.1rem .5rem;font-size:12px;cursor:pointer;}
+#ys-person-toast .pt-ex:hover,#ys-person-toast .pt-undo:hover{border-color:#6b7380;color:#fff;}
+#ys-person-toast .pt-done{color:#9aa0a6;}
 /* 소제목 우측 시각 pill은 표시하지 않는다(2026-09-03 사용자 지시). 요소는 남긴다 —
    목차(_tocLabel)와 시각 이동이 이 값을 읽는다. */
 .kf-time{display:none;margin-left:auto;flex-shrink:0;color:var(--muted,#999);font-weight:600;font-size:.7em;letter-spacing:.02em;font-family:ui-monospace,monospace;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);padding:.14em .55em;border-radius: 2px;}

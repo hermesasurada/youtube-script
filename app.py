@@ -1437,6 +1437,7 @@ _REMOTE_DATA_ALLOWED = {
     "/history/refresh-meta",  # 제목·썸네일 갱신 — 빠지면 원격 POST가 302로 튕겨 '갱신 실패'로 보인다(2026-09-03)
     "/history/publish-blog",  # 블로그스팟 발행(원격에서도 — 폰에서 읽고 바로 올린다)
     "/terms/excluded",        # 각주 제외 용어 — 요약 뷰어 ✕ 버튼(폰에서도 누른다)
+    "/people/excluded",       # 인명 소개에서 제외 — 소개 창의 제외 버튼(폰에서도 누른다)
 }
 _PHONE_UA  = re.compile(r"iPhone|iPod|Windows Phone", re.I)
 _TABLET_UA = re.compile(r"iPad|Tablet|PlayBook|Kindle|Silk", re.I)
@@ -2916,6 +2917,18 @@ def _inject_term_exclusions(prompt: str, terms: list[str]) -> str:
         return prompt.rstrip("\n") + "\n\n" + line.rstrip("\n")
     line_start = prompt.rfind("\n", 0, idx) + 1
     return prompt[:line_start] + line + prompt[line_start:]
+
+
+@app.route("/people/excluded", methods=["POST"])
+def people_excluded():
+    """인명 소개에서 빼기/되돌리기 {person_id, excluded}. yt·td 공용 캐시라 양쪽 모두에 적용된다."""
+    data = request.get_json(force=True) or {}
+    try:
+        pid = int(data.get("person_id"))
+    except (TypeError, ValueError):
+        return _json({"ok": False, "error": "person_id 필요"}, 400)
+    ok = bool(name_fix.name_resolver) and name_fix.name_resolver.set_excluded(pid, bool(data.get("excluded", True)))
+    return _json({"ok": ok})
 
 
 @app.route("/terms/excluded", methods=["GET", "POST", "DELETE"])
