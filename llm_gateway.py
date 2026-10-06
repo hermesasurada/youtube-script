@@ -242,6 +242,10 @@ def resolve_claude_bin() -> str:
     env = os.environ.get("CLAUDE_BIN")
     if env and os.path.exists(env):
         return env
+    # 2026-10-07 사용자 지시: 독립 설치판(~/.local/bin/claude, 자동 업데이트 켬)으로 통일 — PATH와 무관하게 먼저 찾는다.
+    native = os.path.expanduser("~/.local/bin/claude")
+    if os.path.exists(native):
+        return native
     found = shutil.which("claude")
     if found:
         return found
@@ -251,9 +255,6 @@ def resolve_claude_bin() -> str:
                   for path in glob.glob(os.path.join(base, pattern)) if os.path.exists(path)]
     if candidates:
         return max(candidates, key=os.path.getmtime)
-    native = os.path.expanduser("~/.local/bin/claude")   # 독립 설치판(launchd PATH엔 ~/.local/bin이 없다)
-    if os.path.exists(native):
-        return native
     return env or "claude"
 
 
