@@ -1505,7 +1505,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 /* 인명 소개(어두운 소개 창, 누른 낱말 곁) */
 .person-name{cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--muted,#999);text-underline-offset:3px;}
 .person-name:hover{text-decoration-style:solid;}
-#ys-person-toast{position:fixed;left:0;top:0;opacity:0;pointer-events:none;transform:translateY(4px);transition:opacity .14s,transform .14s;z-index:10050;width:max-content;max-width:min(300px,calc(100vw - 24px));background:#1f2329;color:#e8eaed;border:1px solid #343a42;box-shadow:0 10px 30px rgba(0,0,0,.35);border-radius:9px;padding:.6rem .75rem .5rem;font-size:11.5px;line-height:1.5;}
+#ys-person-toast{position:fixed;left:0;top:0;opacity:0;pointer-events:none;transform:translateY(4px);transition:opacity .14s,transform .14s;z-index:10050;width:max-content;max-width:min(260px,calc(100vw - 24px));word-break:keep-all;overflow-wrap:break-word;background:#1f2329;color:#e8eaed;border:1px solid #343a42;box-shadow:0 10px 30px rgba(0,0,0,.35);border-radius:9px;padding:.6rem .75rem .5rem;font-size:11.5px;line-height:1.5;}
 #ys-person-toast.show{opacity:1;transform:none;pointer-events:auto;}
 #ys-person-toast::before{content:"";position:absolute;left:calc(var(--arrow-x,50%) - 6px);top:-6px;width:10px;height:10px;background:#1f2329;border-left:1px solid #343a42;border-top:1px solid #343a42;transform:rotate(45deg);}
 #ys-person-toast.above::before{top:auto;bottom:-6px;transform:rotate(225deg);}
