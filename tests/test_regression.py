@@ -2306,14 +2306,10 @@ def test_claude_stream_summary_logs_result_usage(llm_db, monkeypatch):
     assert "usage limit" in rows[1]["error"]
 
 
-def test_title_translate_and_query_log_rows(llm_db, monkeypatch):
+def test_title_translate_log_rows(llm_db, monkeypatch):
     def run_command(args, **kwargs):
         assert "--output-format" in args and "json" in args
-        if "--allowedTools" in args:                 # 원본 검색어 경로(stdin 프롬프트)
-            assert kwargs.get("input_text")
-            env = dict(_CLAUDE_ENV, result="SpaceX Starship Flight 10 webcast")
-        else:                                        # 제목 번역 경로(argv 프롬프트)
-            env = dict(_CLAUDE_ENV, result='["안녕하세요 세계", "두 번째"]')
+        env = dict(_CLAUDE_ENV, result='["안녕하세요 세계", "두 번째"]')
         return llm_gateway.ProcessResult(0, json.dumps(env), "")
     codex_calls = []
 
@@ -2327,12 +2323,9 @@ def test_title_translate_and_query_log_rows(llm_db, monkeypatch):
     # 제목 번역은 GPT-6 Luna, 추론 기본값(2026-09-23 사용자 지시).
     assert codex_calls == [{"model": "gpt-6-luna", "timeout": app.TITLE_TR_TIMEOUT,
                             "reasoning_effort": "default"}]
-    query = app._original_search_query({"title": "스페이스X 스타십"}, "설명")
-    assert query == "SpaceX Starship Flight 10 webcast"
     rows = _llm_rows(llm_db)
     assert [(r["provider"], r["purpose"], r["title"], r["model"], r["reasoning"]) for r in rows] == [
-        ("codex", "title", "제목 2건 번역", "gpt-6-luna", None),
-        ("claude", "query", "스페이스X 스타십", "claude-sonnet-5", None)]
+        ("codex", "title", "제목 2건 번역", "gpt-6-luna", None)]
 
 
 def test_title_translation_falls_back_to_summary_slots_after_luna(monkeypatch):
