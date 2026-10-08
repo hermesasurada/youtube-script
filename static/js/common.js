@@ -1270,12 +1270,16 @@
      그리고, 여기서는 상태·저장만 맡는다.
      요약: 슬롯 1~5개(슬롯마다 구체 모델+추론 수준, 같은 계열 여러 번 가능), 라운드로빈.
      캡처는 따로 고르지 않는다 — 그 영상을 요약한 모델이 맡는다(서버 app._capture_order).
-     제목 번역: 모델+추론 한 칸(2026-09-29 사용자 지시). 실패한 묶음은 요약 슬롯 순번으로 넘어간다. */
+     제목 번역: 모델+추론 한 칸(2026-09-29 사용자 지시). 실패한 묶음은 요약 슬롯 순번으로 넘어간다.
+     인명 확인: 판별·검색(웹) 두 칸(2026-10-08 사용자 지시). Claude·GPT만, 빈 값 = 모듈 기본값. */
   const _mm = {
     slots: [], nextIndex: 0, limits: { min: 1, max: 5 },
     options: [], notes: [], status: '',
     efforts: [],
     titleModel: '', titleEffort: 'default',
+    // 인명 확인 — 빈 문자열 = 기본값(name_resolver.default_choice, 예: Haiku 5.5)
+    name: { detect: { model: '', effort: '' }, lookup: { model: '', effort: '' } },
+    nameOptions: [], nameDefault: { model: '', effort: 'default', label: 'Haiku 5.5' },
     root: null, onSaved: null,
   };
 
@@ -1289,12 +1293,20 @@
     if (d.model_notes) _mm.notes = d.model_notes;
     if (d.title_model) _mm.titleModel = d.title_model;
     if (d.title_effort) _mm.titleEffort = d.title_effort;
+    if (Array.isArray(d.name_model_options)) _mm.nameOptions = d.name_model_options;
+    if (d.name_model_default) _mm.nameDefault = d.name_model_default;
+    ['detect', 'lookup'].forEach(k => {   // 빈 값도 의미가 있다(기본값) — undefined만 건너뛴다
+      if (d['name_' + k + '_model'] !== undefined) _mm.name[k].model = d['name_' + k + '_model'] || '';
+      if (d['name_' + k + '_effort'] !== undefined) _mm.name[k].effort = d['name_' + k + '_effort'] || '';
+    });
   }
   /** 페이지 캐시에 되써 둘 필드만 추린다(모달을 다시 열 때 최신 상태로 그리게). */
   function mmFields(d) {
     const out = {};
     ['summary_slots', 'summary_next_index', 'slot_limits',
-     'model_options', 'reasoning_options', 'model_notes', 'title_model', 'title_effort']
+     'model_options', 'reasoning_options', 'model_notes', 'title_model', 'title_effort',
+     'name_model_options', 'name_model_default', 'name_detect_model', 'name_detect_effort',
+     'name_lookup_model', 'name_lookup_effort']
       .forEach(k => { if (d && d[k] !== undefined) out[k] = d[k]; });
     return out;
   }
@@ -1319,6 +1331,40 @@
       + `</section>`;
   }
 
+  /** 인명 확인 블록 — 판별·검색(웹) 두 행. 제목 번역 행과 같은 모양, 맨 위는 '기본값' 선택지. */
+  function mmNameBlock() {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const opt = (v, label, cur, dis) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(label)}</option>`;
+    const choices = _mm.nameOptions;
+    const row = (kind, label) => {
+      const cur = _mm.name[kind];
+      let models = opt('', `기본값 (${_mm.nameDefault.label || 'Haiku 5.5'})`, cur.model)
+        + choices.map(o => opt(o.value, o.label, cur.model, o.enabled === false)).join('');
+      if (cur.model && !choices.some(o => o.value === cur.model)) models += opt(cur.model, cur.model + ' (기존 설정·선택 불가)', cur.model, true);
+      let levels;
+      if (!cur.model) {
+        levels = opt('', '기본값', '');
+      } else {
+        const hit = choices.find(o => o.value === cur.model);
+        let list = hit && hit.reasoning ? _mm.efforts.filter(e => hit.reasoning.includes(e.value)) : _mm.efforts;
+        const eff = cur.effort || 'default';
+        if (!list.some(e => e.value === eff)) list = list.concat([{ value: eff, label: eff + ' (기존 설정)' }]);
+        levels = list.map(e => opt(e.value, e.label, eff)).join('');
+      }
+      // 공통 디자인의 '서비스 고유 행'(라벨 · 모델 · 추론) — 라벨이 짧아 첫 칸만 좁힌다(공용 CSS는 그대로)
+      return `<div class="msel-row is-lead" style="grid-template-columns:56px minmax(0,1fr) 104px">`
+        + `<span class="msel-tag">${label}</span>`
+        + `<select id="mmName_${kind}_model" aria-label="인명 ${label} 모델">${models}</select>`
+        + `<select id="mmName_${kind}_effort" aria-label="인명 ${label} 추론 수준"${cur.model ? '' : ' disabled'}>${levels}</select></div>`;
+    };
+    return `<section class="msel-block">`
+      + `<div class="msel-head"><strong>인명 확인</strong><span class="msel-tag">Claude·GPT</span></div>`
+      + row('detect', '판별') + row('lookup', '검색(웹)')
+      + `<p class="msel-hint">요약 속 인명을 찾는 모델(판별)과 처음 보는 인물의 원문 철자·소개를 웹에서 확인하는 모델(검색). 웹 검색 도구가 있는 Claude·GPT만 고를 수 있다.</p>`
+      + `</section>`;
+  }
+
   function mmRender() {
     const MS = global.ModelSelector;
     if (!_mm.root || !MS) return;
@@ -1326,7 +1372,7 @@
       slots: _mm.slots, nextIndex: _mm.nextIndex, limits: _mm.limits,
       versions: _mm.options, efforts: _mm.efforts,
       hint: '영상마다 시작 슬롯을 한 칸씩 넘기고, 실패하면 다음 슬롯이 받는다. 같은 모델을 여러 슬롯에 두면 그만큼 자주 먼저 쓰인다(실패 폴백에서는 같은 모델을 다시 부르지 않는다).',
-      status: _mm.status, notes: _mm.notes, extra: mmTitleBlock(),
+      status: _mm.status, notes: _mm.notes, extra: mmTitleBlock() + mmNameBlock(),
     }, {
       onSlotModel(i, value) {
         mmSave(() => { const option = _mm.options.find(o => o.value === value);
@@ -1375,11 +1421,27 @@
       }
     });
     if (tEffort) tEffort.onchange = () => mmSave(() => { _mm.titleEffort = tEffort.value; });
+    ['detect', 'lookup'].forEach(kind => {
+      const nModel = _mm.root.querySelector(`#mmName_${kind}_model`);
+      const nEffort = _mm.root.querySelector(`#mmName_${kind}_effort`);
+      if (nModel) nModel.onchange = () => mmSave(() => {
+        const cur = _mm.name[kind];
+        const hit = _mm.nameOptions.find(o => o.value === nModel.value);
+        if (!nModel.value) { _mm.name[kind] = { model: '', effort: '' }; return; }
+        let effort = cur.effort || 'default';
+        if (hit && hit.reasoning && !hit.reasoning.includes(effort)) {
+          effort = 'default';
+          _mm.status = '모델에 맞게 추론 수준을 기본값으로 변경했습니다';
+        }
+        _mm.name[kind] = { model: nModel.value, effort };
+      });
+      if (nEffort) nEffort.onchange = () => mmSave(() => { _mm.name[kind] = { ..._mm.name[kind], effort: nEffort.value }; });
+    });
   }
 
   /** 변경을 적용하고 바로 저장한다. 실패하면 적용 전 상태로 되돌린다. */
   async function mmSave(mutate) {
-    const snapshot = JSON.stringify([_mm.slots, _mm.titleModel, _mm.titleEffort]);
+    const snapshot = JSON.stringify([_mm.slots, _mm.titleModel, _mm.titleEffort, _mm.name]);
     _mm.status = '';
     mutate();
     const adjustment = _mm.status;
@@ -1387,6 +1449,10 @@
     mmRender();
     _mm.root.querySelectorAll('select, button').forEach(el => { el.disabled = true; });
     const body = { summary_slots: _mm.slots, title_model: _mm.titleModel, title_effort: _mm.titleEffort };
+    ['detect', 'lookup'].forEach(k => {
+      body['name_' + k + '_model'] = _mm.name[k].model;
+      body['name_' + k + '_effort'] = _mm.name[k].effort;
+    });
     try {
       const r = await fetch('/channels/model-orders', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -1397,7 +1463,7 @@
       _mm.status = adjustment || '저장됨';
       if (_mm.onSaved) _mm.onSaved(d);
     } catch (e) {
-      [_mm.slots, _mm.titleModel, _mm.titleEffort] = JSON.parse(snapshot);
+      [_mm.slots, _mm.titleModel, _mm.titleEffort, _mm.name] = JSON.parse(snapshot);
       _mm.status = '저장 실패';
       alert('모델 설정 저장 실패: ' + e.message);
     } finally {

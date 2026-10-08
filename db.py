@@ -24,6 +24,11 @@ SUMMARY_DIR = os.path.join(RES_DIR, "summary")
 DB_PATH     = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "index.db"))
 
 _lock = threading.RLock()
+
+# 인명 확인 모델(판별·검색) 저장 칸 — DB v25. 빈 문자열 = name_resolver 기본값.
+NAME_MODEL_KINDS = ("detect", "lookup")
+NAME_MODEL_COLUMNS = tuple(f"name_{k}_{f}" for k in NAME_MODEL_KINDS for f in ("model", "effort"))
+
 _HANGUL_RE = re.compile(r"[가-힣]")   # 제목에 한글이 있으면 번역 대상이 아니다
 _local = threading.local()
 
@@ -388,6 +393,14 @@ def init() -> None:
             if "title_effort" not in mcols:
                 c.execute("ALTER TABLE monitor_settings ADD COLUMN title_effort TEXT NOT NULL DEFAULT ''")
             c.execute("PRAGMA user_version = 24")
+        if ver < 25:
+            # v25: 인명 확인(판별·웹 검색) 모델을 설정 팝업에서 고른다(2026-10-08 사용자 지시).
+            # 빈 값 = name_resolver 기본(Haiku 5.5) — 동작을 바꾸지 않는다.
+            mcols = {r[1] for r in c.execute("PRAGMA table_info(monitor_settings)").fetchall()}
+            for col in NAME_MODEL_COLUMNS:
+                if col not in mcols:
+                    c.execute(f"ALTER TABLE monitor_settings ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            c.execute("PRAGMA user_version = 25")
 
 
 def get_summary_notes(md_path: str) -> dict:
@@ -958,6 +971,38 @@ def set_title_model(model: str, effort: str) -> dict:
                          "summary_slots, title_model, title_effort, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
                          (order, order, json.dumps([dict(x) for x in _DEFAULT_SLOTS]), model, effort, _now()))
     return get_title_model()
+
+
+def get_name_models() -> dict:
+    """저장된 인명 판별·검색 모델 {"detect": {"model", "effort"}, "lookup": {...}}(없으면 빈 값)."""
+    try:
+        row = _conn().execute(
+            f"SELECT {', '.join(NAME_MODEL_COLUMNS)} FROM monitor_settings WHERE id = 1").fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    return {k: {"model": (row[f"name_{k}_model"] if row else "") or "",
+                "effort": (row[f"name_{k}_effort"] if row else "") or ""}
+            for k in NAME_MODEL_KINDS}
+
+
+def set_name_model(kind: str, model: str, effort: str) -> dict:
+    """인명 판별(detect)·검색(lookup) 중 한 칸을 저장한다. 빈 모델 = 기본값(추론도 비운다)."""
+    if kind not in NAME_MODEL_KINDS:
+        raise ValueError(f"unknown name model kind: {kind}")
+    model = (model or "").strip()
+    effort = (effort or "").strip() if model else ""
+    mcol, ecol = f"name_{kind}_model", f"name_{kind}_effort"
+    with _lock:
+        conn = _conn()
+        if conn.execute("SELECT 1 FROM monitor_settings WHERE id = 1").fetchone():
+            conn.execute(f"UPDATE monitor_settings SET {mcol} = ?, {ecol} = ?, updated_at = ? "
+                         "WHERE id = 1", (model, effort, _now()))
+        else:
+            order = json.dumps(list(llm_gateway.MODEL_KEYS))
+            conn.execute("INSERT INTO monitor_settings (id, summary_models, capture_models, "
+                         f"summary_slots, {mcol}, {ecol}, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
+                         (order, order, json.dumps([dict(x) for x in _DEFAULT_SLOTS]), model, effort, _now()))
+    return get_name_models()
 
 
 def reserve_monitor_summary_slots() -> dict:

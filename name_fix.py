@@ -43,6 +43,26 @@ def _detect_text(md: str) -> str:
     return body.strip()
 
 
+def _saved_choices() -> tuple:
+    """설정 팝업 '인명 확인'에서 고른 (판별, 검색) 모델 — 매번 DB에서 읽어 재시작 없이 반영한다.
+
+    빈 값이면 None(모듈 기본 Haiku 5.5). 설정을 못 읽어도 인명 교정은 기본값으로 계속 돈다.
+    """
+    try:
+        import db
+        saved = db.get_name_models()
+        out = []
+        for kind in ("detect", "lookup"):
+            v = saved.get(kind) or {}
+            model = str(v.get("model") or "").strip()
+            out.append({"model": model, "effort": str(v.get("effort") or "default").strip() or "default"}
+                       if model else None)
+        return tuple(out)
+    except Exception as e:                          # noqa: BLE001 — 설정은 부가 정보
+        log.warning("name_fix 모델 설정 읽기 실패(기본값 사용): %s", e)
+        return None, None
+
+
 def _doc_date(summary_path: str) -> str:
     m = re.search(r"/(\d{4})(\d{2})(\d{2})/", summary_path)
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
@@ -74,10 +94,12 @@ def process(summary_path: str, *, dry_run: bool = False, on_change=None) -> dict
             if on_change:
                 on_change(summary_path)
 
+        detect_choice, lookup_choice = _saved_choices()
         res = name_resolver.process_docs(
             SERVICE, {doc_id(summary_path): {"text": _detect_text(md), "date": _doc_date(summary_path),
                                              "title": title}},
-            apply_fn=apply, dry_run=dry_run)
+            apply_fn=apply, dry_run=dry_run,
+            detect_choice=detect_choice, lookup_choice=lookup_choice)
         out = (res or {}).get(doc_id(summary_path), {})
         out["changed"] = changed["n"]
         if out.get("mapping") or out.get("people"):

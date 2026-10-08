@@ -2306,7 +2306,42 @@ def _monitor_model_payload() -> dict:
         "model_notes": _monitor_model_notes(),
         "title_model": _title_tr_setting()[0],
         "title_effort": _title_tr_setting()[1],
+        **_name_model_payload(),
     }
+
+
+# 인명 확인(name_fix → name_resolver) 판별·웹 검색 모델 — 설정 팝업 '인명 확인' 블록
+# (2026-10-08 사용자 지시). 웹 검색 도구가 있는 Claude·Codex CLI만 고를 수 있다.
+_NAME_FALLBACK_PROVIDERS = ("claude", "codex")
+
+
+def _name_providers() -> tuple:
+    return tuple(getattr(name_fix.name_resolver, "CHOICE_PROVIDERS", None) or _NAME_FALLBACK_PROVIDERS)
+
+
+def _name_default_choice() -> dict:
+    try:
+        d = dict(name_fix.name_resolver.default_choice())
+    except Exception:
+        d = {"model": "claude-haiku-5-5", "effort": "default"}
+    entry = llm_gateway.llm_catalog.resolve(d.get("model") or "") or {}
+    d["label"] = entry.get("label") or _model_label(d.get("model") or "")
+    return d
+
+
+def _name_model_payload() -> dict:
+    """저장값(빈 값 = 모듈 기본) + 선택지(Claude·Codex text 모델) + 기본값 표시."""
+    saved = db.get_name_models()
+    selected = [v["model"] for v in saved.values() if v["model"]]
+    options = []
+    for provider in _name_providers():
+        options.extend(dict(o) for o in llm_gateway.llm_catalog.options(provider, capability="text",
+                                                                        selected=selected))
+    out = {"name_model_options": options, "name_model_default": _name_default_choice()}
+    for kind, v in saved.items():
+        out[f"name_{kind}_model"] = v["model"]
+        out[f"name_{kind}_effort"] = v["effort"]
+    return out
 
 
 def _monitor_model_notes() -> list[dict[str, str]]:
@@ -3259,7 +3294,12 @@ def channel_model_orders():
         return _json({"error": "설정 형식이 잘못됐습니다."}, 400)
     slots = data.get("summary_slots")
     has_title = "title_model" in data or "title_effort" in data
-    if slots is None and not has_title:
+    name_updates = {}
+    for kind in db.NAME_MODEL_KINDS:
+        mk, ek = f"name_{kind}_model", f"name_{kind}_effort"
+        if mk in data or ek in data:
+            name_updates[kind] = (mk, ek)
+    if slots is None and not has_title and not name_updates:
         return _json({"error": "변경할 요약 슬롯이 없습니다."}, 400)
     if slots is not None and not llm_gateway.is_valid_summary_slots(slots, db.get_monitor_summary_slots()["slots"]):
         return _json({"error": f"요약 슬롯은 {llm_gateway.MIN_SUMMARY_SLOTS}~"
@@ -3274,7 +3314,26 @@ def channel_model_orders():
         if not unchanged and not (entry.get("provider") in ("claude", "codex", "grok")
                                   and llm_gateway.llm_catalog.valid(t_model, t_effort, selectable=True)):
             return _json({"error": "제목 번역 모델·추론 조합이 목록에 없습니다."}, 400)
+    name_values = {}
+    if name_updates:
+        saved_names = db.get_name_models()
+        for kind, (mk, ek) in name_updates.items():
+            cur = saved_names[kind]
+            n_model = str((data.get(mk) if mk in data else cur["model"]) or "").strip()
+            # 빈 모델 = 기본값(Haiku 5.5) — 추론도 비운다. 모델을 고르면 추론 기본은 'default'.
+            n_effort = str(data.get(ek) or "default").strip().lower() if n_model else ""
+            unchanged = (n_model, n_effort) == (cur["model"], cur["effort"])
+            entry = (llm_gateway.llm_catalog.resolve(n_model) or {}) if n_model else {}
+            # 웹 검색 도구가 있는 Claude·Codex CLI만 — Grok·로컬 모델은 목록에 있어도 받지 않는다.
+            if n_model and not unchanged and not (
+                    entry.get("provider") in _name_providers()
+                    and llm_gateway.llm_catalog.valid(n_model, n_effort, selectable=True)):
+                label = "판별" if kind == "detect" else "검색"
+                return _json({"error": f"인명 {label} 모델·추론 조합이 목록에 없습니다(Claude·GPT만)."}, 400)
+            name_values[kind] = (n_model, n_effort)
     try:
+        for kind, (n_model, n_effort) in name_values.items():
+            db.set_name_model(kind, n_model, n_effort)
         if has_title:
             db.set_title_model(t_model, t_effort)
         if slots is not None:
