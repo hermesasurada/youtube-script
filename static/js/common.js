@@ -1769,5 +1769,33 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
     }, 800 * (n + 1));
   }, true);
 
+  // 목록 카드 좌하단 #id(내부 DB item_id) — 클릭하면 숫자만 복사(2026-10-10 사용자 지시, sa·td·wm과 같은 기능).
+  // 카드 자체가 클릭으로 요약을 여므로 캡처 단계에서 받아 카드 클릭으로 번지지 않게 한다.
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest && e.target.closest(".hist-card-id");
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const txt = String(el.dataset.id || "");
+    const flash = () => {
+      el.textContent = "복사됨 ✓";
+      el.classList.add("copied");
+      clearTimeout(el._t);
+      el._t = setTimeout(() => { el.textContent = "#" + txt; el.classList.remove("copied"); }, 1000);
+    };
+    const legacy = () => {
+      const ta = document.createElement("textarea");
+      ta.value = txt;
+      ta.style.cssText = "position:fixed;opacity:0;top:0;left:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch (_) {}
+      ta.remove();
+      flash();
+    };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(txt).then(flash).catch(legacy);
+    else legacy();
+  }, true);
+
   global.YS.setupKeyframeUI = _setupKeyframeUI;
 })(window);

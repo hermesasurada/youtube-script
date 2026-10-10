@@ -1553,6 +1553,18 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   color: var(--muted);
   letter-spacing: .01em;
 }
+/* 좌하단 #id(내부 DB item_id) — 클릭하면 복사(2026-10-10, sa·td·wm과 같은 기능) */
+.hist-card-left { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
+.hist-card-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s;
+}
+.hist-card-id:hover { color: var(--highlight); }
+.hist-card-id.copied { color: var(--green, #16a34a); }
 .hist-card-actions {
   display: flex;
   gap: .3rem;

@@ -181,6 +181,9 @@
     }
     .hist-card-footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .15rem; }
     .hist-card-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+    .hist-card-left { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
+    .hist-card-id { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+    .hist-card-id.copied { color: var(--accent, #16a34a); }
     .hist-card-actions { display: flex; gap: .35rem; }
     .hist-icon-btn {
       width: 34px; height: 34px;
@@ -985,7 +988,7 @@ function renderCard(item) {
       <h3 class="hist-card-title">${unreadDot}${esc(item.title)}</h3>
       <div class="hist-card-meta">${uploader}</div>
       <div class="hist-card-footer">
-        <span class="hist-card-date">${fmtDate(histDisplayDate(item))}</span>
+        <span class="hist-card-left"><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span><span class="hist-card-date">${fmtDate(histDisplayDate(item))}</span></span>
         <div class="hist-card-actions">${readBtn}${bmBtn}${txtBtn}${ytBtn}${delBtn}</div>
       </div>
     </div>
