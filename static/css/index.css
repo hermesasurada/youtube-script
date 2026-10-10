@@ -1554,7 +1554,8 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   letter-spacing: .01em;
 }
 /* 좌하단 #id(내부 DB item_id) — 클릭하면 복사(2026-10-10, sa·td·wm과 같은 기능) */
-.hist-card-left { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
+/* 두 줄: 날짜 위, id 아래(2026-10-10 사용자 지시) */
+.hist-card-left { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; line-height: 1.25; }
 .hist-card-id {
   font-family: var(--font-mono);
   font-size: 11px;

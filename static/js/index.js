@@ -731,7 +731,7 @@ function _renderHistoryList() {
         <h3 class="hist-card-title" title="${titleAttr}">${unreadDot}${esc(item.title)}</h3>
         <div class="hist-card-meta">${uploaderHtml}</div>
         <div class="hist-card-footer">
-          <span class="hist-card-left"><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span><span class="hist-card-date" title="${_histSortKey === 'upload' ? '영상 게시일' : '전사 처리일'}">${fmtDate(histDisplayDate(item))}</span></span>
+          <span class="hist-card-left"><span class="hist-card-date" title="${_histSortKey === 'upload' ? '영상 게시일' : '전사 처리일'}">${fmtDate(histDisplayDate(item))}</span><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span></span>
           <div class="hist-card-actions">${readBtn}${sumBtn}${txtBtn}${ytBtn}${delBtn}</div>
         </div>
       </div>
