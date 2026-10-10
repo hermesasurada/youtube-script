@@ -84,7 +84,7 @@ TRANS_DIR  = os.path.join(RES_DIR, "translated")
 QWEN_BASE   = os.environ.get("QWEN_BASE_URL", "http://192.168.1.125:8000/v1")
 QWEN_MODEL  = os.environ.get("QWEN_MODEL", "qwen3.8-27b")
 OMLX_BASE   = os.environ.get("OMLX_BASE_URL", "http://127.0.0.1:8080/v1")
-OMLX_MODEL  = os.environ.get("OMLX_MODEL", "Qwen3.8-27B-Alis-MLX-6bit")
+OMLX_MODEL  = os.environ.get("OMLX_MODEL", "Qwen3.8-27B-oQ6-mtp8")
 QWEN_TIMEOUT = int(os.environ.get("QWEN_TIMEOUT", "900"))
 
 BACKENDS = [("spark", QWEN_BASE, QWEN_MODEL), ("omlx", OMLX_BASE, OMLX_MODEL)]
