@@ -380,6 +380,75 @@ function _populateUploaderOptions() {
   if (prev && uploaders.includes(prev)) sel.value = prev;
 }
 
+/* ── 채널 선택 팝업(2026-10-11 사용자 지시): 채널별 전체·미읽음 건수 표시, 누르면 그 채널로 좁힌다.
+   실제 필터 상태는 숨긴 select(#hf-uploader)가 들고 있어 기존 저장·복원·초기화 경로를 그대로 쓴다. ── */
+function _uploaderStats() {
+  const stats = new Map();
+  for (const it of _historyItems) {
+    const u = it.uploader;
+    if (!u || u === '—') continue;
+    const s = stats.get(u) || { total: 0, unread: 0 };
+    s.total += 1;
+    if (!it.is_read) s.unread += 1;
+    stats.set(u, s);
+  }
+  return stats;
+}
+function _paintUploaderBtn() {
+  const btn = document.getElementById('hf-uploader-btn');
+  if (!btn) return;
+  const u = document.getElementById('hf-uploader').value;
+  btn.querySelector('.nm').textContent = u || '전체 채널';
+  btn.classList.toggle('active', !!u);
+  btn.title = u ? `채널: ${u} — 바꾸기` : '채널 선택';
+}
+function _renderUploaderList() {
+  const box = document.getElementById('uploader-list');
+  if (!box) return;
+  const q = (document.getElementById('uploader-search').value || '').trim().toLowerCase();
+  const cur = document.getElementById('hf-uploader').value;
+  const stats = _uploaderStats();
+  const names = [...stats.keys()].sort((a, b) =>
+    (stats.get(b).unread - stats.get(a).unread) || a.localeCompare(b, 'ko'));   // 미읽음 많은 채널 먼저
+  const totalUnread = [...stats.values()].reduce((n, s) => n + s.unread, 0);
+  const row = (val, label, s) => {
+    const unread = s.unread ? `<span class="up-unread" title="미읽음 ${s.unread}건">${s.unread}</span>` : '';
+    return `<button type="button" class="uploader-item${val === cur ? ' selected' : ''}" role="option"
+        aria-selected="${val === cur}" data-uploader="${_attrEsc(val)}" onclick="pickUploader(this.dataset.uploader)">
+        <span class="up-name">${esc(label)}</span>${unread}<span class="up-total" title="전체 ${s.total}건">${s.total}</span></button>`;
+  };
+  const all = { total: _historyItems.length, unread: totalUnread };
+  const list = names.filter(n => !q || n.toLowerCase().includes(q));
+  box.innerHTML = (q ? '' : row('', '전체 채널', all))
+    + list.map(n => row(n, n, stats.get(n))).join('')
+    + (list.length || !q ? '' : '<div class="uploader-empty">일치하는 채널이 없습니다</div>');
+}
+function openUploaderModal() {
+  document.getElementById('uploader-search').value = '';
+  _renderUploaderList();
+  document.getElementById('uploader-modal').classList.add('open');
+  const sel = document.querySelector('#uploader-list .uploader-item.selected');
+  (sel || document.getElementById('uploader-search')).focus();
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+function closeUploaderModal() {
+  document.getElementById('uploader-modal').classList.remove('open');
+  document.getElementById('hf-uploader-btn')?.focus();
+}
+function pickUploader(uploader) {
+  const sel = document.getElementById('hf-uploader');
+  if (uploader && ![...sel.options].some(o => o.value === uploader)) return;
+  sel.value = uploader || '';
+  document.getElementById('uploader-modal').classList.remove('open');
+  applyHistoryFilter();
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('uploader-modal')?.classList.contains('open')) {
+    e.preventDefault();
+    closeUploaderModal();
+  }
+});
+
 function clearTitleSearch() {
   const inp = document.getElementById('hf-title');
   inp.value = '';
@@ -390,6 +459,7 @@ function clearTitleSearch() {
 
 function applyHistoryFilter(keepPage = false) {
   const uploader = document.getElementById('hf-uploader').value;
+  _paintUploaderBtn();
   const titleQ   = document.getElementById('hf-title').value.trim().toLowerCase();
   document.getElementById('hf-clear-btn').classList.toggle('visible', titleQ.length > 0);
 

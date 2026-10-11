@@ -2152,6 +2152,24 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   transition: border-color .15s;
 }
 .hf-uploader:focus { border-color: var(--highlight); box-shadow: 0 0 0 3px var(--highlight-soft); }
+/* 채널 선택 버튼·팝업(2026-10-11) */
+.hf-uploader-btn { display: inline-flex; align-items: center; gap: .35rem; text-align: left; }
+.hf-uploader-btn .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hf-uploader-btn .chev { color: var(--muted); font-size: 10px; flex-shrink: 0; }
+.hf-uploader-btn.active { color: var(--highlight); }
+.uploader-modal { width: min(460px, 92vw); }
+.uploader-search-wrap { padding: .6rem .9rem; border-bottom: 1px solid var(--border); }
+.uploader-search-wrap input { width: 100%; height: 32px; box-sizing: border-box; }
+.uploader-list { display: flex; flex-direction: column; padding: .35rem; }
+.uploader-item { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .55rem .7rem; border: 0;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.uploader-item:hover { background: var(--surface2); }
+.uploader-item.selected { background: var(--highlight-soft); color: var(--highlight); font-weight: 600; }
+.uploader-item .up-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uploader-item .up-unread { flex-shrink: 0; min-width: 20px; padding: 1px 7px; border-radius: 10px; background: var(--highlight);
+  color: #fff; font-size: 11px; font-weight: 700; text-align: center; font-family: var(--font-mono); }
+.uploader-item .up-total { flex-shrink: 0; min-width: 28px; text-align: right; color: var(--muted); font-size: 11.5px; font-family: var(--font-mono); }
+.uploader-empty { padding: 1rem; color: var(--muted); font-size: 12.5px; text-align: center; }
 .hf-sort-toggle {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text); font-family: inherit; font-size: 12px; padding: 0 .6rem;
