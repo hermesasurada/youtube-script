@@ -1776,12 +1776,13 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
-    const txt = String(el.dataset.id || "");
+    const id = String(el.dataset.id || "");
+    const txt = `yt ${id}`;   // 서비스 약칭을 붙여 복사(2026-10-12 사용자 지시 — 'yt 1111')
     const flash = () => {
       el.textContent = "복사됨 ✓";
       el.classList.add("copied");
       clearTimeout(el._t);
-      el._t = setTimeout(() => { el.textContent = "#" + txt; el.classList.remove("copied"); }, 1000);
+      el._t = setTimeout(() => { el.textContent = "#" + id; el.classList.remove("copied"); }, 1000);
     };
     const legacy = () => {
       const ta = document.createElement("textarea");
