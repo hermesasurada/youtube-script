@@ -100,6 +100,13 @@ def test_patch_name_models_validation(monkeypatch, tmp_path):
                          json={"summary_slots": before, "name_lookup_model": "claude-retired-1",
                                "name_lookup_effort": "default"})
         assert r.status_code == 200 and r.get_json()["name_lookup_model"] == "claude-retired-1"
+        # 저장된 모델은 자기 제공사 목록에만 '기존 선택'으로 남는다(2026-10-13: GPT 목록에
+        # 'claude-haiku-5-5 (미등록·기존 선택)'이 생기고 화면이 그쪽을 골랐다)
+        db.set_name_model("detect", "claude-haiku-5-5", "default")
+        db.set_name_model("lookup", "gpt-6-luna", "low")
+        opts = client.get("/channels").get_json()["name_model_options"]
+        assert {o["provider"] for o in opts if o["value"] == "claude-haiku-5-5"} == {"claude"}
+        assert {o["provider"] for o in opts if o["value"] == "gpt-6-luna"} == {"codex"}
         # 빈 모델 = 기본값으로 되돌리기
         r = client.patch("/channels/model-orders", json={"name_detect_model": "", "name_detect_effort": "low"})
         assert r.status_code == 200

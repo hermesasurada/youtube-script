@@ -2239,14 +2239,29 @@ def _name_default_choice() -> dict:
     return d
 
 
+def _catalog_provider(model: str) -> str:
+    """모델 ID → 카탈로그 제공사(claude/codex/grok). 카탈로그가 모르면 ID 접두어로."""
+    try:
+        entry = llm_gateway.llm_catalog.resolve(model) or {}
+    except Exception:
+        entry = {}
+    if entry.get("provider"):
+        return entry["provider"]
+    m = (model or "").lower()
+    return "grok" if m.startswith("grok") else "codex" if m.startswith(("gpt", "codex")) else "claude"
+
+
 def _name_model_payload() -> dict:
     """저장값(빈 값 = 모듈 기본) + 선택지(Claude·Codex text 모델) + 기본값 표시."""
     saved = db.get_name_models()
     selected = [v["model"] for v in saved.values() if v["model"]]
     options = []
     for provider in _name_providers():
+        # 저장된 모델은 자기 제공사 목록에만 '기존 선택'으로 보존한다 — 섞어 넘기면 GPT 목록에
+        # 'claude-haiku-5-5 (미등록·기존 선택)'이 생기고 화면이 그쪽을 골랐다(2026-10-13).
+        mine = [m for m in selected if _catalog_provider(m) == provider]
         options.extend(dict(o) for o in llm_gateway.llm_catalog.options(provider, capability="text",
-                                                                        selected=selected))
+                                                                        selected=mine))
     out = {"name_model_options": options, "name_model_default": _name_default_choice()}
     for kind, v in saved.items():
         out[f"name_{kind}_model"] = v["model"]
