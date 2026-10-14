@@ -927,7 +927,8 @@
      점선 밑줄로 표시하고, 누르면 그 낱말 바로 곁에 어두운 소개 창을 띄운다. 창의 '제외'는 그 인물을
      yt·td 인명 소개에서 모두 뺀다(각주 제외와 같은 방식, 되돌리기 가능). 소개는 서버 캐시에서 온다. */
   let _people = [];
-  const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title';
+  // 제목(h1·메타정보 표의 제목 칸)은 인명 링크 대상이 아니다(2026-10-15 사용자 지시) — 메타정보 표는 통째로 건너뛴다.
+  const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, [data-person-skip]';
   function decoratePeople(root, people) {
     if (!root) return;
     const list = (people || _people || []).filter(p => p && p.bio && (p.forms || []).length);   // 렌더 직후엔 방금 받은 목록
@@ -943,6 +944,14 @@
     const byForm = new Map(forms.map(x => [x.f, x.i]));
     const seen = new Set(root.querySelectorAll('.person-name').length
       ? [...root.querySelectorAll('.person-name')].map(e => Number(e.dataset.person)) : []);
+    root.querySelectorAll('h2, h3').forEach(h => {          // '## 1. 메타정보' 바로 뒤 표(제목·업로더 칸)
+      if (!/메타\s*정보/.test(h.textContent || '')) return;
+      let el = h.nextElementSibling;
+      while (el && !/^H[1-6]$/.test(el.tagName)) {
+        if (el.matches('table') || el.querySelector('table')) { el.dataset.personSkip = '1'; break; }
+        el = el.nextElementSibling;
+      }
+    });
     const walk = (node) => {
       if (node.nodeType === 1) {
         if (node.matches && node.matches(_PERSON_SKIP)) return;

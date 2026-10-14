@@ -80,7 +80,11 @@ def process(summary_path: str, *, dry_run: bool = False, on_change=None) -> dict
         def apply(_doc, mapping):
             with document_io.summary_lock(summary_path):
                 cur = open(summary_path, encoding="utf-8", errors="replace").read()
-                new, n = name_resolver.replace_names(cur, mapping)
+                # 제목(H1)·메타정보 표는 인명 교정 대상이 아니다(2026-10-15 사용자 지시) — '## 2.'(한눈 요약)부터만 바꾼다.
+                cut = cur.find("\n## 2.")
+                head, body = (cur[:cut], cur[cut:]) if cut >= 0 else ("", cur)
+                body, n = name_resolver.replace_names(body, mapping)
+                new = head + body
                 if not n:
                     return
                 pairs = sorted({f"{s}→{d}" for s, d in mapping})
