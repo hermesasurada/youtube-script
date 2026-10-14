@@ -896,6 +896,28 @@ def _cleanup_failed_artifacts(audio_path: str, json_path: str, delete_audio: boo
             log.warning("failed-job cleanup skipped: %s (%s)", os.path.basename(path), e)
 
 
+# 말 없는 구간에서 whisper가 내는 표시·정형 문장 — 본문 길이에서 뺀다(2026-10-14, yt #1500 지식채널e:
+# 화면 자막+음악 5분 영상이 '♪'·'*Splash*'와 'Thank you.'·'We'll be right back.' 같은 환각 문장만으로
+# 분당 57자가 돼 기준(40자)을 넘겨 요약까지 됐다). 줄 전체가 이것뿐일 때만 지운다.
+_NOISE_MARK_RE = re.compile(r"[♪♫♬]+|\*[^*\n]{1,30}\*|\[(?:music|음악|applause|박수|laughter|웃음|silence|무음)[^\]]*\]"
+                            r"|\((?:music|음악|applause|박수|laughter|웃음)[^)]*\)", re.I)
+_HALLUCINATION_LINE_RE = re.compile(
+    r"^(?:thank you(?: (?:so|very) much)?(?: for watching| for listening)?|thanks for watching|"
+    r"(?:we'?ll|i'?ll) be right back|(?:i'?ll )?see you (?:next time|in the next (?:video|one))|bye(?:[- ]bye)?|"
+    r"please subscribe(?: to (?:my|our|the) channel)?|subtitles? by[^.]*|you|"
+    r"시청해 ?주셔서 감사합니다|구독과 좋아요(?: 부탁드립니다)?|감사합니다)[.!。 ]*$", re.I)
+
+
+def _speech_body(transcript: str) -> str:
+    """전사 본문에서 시각 마커·음악/효과음 표시·환각 정형 문장 줄을 뺀 실제 말."""
+    lines = []
+    for line in _TS_TAG_RE.sub("", transcript or "").splitlines():
+        line = _NOISE_MARK_RE.sub("", line).strip()
+        if line and not _HALLUCINATION_LINE_RE.match(line):
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def _transcript_sparse(job_id: str, transcript: str | None) -> str:
     """길이 대비 본문이 사실상 비어 있으면(무음·잘린 오디오·언어 오판) 사유 문자열, 아니면 ""."""
     if transcript is None:
@@ -903,7 +925,7 @@ def _transcript_sparse(job_id: str, transcript: str | None) -> str:
     secs = float(jobs[job_id].get("clip_duration")
                  or (jobs[job_id].get("meta") or {}).get("duration") or 0)
     mins = secs / 60
-    body = _TS_TAG_RE.sub("", transcript).strip()   # [mm:ss] 마커는 본문 길이에서 제외
+    body = _speech_body(transcript)   # 시각 마커·음악 표시·환각 정형 문장은 본문 길이에서 제외
     if mins >= 1 and len(body) / mins < MIN_CHARS_PER_MIN:
         return (f"전사 내용이 비어 있습니다: {len(body)}자 / "
                 f"{_format_duration(secs)} (분당 {len(body) / mins:.0f}자)")
