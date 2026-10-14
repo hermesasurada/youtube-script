@@ -2169,6 +2169,7 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .uploader-item .up-unread { flex-shrink: 0; min-width: 20px; padding: 1px 7px; border-radius: 10px; background: var(--highlight);
   color: #fff; font-size: 11px; font-weight: 700; text-align: center; font-family: var(--font-mono); }
 .uploader-item .up-total { flex-shrink: 0; min-width: 28px; text-align: right; color: var(--muted); font-size: 11.5px; font-family: var(--font-mono); }
+.uploader-item .up-dur { flex-shrink: 0; color: var(--highlight); font-size: 11px; white-space: nowrap; }   /* 안읽은 영상 길이 합계 */
 .uploader-empty { padding: 1rem; color: var(--muted); font-size: 12.5px; text-align: center; }
 .hf-sort-toggle {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);

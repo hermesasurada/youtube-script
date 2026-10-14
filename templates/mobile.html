@@ -116,6 +116,7 @@
     .uploader-item .up-unread { flex-shrink: 0; min-width: 22px; padding: 1px 7px; border-radius: 10px; background: var(--highlight);
       color: #fff; font-size: 11.5px; font-weight: 700; text-align: center; }
     .uploader-item .up-total { flex-shrink: 0; min-width: 30px; text-align: right; color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+    .uploader-item .up-dur { flex-shrink: 0; color: var(--highlight); font-size: 11.5px; white-space: nowrap; }
     .uploader-empty { padding: 1rem; color: var(--muted); font-size: 13px; text-align: center; }
     .icon-toggle {
       flex-shrink: 0;
@@ -867,14 +868,21 @@ function _paintUploaderBtnM() {
   b.title = _uploader ? `채널: ${_uploader}` : '채널 선택';
   $('q').placeholder = _uploader ? `${_uploader} 안에서 검색` : '검색';
 }
+// 안읽은 영상의 원본 길이 합계(2026-10-15 사용자 지시) — '3시간 12분'·'45분'
+function fmtUnreadDur(secs) {
+  const m = Math.round((Number(secs) || 0) / 60);
+  if (!m) return '';
+  const h = Math.floor(m / 60);
+  return h ? `${h}시간${m % 60 ? ' ' + (m % 60) + '분' : ''}` : `${m}분`;
+}
 function _uploaderStatsM() {
   const stats = new Map();
   for (const it of ALL) {
     const u = it.uploader;
     if (!u || u === '—') continue;
-    const st = stats.get(u) || { total: 0, unread: 0 };
+    const st = stats.get(u) || { total: 0, unread: 0, unreadSecs: 0 };
     st.total += 1;
-    if (!it.is_read) st.unread += 1;
+    if (!it.is_read) { st.unread += 1; st.unreadSecs += Number(it.duration) || 0; }
     stats.set(u, st);
   }
   return stats;
@@ -894,10 +902,12 @@ function _renderUploaderM() {
   const stats = _uploaderStatsM();
   const names = [...stats.keys()].sort((a, b) =>
     (stats.get(b).unread - stats.get(a).unread) || a.localeCompare(b, 'ko'));
-  const all = { total: ALL.length, unread: [...stats.values()].reduce((n, s) => n + s.unread, 0) };
+  const all = { total: ALL.length, unread: [...stats.values()].reduce((n, s) => n + s.unread, 0),
+                unreadSecs: [...stats.values()].reduce((n, s) => n + s.unreadSecs, 0) };
   const row = (val, label, st) => `<button type="button" class="uploader-item${val === _uploader ? ' selected' : ''}" role="option"
       aria-selected="${val === _uploader}" data-uploader="${attrEsc(val)}" onclick="pickUploaderM(this.dataset.uploader)">
-      <span class="up-name">${esc(label)}</span>${st.unread ? `<span class="up-unread">${st.unread}</span>` : ''}<span class="up-total">${st.total}</span></button>`;
+      <span class="up-name">${esc(label)}</span>${st.unread ? `<span class="up-unread">${st.unread}</span>`
+        + (fmtUnreadDur(st.unreadSecs) ? `<span class="up-dur">${fmtUnreadDur(st.unreadSecs)}</span>` : '') : ''}<span class="up-total">${st.total}</span></button>`;
   const list = names.filter(n => !q || n.toLowerCase().includes(q));
   $('uploader-list').innerHTML = (q ? '' : row('', '전체 채널', all)) + list.map(n => row(n, n, stats.get(n))).join('')
     + (list.length || !q ? '' : '<div class="uploader-empty">일치하는 채널이 없습니다</div>');

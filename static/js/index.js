@@ -382,14 +382,21 @@ function _populateUploaderOptions() {
 
 /* ── 채널 선택 팝업(2026-10-11 사용자 지시): 채널별 전체·미읽음 건수 표시, 누르면 그 채널로 좁힌다.
    실제 필터 상태는 숨긴 select(#hf-uploader)가 들고 있어 기존 저장·복원·초기화 경로를 그대로 쓴다. ── */
+// 안읽은 영상의 원본 길이 합계(2026-10-15 사용자 지시) — '3시간 12분'·'45분'
+function fmtUnreadDur(secs) {
+  const m = Math.round((Number(secs) || 0) / 60);
+  if (!m) return '';
+  const h = Math.floor(m / 60);
+  return h ? `${h}시간${m % 60 ? ' ' + (m % 60) + '분' : ''}` : `${m}분`;
+}
 function _uploaderStats() {
   const stats = new Map();
   for (const it of _historyItems) {
     const u = it.uploader;
     if (!u || u === '—') continue;
-    const s = stats.get(u) || { total: 0, unread: 0 };
+    const s = stats.get(u) || { total: 0, unread: 0, unreadSecs: 0 };
     s.total += 1;
-    if (!it.is_read) s.unread += 1;
+    if (!it.is_read) { s.unread += 1; s.unreadSecs += Number(it.duration) || 0; }
     stats.set(u, s);
   }
   return stats;
@@ -412,12 +419,15 @@ function _renderUploaderList() {
     (stats.get(b).unread - stats.get(a).unread) || a.localeCompare(b, 'ko'));   // 미읽음 많은 채널 먼저
   const totalUnread = [...stats.values()].reduce((n, s) => n + s.unread, 0);
   const row = (val, label, s) => {
-    const unread = s.unread ? `<span class="up-unread" title="미읽음 ${s.unread}건">${s.unread}</span>` : '';
+    const dur = s.unread ? fmtUnreadDur(s.unreadSecs) : '';
+    const unread = s.unread ? `<span class="up-unread" title="미읽음 ${s.unread}건">${s.unread}</span>`
+      + (dur ? `<span class="up-dur" title="안읽은 영상 원본 길이 합계">${dur}</span>` : '') : '';
     return `<button type="button" class="uploader-item${val === cur ? ' selected' : ''}" role="option"
         aria-selected="${val === cur}" data-uploader="${_attrEsc(val)}" onclick="pickUploader(this.dataset.uploader)">
         <span class="up-name">${esc(label)}</span>${unread}<span class="up-total" title="전체 ${s.total}건">${s.total}</span></button>`;
   };
-  const all = { total: _historyItems.length, unread: totalUnread };
+  const all = { total: _historyItems.length, unread: totalUnread,
+                unreadSecs: [...stats.values()].reduce((n, s) => n + s.unreadSecs, 0) };
   const list = names.filter(n => !q || n.toLowerCase().includes(q));
   box.innerHTML = (q ? '' : row('', '전체 채널', all))
     + list.map(n => row(n, n, stats.get(n))).join('')
