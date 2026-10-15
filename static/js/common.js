@@ -1051,8 +1051,9 @@
     const name = p.english ? `${escapeHtml(p.english)}${p.korean ? ` <span class="pt-ko">${escapeHtml(p.korean)}</span>` : ''}`
                            : escapeHtml(p.korean || '');
     const src = (p.source && /^https?:\/\//.test(p.source)) ? `<a class="pt-src" href="${attrEscape(p.source)}" target="_blank" rel="noopener">출처</a>` : '';
+    const when = /^\d{4}-\d{2}$/.test(p.checked || '') ? `<span class="pt-date">${p.checked.replace('-', '.')} 확인</span>` : '';
     t.innerHTML = `<div class="pt-name">${name}</div><div class="pt-bio">${escapeHtml(p.bio || '')}</div>`
-      + `<div class="pt-foot">${src}<button type="button" class="pt-ex" title="이 인물을 인명 소개에서 뺍니다(yt·td 공통)">✕ 인명 소개 제외</button></div>`;
+      + `<div class="pt-foot">${src}${when}<button type="button" class="pt-ex" title="이 인물을 인명 소개에서 뺍니다(yt·td 공통)">✕ 인명 소개 제외</button></div>`;
     t.querySelector('.pt-ex').onclick = async (e) => {
       e.stopPropagation();
       if (!(await _setPersonExcluded(p, true))) return;
@@ -1084,7 +1085,8 @@
     + "tip.textContent='';var n=d.createElement('div');n.style.cssText='font-weight:700;color:#fff;margin-bottom:3px;';n.textContent=el.getAttribute('data-yp-name')||el.textContent;"
     + "var ko=el.getAttribute('data-yp-ko');if(ko){var s=d.createElement('span');s.style.cssText='font-weight:400;color:#9aa0a6;margin-left:6px;font-size:.92em;';s.textContent=ko;n.appendChild(s);}"
     + "var b=d.createElement('div');b.textContent=el.getAttribute('data-yp-bio');tip.appendChild(n);tip.appendChild(b);"
-    + "var src=el.getAttribute('data-yp-src');if(src){var a=d.createElement('a');a.href=src;a.target='_blank';a.rel='noopener';a.textContent='출처';a.style.cssText='display:inline-block;margin-top:5px;color:#8ab4f8;text-decoration:none;font-size:11.5px;';tip.appendChild(a);}"
+    + "var src=el.getAttribute('data-yp-src');if(src){var a=d.createElement('a');a.href=src;a.target='_blank';a.rel='noopener';a.textContent='출처';a.style.cssText='display:inline-block;margin-top:5px;margin-right:8px;color:#8ab4f8;text-decoration:none;font-size:11.5px;';tip.appendChild(a);}"
+    + "var dt=el.getAttribute('data-yp-date');if(dt){var q=d.createElement('span');q.style.cssText='display:inline-block;margin-top:5px;color:#7f868f;font-size:11.5px;';q.textContent=dt;tip.appendChild(q);}"
     + "tip.style.maxWidth=Math.min(260,w.innerWidth-24)+'px';tip.style.display='block';"
     + "var r=el.getBoundingClientRect(),tw=tip.offsetWidth,th=tip.offsetHeight;"
     + "var left=Math.max(12,Math.min(r.left+r.width/2-tw/2,w.innerWidth-tw-12));var top=r.bottom+8;"
@@ -1106,6 +1108,7 @@
       if (p.english && p.korean) span.setAttribute('data-yp-ko', p.korean);
       span.setAttribute('data-yp-bio', p.bio);
       if (p.source && /^https?:\/\//.test(p.source)) span.setAttribute('data-yp-src', p.source);
+      if (/^\d{4}-\d{2}$/.test(p.checked || '')) span.setAttribute('data-yp-date', p.checked.replace('-', '.') + ' 확인');
       span.setAttribute('title', `${name} — ${p.bio}`);
       span.setAttribute('style', _BLOG_PERSON_STYLE);
       span.textContent = form;
@@ -1654,6 +1657,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 #ys-person-toast .pt-bio{color:#d5d8dc;}
 #ys-person-toast .pt-foot{display:flex;align-items:center;gap:.5rem;margin-top:.4rem;font-size:10.5px;}
 #ys-person-toast .pt-src{color:#8ab4f8;text-decoration:none;}
+#ys-person-toast .pt-date{color:#7f868f;}
 #ys-person-toast .pt-ex,#ys-person-toast .pt-undo{margin-left:auto;background:transparent;border:1px solid #444b55;color:#b8bec6;border-radius:6px;padding:.05rem .45rem;font-size:10.5px;cursor:pointer;}
 #ys-person-toast .pt-ex:hover,#ys-person-toast .pt-undo:hover{border-color:#6b7380;color:#fff;}
 #ys-person-toast .pt-done{color:#9aa0a6;}
