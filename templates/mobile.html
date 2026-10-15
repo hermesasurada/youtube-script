@@ -1790,7 +1790,7 @@ async function updateBlogPostM(btn) {
   if (!_summaryMd || !_summaryItemId) return;
   if (!confirm('블로그 글을 지금 요약 내용으로 수정할까요? (기존 글이 덮어써집니다)')) return;
   const lbl = btn.querySelector('.action-label');
-  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM });
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM, people: await YS.blogPeople(_summaryItemId) });
   btn.disabled = true; lbl.textContent = '수정 중…';
   try {
     const r = await fetch('/history/publish-blog', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1820,7 +1820,7 @@ async function publishToBlog(btn) {
   if (!_summaryMd || !_summaryItemId) return;
   if (!confirm('블로그스팟에 바로 발행할까요? (즉시 공개됩니다)')) return;
   const lbl = btn.querySelector('.action-label');
-  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM });
+  const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM, people: await YS.blogPeople(_summaryItemId) });
   btn.disabled = true; lbl.textContent = '…';
   try {
     const d = await YS.apiPublishBlog(_summaryItemId, _titleKoM || title, html);

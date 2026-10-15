@@ -929,12 +929,10 @@
   let _people = [];
   // 제목(h1·메타정보 표의 제목 칸)은 인명 링크 대상이 아니다(2026-10-15 사용자 지시) — 메타정보 표는 통째로 건너뛴다.
   const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, [data-person-skip]';
-  function decoratePeople(root, people) {
-    if (!root) return;
-    const list = (people || _people || []).filter(p => p && p.bio && (p.forms || []).length);   // 렌더 직후엔 방금 받은 목록
-    root._people = list;
+  // 표기(forms)를 본문 텍스트에서 찾아 **글 전체에서 첫 등장 한 번만** makeSpan(표기, 목록 순번)으로 감싼다.
+  // 화면(decoratePeople)과 블로그 내보내기(_bloggerPeople)가 같은 규칙을 쓴다. seen = 이미 표시한 순번.
+  function _wrapPeopleNames(root, list, seen, makeSpan) {
     const live = list.map((p, i) => ({ p, i })).filter(x => !x.p.excluded);
-    if (!live.length) return;
     const forms = [];
     live.forEach(({ p, i }) => (p.forms || []).forEach(f => { if (f && f.length >= 2) forms.push({ f, i }); }));
     if (!forms.length) return;
@@ -942,8 +940,6 @@
     const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp('(' + forms.map(x => esc(x.f)).join('|') + ')', 'g');
     const byForm = new Map(forms.map(x => [x.f, x.i]));
-    const seen = new Set(root.querySelectorAll('.person-name').length
-      ? [...root.querySelectorAll('.person-name')].map(e => Number(e.dataset.person)) : []);
     root.querySelectorAll('h2, h3').forEach(h => {          // '## 1. 메타정보' 바로 뒤 표(제목·업로더 칸)
       if (!/메타\s*정보/.test(h.textContent || '')) return;
       let el = h.nextElementSibling;
@@ -958,6 +954,7 @@
         Array.from(node.childNodes).forEach(walk);
         return;
       }
+      if (node.nodeType === 11) { Array.from(node.childNodes).forEach(walk); return; }   // template.content
       if (node.nodeType !== 3 || !node.nodeValue) return;
       const text = node.nodeValue;
       re.lastIndex = 0;
@@ -970,12 +967,7 @@
         seen.add(i);
         frag = frag || document.createDocumentFragment();
         frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-        const span = document.createElement('span');
-        span.className = 'person-name';
-        span.dataset.person = String(i);
-        span.dataset.pid = String(list[i].id);
-        span.textContent = m[0];
-        frag.appendChild(span);
+        frag.appendChild(makeSpan(m[0], i));
         last = m.index + m[0].length;
       }
       if (frag) {
@@ -984,6 +976,22 @@
       }
     };
     walk(root);
+  }
+  function decoratePeople(root, people) {
+    if (!root) return;
+    const list = (people || _people || []).filter(p => p && p.bio && (p.forms || []).length);   // 렌더 직후엔 방금 받은 목록
+    root._people = list;
+    if (!list.some(p => !p.excluded)) return;
+    const seen = new Set(root.querySelectorAll('.person-name').length
+      ? [...root.querySelectorAll('.person-name')].map(e => Number(e.dataset.person)) : []);
+    _wrapPeopleNames(root, list, seen, (form, i) => {
+      const span = document.createElement('span');
+      span.className = 'person-name';
+      span.dataset.person = String(i);
+      span.dataset.pid = String(list[i].id);
+      span.textContent = form;
+      return span;
+    });
     _peopleRoots.add(root);
     if (!root._personClick) {
       root._personClick = true;
@@ -1061,6 +1069,55 @@
     };
     t.classList.add('show');
     _placePop(t, anchor);
+  }
+
+  /* ── 블로그 글의 인명 소개(2026-10-15 사용자 지시, B안: 앱과 같은 클릭 팝업) ──────────
+     블로그 본문엔 앱 CSS·스크립트가 없어서 ① 인명 첫 등장을 인라인 점선 밑줄 span으로 감싸 소개를
+     data-yp-* 속성에 싣고(스크립트가 안 도는 RSS·앱에선 title 툴팁이 대신한다) ② 글 끝에 작은 인라인
+     스크립트 하나로 클릭 팝업을 띄운다. 홈 화면처럼 한 페이지에 글이 여럿이어도 리스너는 한 번만 단다.
+     블로거 편집기가 &·< 를 바꿔도 깨지지 않게 스크립트에는 두 문자를 쓰지 않는다. 제외 버튼은 없다(읽기 전용). */
+  const _BLOG_PEOPLE_JS = "(function(){var d=document,w=window;"
+    + "var els=d.querySelectorAll('[data-yp-bio][title]');for(var k=0;k!==els.length;k++)els[k].removeAttribute('title');"
+    + "if(w.__ypInit)return;w.__ypInit=1;var tip=null;"
+    + "function hide(){if(tip)tip.style.display='none';}"
+    + "function show(el){if(!tip){tip=d.createElement('div');tip.style.cssText='position:fixed;z-index:2147483000;display:none;padding:9px 12px 8px;border-radius:9px;background:#1f2329;color:#d5d8dc;border:1px solid #343a42;box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:12.5px;line-height:1.55;word-break:keep-all;overflow-wrap:break-word;text-align:left;font-weight:400;';d.body.appendChild(tip);}"
+    + "tip.textContent='';var n=d.createElement('div');n.style.cssText='font-weight:700;color:#fff;margin-bottom:3px;';n.textContent=el.getAttribute('data-yp-name')||el.textContent;"
+    + "var ko=el.getAttribute('data-yp-ko');if(ko){var s=d.createElement('span');s.style.cssText='font-weight:400;color:#9aa0a6;margin-left:6px;font-size:.92em;';s.textContent=ko;n.appendChild(s);}"
+    + "var b=d.createElement('div');b.textContent=el.getAttribute('data-yp-bio');tip.appendChild(n);tip.appendChild(b);"
+    + "var src=el.getAttribute('data-yp-src');if(src){var a=d.createElement('a');a.href=src;a.target='_blank';a.rel='noopener';a.textContent='출처';a.style.cssText='display:inline-block;margin-top:5px;color:#8ab4f8;text-decoration:none;font-size:11.5px;';tip.appendChild(a);}"
+    + "tip.style.maxWidth=Math.min(260,w.innerWidth-24)+'px';tip.style.display='block';"
+    + "var r=el.getBoundingClientRect(),tw=tip.offsetWidth,th=tip.offsetHeight;"
+    + "var left=Math.max(12,Math.min(r.left+r.width/2-tw/2,w.innerWidth-tw-12));var top=r.bottom+8;"
+    + "if(top+th>w.innerHeight-12)top=Math.max(12,r.top-8-th);tip.style.left=left+'px';tip.style.top=top+'px';}"
+    + "d.addEventListener('click',function(e){var t=e.target;var el=t.closest?t.closest('[data-yp-bio]'):null;"
+    + "if(el){e.preventDefault();show(el);return;}if(tip){if(!tip.contains(t))hide();}},true);"
+    + "d.addEventListener('keydown',function(e){if(e.key==='Escape')hide();});"
+    + "w.addEventListener('scroll',hide,true);w.addEventListener('resize',hide);})();";
+  const _BLOG_PERSON_STYLE = 'border-bottom:1px dotted #8a8f98;cursor:pointer;';
+  // root에 인명 span을 넣고, 하나라도 넣었으면 true. people은 /summary/content의 people.
+  function _bloggerPeople(root, people) {
+    const list = (people || []).filter(p => p && p.bio && (p.forms || []).length);
+    if (!list.some(p => !p.excluded)) return false;
+    let n = 0;
+    _wrapPeopleNames(root, list, new Set(), (form, i) => {
+      const p = list[i], name = (p.english || p.korean || form).trim();
+      const span = document.createElement('span');
+      span.setAttribute('data-yp-name', name);
+      if (p.english && p.korean) span.setAttribute('data-yp-ko', p.korean);
+      span.setAttribute('data-yp-bio', p.bio);
+      if (p.source && /^https?:\/\//.test(p.source)) span.setAttribute('data-yp-src', p.source);
+      span.setAttribute('title', `${name} — ${p.bio}`);
+      span.setAttribute('style', _BLOG_PERSON_STYLE);
+      span.textContent = form;
+      n++;
+      return span;
+    });
+    return n > 0;
+  }
+  // 발행 직전에 그 요약의 인명 목록을 새로 받는다(다른 요약을 연 뒤의 전역 목록·방금 한 제외를 피해서).
+  async function blogPeople(ref) {
+    try { const d = await apiSummaryContent(ref); return Array.isArray(d && d.people) ? d.people : []; }
+    catch (e) { return []; }                         // 인명 소개는 부가 기능 — 실패해도 발행은 그대로
   }
 
   /* ── 구글 블로거 포스팅용 변환 ────────────────────────────────────────
@@ -1201,6 +1258,8 @@
     // 강조는 굵기를 명시(본문 400 지정과 짝을 이뤄 편집기 변환에도 살아남게)
     root.querySelectorAll('strong,b').forEach(s => s.setAttribute('style', 'font-weight:700;'));
 
+    const hasPeople = _bloggerPeople(root, opts.people);   // 인명 첫 등장 → 클릭 소개(스크립트는 맨 끝에)
+
     // 5) 조립: 본문 → 출처 푸터
     const body = document.createElement('div');
     body.setAttribute('style', 'font-size:16px;font-weight:400;color:#242424;word-break:keep-all;');
@@ -1233,6 +1292,11 @@
 
     // 6) 서식 붙여넣기가 안 되는 편집기를 위한 평문 대체본
     const text = body.textContent.replace(/\n{3,}/g, '\n\n').trim();
+    if (hasPeople) {                               // 평문에 스크립트 글자가 섞이지 않게 text 다음에 붙인다
+      const sc = document.createElement('script');
+      sc.textContent = _BLOG_PEOPLE_JS;
+      body.appendChild(sc);
+    }
     return { html: body.outerHTML, text, title };
   }
 
@@ -1494,6 +1558,7 @@
     renderMarkdown,
     normalizeModelLabel,
     mdToBloggerHtml,
+    blogPeople,
     escapeHtml,
     attrEscape,
     fmtDate,
