@@ -1961,6 +1961,38 @@ def test_collapse_not_triggered_by_short_backchannels(tmp_path):
     assert not collapsed
 
 
+def _whisper_json_timed(tmp_path, segs):
+    p = tmp_path / "t.mp3.json"
+    p.write_text(json.dumps({"transcription": [
+        {"text": t, "offsets": {"from": int(a * 1000), "to": int(b * 1000)}} for t, a, b in segs]}), encoding="utf-8")
+    return str(p)
+
+
+def test_collapse_detected_on_multi_sentence_cycle(tmp_path):
+    """2026-10-17 CNBC Lutnick·Jensen Huang: 4문장 묶음이 끝까지 되풀이 — 같은 문장 연속 판정은 통과했다."""
+    loop = ["Economic infrastructure.", "In fact, the first time you and I met,", "technology.", "That's the big idea."]
+    segs = [(f"opening {i}", i * 3.0, i * 3.0 + 3) for i in range(30)]
+    t = 90.0
+    for _ in range(40):
+        for s in loop:
+            segs.append((s, t, t + 2)); t += 2
+    collapsed, detail = app._looks_collapsed(_whisper_json_timed(tmp_path, segs))
+    assert collapsed and "4문장 묶음" in detail
+
+
+def test_cycle_not_triggered_by_varied_backchannels_or_short_outro(tmp_path):
+    """맞장구 사이 문장이 매번 다르면 묶음이 아니고, 끝인사 몇십 초 반복(#710 '감사합니다/네' 45초)은 붕괴로 보지 않는다."""
+    segs, t = [], 0.0
+    for i in range(200):
+        for s in (f"point {i}", "네."):
+            segs.append((s, t, t + 2)); t += 2
+    for _ in range(22):
+        for s in ("감사합니다", "네"):
+            segs.append((s, t, t + 1)); t += 1
+    collapsed, _ = app._looks_collapsed(_whisper_json_timed(tmp_path, segs))
+    assert not collapsed
+
+
 def test_collapse_ignores_too_short_output(tmp_path):
     """세그먼트가 적으면 판정하지 않는다(짧은 영상의 후렴 반복 등)."""
     collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, ["같은 말"] * 10))

@@ -518,12 +518,37 @@ def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, 
 
 _COLLAPSE_MIN_RUN    = 50     # 같은 문장이 이만큼 연달아 나오면 붕괴로 본다
 _COLLAPSE_MIN_SECS   = 120    # 같은 문장이 이만큼의 시간을 덮어도 붕괴다(세그먼트가 길 때)
+# 2~6문장 묶음이 통째로 되풀이되는 붕괴(2026-10-17, CNBC Lutnick·Jensen Huang 33분 — 4문장이 430번 돌았는데
+# 같은 문장 '연속'만 보던 판정을 통과했다. 기존 전사 1,420편에서 10편이 이 모양이었다).
+_COLLAPSE_CYCLE_MAX  = 6      # 묶음 길이(문장 수) 상한
+_COLLAPSE_CYCLE_RUN  = 20     # 묶음이 이만큼 되풀이되고
+_COLLAPSE_CYCLE_SECS = 60     # 이만큼의 시간을 덮으면 붕괴(시각 없는 출력은 50회)
 _COLLAPSE_CONTEXT    = 64     # 붕괴 시 재전사에 쓸 컨텍스트 상한(토큰)
 # 붕괴 재전사 뒤 '반복이 사라졌는가'만 보면 부족하다 — 2026-09-10 Tom Brown G20(24분)은
 # 컨텍스트 제한 재전사가 반복 없이 끝났지만 3분 15초 이후가 통째로 비어 2,983자만 남았다.
 # 세그먼트가 실제로 덮는 시간이 전체의 이 비율에 못 미치면 구간 분할로 다시 돈다.
 _MIN_COVERAGE        = float(os.environ.get("WHISPER_MIN_COVERAGE", "0.6"))
 _CHUNK_SEC           = int(os.environ.get("WHISPER_CHUNK_SEC", "600"))   # 분할 재전사 구간(초)
+
+
+def _repeat_cycle(items: list[tuple[str, float, float]]) -> tuple[int, int, float, str]:
+    """서로 다른 2~6문장 묶음이 그대로 되풀이되는 가장 긴 구간 → (반복 횟수, 묶음 길이, 덮은 초, 예시 문장).
+    정상 대화의 '네.'·'Yeah.' 같은 맞장구는 사이 문장이 매번 달라 묶음이 이어지지 않는다."""
+    texts = [t for t, _, _ in items]
+    best = (0, 0, 0.0, "")
+    for k in range(2, _COLLAPSE_CYCLE_MAX + 1):
+        run, start = 0, 0
+        for i in range(k, len(texts)):
+            if texts[i] == texts[i - k] and len(set(texts[i - k:i])) == k:
+                if run == 0:
+                    start = i - k
+                run += 1
+                reps = run // k
+                if reps > best[0]:
+                    best = (reps, k, max(0.0, items[i][2] - items[start][1]), texts[i])
+            elif texts[i] != texts[i - k]:
+                run = 0
+    return best
 
 
 def _looks_collapsed(json_path: str) -> tuple[bool, str]:
@@ -569,6 +594,9 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
             run_start = a
         prev = t
     ratio = dropped / len(texts)
+    reps, period, span, sample = _repeat_cycle(items)
+    if (reps >= _COLLAPSE_CYCLE_RUN and span >= _COLLAPSE_CYCLE_SECS) or reps >= _COLLAPSE_MIN_RUN:
+        return True, f"{period}문장 묶음 {reps}회 반복({span:.0f}초), 중복 {ratio:.0%} ({sample[:40]})"
     if worst_secs >= _COLLAPSE_MIN_SECS:
         return True, f"같은 문장이 {worst_secs:.0f}초 연속, 중복 {ratio:.0%} ({worst_secs_txt[:40]})"
     # 판정은 '같은 문장이 길게 이어지는가'만 본다. 중복 비율 단독 조건은 오탐이 잦았다
