@@ -2390,6 +2390,31 @@ async function _updateBlogPost(btn) {
   setTimeout(() => _setPubBtn(_blogUrl, _blogState), 2200);
 }
 
+/* 발행한 블로그 글을 지우고 '블로그 발행' 상태로 되돌린다(2026-10-19). */
+async function _deleteBlogPost(btn) {
+  if (!_summaryItemId || !_blogUrl) return;
+  if (!confirm('블로그에서 이 글을 삭제할까요? (공개된 글이 지워지고 되돌릴 수 없습니다)')) return;
+  const label = btn && btn.querySelector('.pub-label');
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = '삭제 중…';
+  try {
+    const d = await YS.apiDeleteBlog(_summaryItemId);
+    if (d && d.status === 'deleted') {
+      _setPubBtn('');
+      if (typeof loadHistory === 'function') loadHistory(true);
+      return;
+    }
+    if (label) label.textContent = d && d.code === 'not_configured' ? '연동 미설정' : '삭제 실패';
+    if (btn) btn.style.color = 'var(--error)';
+    console.warn('[blog]', d);
+  } catch (e) {
+    if (label) label.textContent = '삭제 실패';
+    if (btn) btn.style.color = 'var(--error)';
+    console.warn('[blog]', e);
+  }
+  setTimeout(() => _setPubBtn(_blogUrl, _blogState), 2200);
+}
+
 async function publishSummaryToBlog(btn) {
   // 이미 발행된 글은 바로 열지 않고 '보기 / 수정' 중에서 고르게 한다.
   if (_blogUrl) {
@@ -2398,6 +2423,7 @@ async function publishSummaryToBlog(btn) {
       publishedAt: _blogState.published_at || '',
       contentChanged: !!_blogState.content_changed, outdatedRender: !!_blogState.outdated_render,
       onUpdate: () => _updateBlogPost(btn),
+      onDelete: () => _deleteBlogPost(btn),
     });
     return;
   }

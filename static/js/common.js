@@ -380,7 +380,7 @@
   const _blogStamp = t => (t || '').slice(0, 16);   // 'YYYY-MM-DD HH:MM'
 
   function openBlogMenu(anchorEl, { url, stale, changedAt, publishedAt, contentChanged,
-                                    outdatedRender, onOpen, onUpdate }) {
+                                    outdatedRender, onOpen, onUpdate, onDelete }) {
     if (typeof document === 'undefined') return;
     document.querySelectorAll('.ys-blog-menu').forEach(m => m.remove());
     const menu = document.createElement('div');
@@ -422,6 +422,8 @@
     else if (outdatedRender) why = '표시 형식이 바뀜 — 지금 모양으로 다시 올리기';
     else if (stale) why = '변경 사항 반영';
     item('지금 내용으로 수정', why, !stale, () => onUpdate && onUpdate());
+    if (onDelete) item('블로그 글 삭제', '블로그에서 글을 지우고 발행 전 상태로', false, () => onDelete())
+      .classList.add('danger');
 
     function close() {
       menu.remove();
@@ -896,6 +898,15 @@
     const r = await fetch('/history/refresh-meta', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(_historyRef(ref, 'path')),
+    });
+    return r.json();
+  }
+
+  /* 발행한 블로그 글 삭제(2026-10-19). 확인은 호출하는 쪽이 받는다. */
+  async function apiDeleteBlog(ref) {
+    const r = await fetch('/history/delete-blog', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(_historyRef(ref, 'path')),
     });
     return r.json();
@@ -1573,6 +1584,7 @@
     decoratePeople,
     apiRefreshMeta,
     apiPublishBlog,
+    apiDeleteBlog,
     ensureReaderAssets,
     applyTitleTranslation,
     stripSummaryPopupChrome,
@@ -1681,6 +1693,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-blog-menu-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:var(--text,#242424);font:inherit;font-size:.9rem;text-align:left;cursor:pointer;}
 .ys-blog-menu-item:hover:not([disabled]){background:var(--surface2,#f3f5f3);}
 .ys-blog-menu-item[disabled]{opacity:.5;cursor:default;}
+.ys-blog-menu-item.danger .ys-blog-menu-label{color:var(--error,#c0392b);}
 .ys-blog-menu-hint{font-size:.75rem;color:var(--muted,#7a7f87);overflow-wrap:anywhere;}
 .ys-blog-menu-head{padding:7px 11px 8px;margin-bottom:2px;border-bottom:1px solid var(--border,#e4e7e4);font-size:.76rem;color:var(--muted,#7a7f87);}
 .summary-memo{margin:.85rem 0;padding:8px 12px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}

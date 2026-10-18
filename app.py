@@ -1396,6 +1396,7 @@ _REMOTE_DATA_ALLOWED = {
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
     "/history/refresh-meta",  # 제목·썸네일 갱신 — 빠지면 원격 POST가 302로 튕겨 '갱신 실패'로 보인다(2026-09-03)
     "/history/publish-blog",  # 블로그스팟 발행(원격에서도 — 폰에서 읽고 바로 올린다)
+    "/history/delete-blog",   # 발행한 블로그 글 삭제(발행 메뉴, 원격에서도)
     "/terms/excluded",        # 각주 제외 용어 — 요약 뷰어 ✕ 버튼(폰에서도 누른다)
     "/people/excluded",       # 인명 소개에서 제외 — 소개 창의 제외 버튼(폰에서도 누른다)
 }
@@ -4050,6 +4051,37 @@ def history_publish_blog():
     fresh = db.get_history_item(item["item_id"]) or dict(item, blog_url=url)
     return _json({"status": "updated" if updating else "ok", "url": url,
                   "id": res.get("id") or post_id, "blog": _blog_state(fresh)})
+
+
+@app.route("/history/delete-blog", methods=["POST"])
+def history_delete_blog():
+    """발행한 블로그 글을 지우고 발행 기록을 비운다(2026-10-19 사용자 지시 — 발행 메뉴의 '블로그 글 삭제').
+
+    블로거에서 이미 지워진 글(404)이면 기록만 비운다. 그 밖의 실패는 기록을 그대로 둬
+    앱과 블로그가 어긋나지 않게 한다."""
+    import hermes_blogger as bl
+    data = request.get_json(force=True) or {}
+    item, err = _history_item_from_payload(data)
+    if err:
+        return err
+    if not item:
+        return _json({"error": "item_id 필요"}, 400)
+    if not item.get("blog_url"):
+        return _json({"status": "error", "code": "not_published", "message": "발행되지 않은 요약입니다"}, 400)
+    post_id = str(item.get("blog_post_id") or "")
+    if post_id:
+        if not bl.configured():
+            return _json({"status": "error", "code": "not_configured",
+                          "message": "블로그 연동 미설정 — 서버에서 hermes-blogger auth 실행 필요"})
+        try:
+            bl.delete_post(post_id)
+        except bl.BloggerError as e:
+            if "HTTP 404" not in str(e):
+                log.warning("blog delete failed item=%s: %s", item["item_id"], e)
+                return _json({"status": "error", "code": "api", "message": str(e)})
+    db.clear_blog_publish(item["item_id"])
+    log.info("blog deleted item=%s post=%s (%s)", item["item_id"], post_id or "-", item.get("blog_url"))
+    return _json({"status": "deleted"})
 
 
 @app.route("/thumb/<yt_id>")

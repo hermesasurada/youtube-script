@@ -457,6 +457,15 @@ def get_title_ko(path: str) -> str | None:
     return v or None
 
 
+def clear_blog_publish(item_id: int) -> bool:
+    """블로그 글을 지운 뒤 발행 기록을 비운다(다시 '블로그 발행' 상태로, 2026-10-19)."""
+    with _lock:
+        cur = _conn().execute(
+            """UPDATE items SET blog_url = '', blog_post_id = '', blog_published_at = NULL,
+                                blog_render_ver = '' WHERE rowid = ?""", (int(item_id),))
+        return cur.rowcount > 0
+
+
 def set_blog_publish(item_id: int, url: str, post_id: str, render_ver: str = "") -> bool:
     """블로그스팟 발행 결과 기록 — 같은 영상을 두 번 올리지 않는 근거.
 
