@@ -377,7 +377,7 @@
    * 데스크톱·모바일이 버튼 모양만 다르고 동작은 같아 여기서 공유한다. 수정은 발행 이후
    * 요약·메모가 바뀐 경우(stale)에만 활성화하고, 아니면 이유를 함께 보여 준다.
    */
-  const _blogStamp = t => (t || '').slice(0, 16);   // 'YYYY-MM-DD HH:MM'
+  const _blogShort = t => { const m = /^\d{4}-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/.exec(t || ''); return m ? `${m[1]}.${m[2]} ${m[3]}` : (t || ''); };   // '10.15 17:35'
 
   function openBlogMenu(anchorEl, { url, stale, changedAt, publishedAt, contentChanged,
                                     outdatedRender, onOpen, onUpdate, onDelete }) {
@@ -387,13 +387,13 @@
     menu.className = 'ys-blog-menu';
     menu.setAttribute('role', 'menu');
 
-    // 게시 시각을 머리에 둬서 아래 '수정됨' 시각과 바로 견줄 수 있게 한다.
+    // 간결한 메뉴(2026-10-19 사용자 지시): 머리에 게시 시각 한 줄, 항목은 한 줄짜리(오른쪽에 짧은 꼬리표만).
     const head = document.createElement('div');
     head.className = 'ys-blog-menu-head';
-    head.textContent = publishedAt ? `${_blogStamp(publishedAt)} 게시됨` : '게시 시각 기록 없음';
+    head.textContent = publishedAt ? `${_blogShort(publishedAt)} 게시` : '게시 시각 기록 없음';
     menu.appendChild(head);
 
-    const item = (label, hint, disabled, fn) => {
+    const item = (label, tag, disabled, fn) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'ys-blog-menu-item';
@@ -403,10 +403,10 @@
       t.className = 'ys-blog-menu-label';
       t.textContent = label;
       b.appendChild(t);
-      if (hint) {
+      if (tag) {
         const h = document.createElement('span');
         h.className = 'ys-blog-menu-hint';
-        h.textContent = hint;
+        h.textContent = tag;
         b.appendChild(h);
       }
       if (!disabled) b.onclick = () => { close(); fn(); };
@@ -414,16 +414,14 @@
       return b;
     };
 
-    item('블로그에서 보기', url ? url.replace(/^https?:\/\//, '') : '', false,
-         () => (onOpen ? onOpen() : window.open(url, '_blank', 'noopener')));
-    // 왜 수정할 거리가 있는지 알려 준다 — 내용이 바뀐 경우와 표시 형식만 바뀐 경우.
-    let why = '게시 이후 바뀐 내용 없음';
-    if (contentChanged) why = changedAt ? _blogStamp(changedAt) + ' 수정됨' : '변경 사항 반영';
-    else if (outdatedRender) why = '표시 형식이 바뀜 — 지금 모양으로 다시 올리기';
-    else if (stale) why = '변경 사항 반영';
-    item('지금 내용으로 수정', why, !stale, () => onUpdate && onUpdate());
-    if (onDelete) item('블로그 글 삭제', '블로그에서 글을 지우고 발행 전 상태로', false, () => onDelete())
-      .classList.add('danger');
+    item('블로그에서 보기', '', false, () => (onOpen ? onOpen() : window.open(url, '_blank', 'noopener')));
+    // 수정할 거리가 있으면 왜인지 짧게 — 내용이 바뀐 시각, 또는 표시 형식만 바뀜.
+    let tag = '';
+    if (contentChanged) tag = changedAt ? _blogShort(changedAt) + ' 변경' : '변경됨';
+    else if (outdatedRender) tag = '형식 변경';
+    else if (stale) tag = '변경됨';
+    item('지금 내용으로 수정', tag, !stale, () => onUpdate && onUpdate());
+    if (onDelete) item('삭제', '', false, () => onDelete()).classList.add('danger');
 
     function close() {
       menu.remove();
@@ -1689,13 +1687,13 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .sec-edit-bar{display:flex;align-items:center;gap:6px;margin-top:6px;}
 .sec-edit-bar button{font:inherit;font-size:.8rem;padding:6px 12px;border:1px solid var(--border,#d9deda);border-radius:6px;background:var(--surface,#fff);color:var(--text,#34443a);cursor:pointer;}
 .sec-edit-status{font-size:.78rem;color:var(--muted,#7a7f87);}
-.ys-blog-menu{position:fixed;z-index:9999;min-width:220px;padding:6px;border:1px solid var(--border,#d9deda);border-radius:10px;background:var(--surface,#fff);box-shadow:0 12px 28px -12px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:2px;}
-.ys-blog-menu-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:var(--text,#242424);font:inherit;font-size:.9rem;text-align:left;cursor:pointer;}
+.ys-blog-menu{position:fixed;z-index:9999;min-width:180px;padding:4px;border:1px solid var(--border,#d9deda);border-radius:9px;background:var(--surface,#fff);box-shadow:0 10px 24px -12px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:1px;}
+.ys-blog-menu-item{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:7px 10px;border:0;border-radius:6px;background:none;color:var(--text,#242424);font:inherit;font-size:.86rem;text-align:left;cursor:pointer;white-space:nowrap;}
 .ys-blog-menu-item:hover:not([disabled]){background:var(--surface2,#f3f5f3);}
-.ys-blog-menu-item[disabled]{opacity:.5;cursor:default;}
+.ys-blog-menu-item[disabled]{opacity:.45;cursor:default;}
 .ys-blog-menu-item.danger .ys-blog-menu-label{color:var(--error,#c0392b);}
-.ys-blog-menu-hint{font-size:.75rem;color:var(--muted,#7a7f87);overflow-wrap:anywhere;}
-.ys-blog-menu-head{padding:7px 11px 8px;margin-bottom:2px;border-bottom:1px solid var(--border,#e4e7e4);font-size:.76rem;color:var(--muted,#7a7f87);}
+.ys-blog-menu-hint{font-size:.72rem;color:var(--muted,#7a7f87);}
+.ys-blog-menu-head{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--border,#e4e7e4);font-size:.72rem;color:var(--muted,#7a7f87);}
 .summary-memo{margin:.85rem 0;padding:8px 12px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
 .summary-memo.empty{padding:0;border:0;background:none;}
 .summary-memo-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95em;line-height:1.65;margin-bottom:5px;}
