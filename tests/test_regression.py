@@ -398,8 +398,8 @@ def test_publish_button_offers_open_and_update_on_both_surfaces():
     # 간결한 메뉴(2026-10-19): 보기·수정(짧은 꼬리표)·삭제
     assert "지금 내용으로 수정" in common and "'형식 변경'" in common and "item('삭제'" in common
     # 메뉴 머리에 게시 시각을 보여 주고, 양쪽 화면이 그 값을 넘긴다
-    assert "게시됨" in common and "ys-blog-menu-head" in common
-    assert "표시 형식이 바뀜" in common          # 내용은 그대로고 형식만 바뀐 경우의 안내
+    assert " 게시` : " in common and "ys-blog-menu-head" in common
+    assert "'형식 변경'" in common          # 내용은 그대로고 형식만 바뀐 경우의 꼬리표
     for src in (js, mobile):
         assert "publishedAt:" in src
         assert "ys:blog-state" in src      # 메모 저장 즉시 버튼 갱신
