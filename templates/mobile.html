@@ -378,7 +378,7 @@
     .modal[data-reader-font="chosun"] .modal-body.markdown p,
     .modal[data-reader-font="chosun"] .modal-body.markdown li { line-height: 1.85; }
     .modal[data-reader-font="gowun"] .modal-body.markdown {
-      font-family: "Gowun Batang", "Nanum Myeongjo", "Song Myung", "Noto Serif KR", serif;
+      font-family: "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
       letter-spacing: -.01em; word-break: keep-all;
     }
     .modal[data-reader-font="gowun"] .modal-body.markdown p,
@@ -389,12 +389,18 @@
     }
     .modal[data-reader-font="nanum"] .modal-body.markdown p,
     .modal[data-reader-font="nanum"] .modal-body.markdown li { line-height: 1.8; }
-    .modal[data-reader-font="song"] .modal-body.markdown {
-      font-family: "Song Myung", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+    .modal[data-reader-font="suit"] .modal-body.markdown {
+      font-family: "SUIT Variable", "Pretendard Variable", -apple-system, sans-serif; word-break: keep-all;
+    }
+    .modal[data-reader-font="wanted"] .modal-body.markdown {
+      font-family: "Wanted Sans Variable", "Pretendard Variable", -apple-system, sans-serif; word-break: keep-all;
+    }
+    .modal[data-reader-font="maru"] .modal-body.markdown {
+      font-family: "MaruBuri", "Gowun Batang", "Noto Serif KR", serif;
       letter-spacing: -.01em; word-break: keep-all;
     }
-    .modal[data-reader-font="song"] .modal-body.markdown p,
-    .modal[data-reader-font="song"] .modal-body.markdown li { line-height: 1.8; }
+    .modal[data-reader-font="maru"] .modal-body.markdown p,
+    .modal[data-reader-font="maru"] .modal-body.markdown li { line-height: 1.82; }
     .modal[data-reader-font="system"] .modal-body.markdown {
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
     }
@@ -711,13 +717,15 @@
       </a>
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
         <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
-          <option value="sans">Noto Sans KR</option>
           <option value="pretendard">Pretendard</option>
+          <option value="sans">Noto Sans KR</option>
+          <option value="suit">SUIT</option>
+          <option value="wanted">Wanted Sans</option>
+          <option value="maru">마루 부리</option>
           <option value="chosun">조선일보명조</option>
           <option value="serif">Noto Serif KR</option>
           <option value="gowun">고운바탕</option>
           <option value="nanum">나눔명조</option>
-          <option value="song">송명</option>
           <option value="system">시스템</option>
           <option value="mono">고정폭</option>
         </select>
@@ -1536,8 +1544,8 @@ function adjustFs(delta) {
 
 // 데스크톱과 같은 본문 글꼴 설정을 공유하고 로컬에 기억한다.
 const _READER_FONTS = {
-  sans: 'Noto Sans KR', pretendard: 'Pretendard', chosun: '조선일보명조', serif: 'Noto Serif KR',
-  gowun: '고운바탕', nanum: '나눔명조', song: '송명', system: '시스템', mono: '고정폭',
+  pretendard: 'Pretendard', sans: 'Noto Sans KR', suit: 'SUIT', wanted: 'Wanted Sans', maru: '마루 부리',
+  chosun: '조선일보명조', serif: 'Noto Serif KR', gowun: '고운바탕', nanum: '나눔명조', system: '시스템', mono: '고정폭',
 };
 let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
 if (_readerFont === 'news') _readerFont = 'gowun';

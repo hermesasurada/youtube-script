@@ -1982,7 +1982,7 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .sum-panel[data-reader-font="chosun"] .sum-md li { line-height: 1.85; }
 /* 고운바탕 — 신문·사설 본문 느낌 */
 .sum-panel[data-reader-font="gowun"] .sum-md {
-  font-family: "Gowun Batang", "Nanum Myeongjo", "Song Myung", "Noto Serif KR", serif;
+  font-family: "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
   letter-spacing: -0.01em;
   word-break: keep-all;
 }
@@ -1996,14 +1996,23 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 }
 .sum-panel[data-reader-font="nanum"] .sum-md p,
 .sum-panel[data-reader-font="nanum"] .sum-md li { line-height: 1.8; }
-/* 송명 (Song Myung) */
-.sum-panel[data-reader-font="song"] .sum-md {
-  font-family: "Song Myung", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+/* SUIT·Wanted Sans — 본문 고딕(2026-10-20 추가) */
+.sum-panel[data-reader-font="suit"] .sum-md {
+  font-family: "SUIT Variable", "Pretendard Variable", var(--font-sans);
+  word-break: keep-all;
+}
+.sum-panel[data-reader-font="wanted"] .sum-md {
+  font-family: "Wanted Sans Variable", "Pretendard Variable", var(--font-sans);
+  word-break: keep-all;
+}
+/* 마루 부리 — 네이버, 화면 장문용 명조(2026-10-20 추가) */
+.sum-panel[data-reader-font="maru"] .sum-md {
+  font-family: "MaruBuri", "Gowun Batang", "Noto Serif KR", serif;
   letter-spacing: -0.01em;
   word-break: keep-all;
 }
-.sum-panel[data-reader-font="song"] .sum-md p,
-.sum-panel[data-reader-font="song"] .sum-md li { line-height: 1.8; }
+.sum-panel[data-reader-font="maru"] .sum-md p,
+.sum-panel[data-reader-font="maru"] .sum-md li { line-height: 1.82; }
 .sum-panel[data-reader-font="system"] .sum-md {
   font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
 }

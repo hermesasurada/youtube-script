@@ -2498,14 +2498,17 @@ function adjustReaderFs(dir) {
 
 
 /* ── 본문 글꼴 선택 — 일반/몰입 공통, localStorage 기억 ── */
+// 2026-10-20: 송명 빼고 SUIT·Wanted Sans·마루 부리 추가, 이름표는 wm·sa·td와 통일(키는 그대로 — sans=Noto Sans KR)
 const _READER_FONTS = {
-  sans:       'Noto Sans KR',
   pretendard: 'Pretendard',
+  sans:       'Noto Sans KR',
+  suit:       'SUIT',
+  wanted:     'Wanted Sans',
+  maru:       '마루 부리',
   chosun: '조선일보명조',
   serif:  'Noto Serif KR',
   gowun:  '고운바탕',
   nanum:  '나눔명조',
-  song:   '송명',
   system: '시스템',
   mono:   '고정폭',
 };
