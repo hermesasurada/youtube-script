@@ -287,6 +287,15 @@ def rss_recent(channel_id: str) -> list[dict]:
     return out
 
 
+# 광고 영상(2026-10-24 사용자 지시, #1638 집코노미 '… | 흥청망청 [AD]'): 제목의 광고 표기 태그만 보고 건너뛴다.
+# 대괄호·소괄호로 감싼 AD·광고·유료광고·Sponsored와 해시태그 #광고만 — 'ADR'·'AD램' 같은 낱말은 태그가 아니라 남는다.
+_AD_TITLE_RE = re.compile(r"[\[(（【]\s*(?:AD|Ad|ad|광고|유료\s*광고|sponsored)\s*[\])）】]|#광고(?![가-힣])", re.I)
+
+
+def is_ad_title(title: str) -> bool:
+    return bool(_AD_TITLE_RE.search(title or ""))
+
+
 def filter_verdict(url: str, min_dur: int = MIN_DUR) -> tuple[bool, str]:
     """메타 확인 후 (처리해도 되는가, 사유). yt-dlp로 길이/라이브 판별.
 
@@ -457,6 +466,11 @@ def poll_channels(dry: bool = False) -> int:
         for v in vids:
             if db.find_by_yt_id(v["yt_id"]) or db.in_queue(v["yt_id"]):
                 continue                          # 이미 전사됨 / 이미 큐에 있음
+            if is_ad_title(v["title"]):
+                log(f"[poll] {title}: 제외 [ad] {v['title'][:40]}")
+                if not dry:
+                    db.enqueue_video(v["yt_id"], v["url"], v["title"], cid, status="skipped", reason="ad")
+                continue
             cmin = ch["min_duration"] if ch["min_duration"] is not None else MIN_DUR
             ok, reason = filter_verdict(v["url"], cmin)
             if not ok:

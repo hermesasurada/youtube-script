@@ -2522,3 +2522,13 @@ def test_title_translation_model_is_configurable(monkeypatch, tmp_path):
         assert all(e == "default" for _, e in tried[1:]) and len(tried) >= 2
     finally:
         db.set_title_model("", "")
+
+
+def test_ad_title_skipped_by_monitor():
+    """광고 표기 영상은 채널 감시에서 건너뛴다(2026-10-24 사용자 지시, #1638)."""
+    import channel_monitor as cm
+    for t in ("개방감 끝판왕 시티오씨엘9단지 오션파크뷰 | 흥청망청 [AD]", "[광고] 신제품 리뷰",
+              "(유료광고) 체험기", "#광고 포함", "[Sponsored] x"):
+        assert cm.is_ad_title(t), t
+    for t in ("ADR 상장 의미", "SK하이닉스 AD램?", "[ADR] 해설", "#광고판 산업", "광고 시장 전망"):
+        assert not cm.is_ad_title(t), t
