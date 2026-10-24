@@ -128,7 +128,6 @@ header h1 em {
   font-weight: 400;
 }
 .theme-btn {
-  margin-left: auto;
   background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -141,6 +140,17 @@ header h1 em {
   flex-shrink: 0;
 }
 .theme-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface2); }
+.theme-slot { margin-left: auto; display: inline-flex; }
+.theme-btn .ui-icon { width: 15px; height: 15px; }
+/* 공용 hermes-theme 메뉴가 쓰는 --ui-* 토큰을 yt 색으로 잇는다(hermes-theme.css의 다크 값보다 뒤에 와서 덮는다) */
+:root, :root[data-theme="dark"], :root[data-theme="light"] {
+  --ui-surface: var(--surface); --ui-surface-2: var(--surface2); --ui-hover: var(--surface2);
+  --ui-border: var(--border); --ui-text: var(--text); --ui-muted: var(--muted); --ui-faint: var(--subtle);
+  --ui-accent: var(--highlight); --ui-font: var(--font-sans); --ui-radius: var(--radius); --ui-radius-sm: var(--radius-sm);
+}
+/* 설정 팝업 탭(모델·채널·각주 제외) — 프롬프트 팝업 탭 모양을 그대로 쓴다 */
+.settings-tabs { margin-bottom: 4px; }
+#channels-panel .prompt-tabpane.active { gap: 10px; }
 .nav-link {
   font-size: 13px;
   color: var(--muted);

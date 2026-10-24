@@ -1,0 +1,108 @@
+/* ── Hermes 색상 모드 — sa·td·wm 공용 ─────────────────────────────────────
+   세 저장소에 같은 파일이 있다(hermes-theme.js와 짝). hermes-ui.css 뒤에 불러온다.
+   다크 색은 [data-theme="dark"] 하나로만 건다 — 시스템 설정 추종은 JS가
+   data-theme을 확정해 주므로 CSS에 prefers-color-scheme를 두 번 쓸 필요가 없다.
+   앱마다 따로 칠한 색은 각 앱 CSS의 '다크 모드' 절에서 덮는다. */
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ui-bg: #111418;
+  --ui-surface: #1a1e24;
+  --ui-surface-2: #222730;
+  --ui-hover: #2a303a;
+  --ui-border: #2f3540;
+  --ui-border-strong: #434b59;
+  --ui-text: #e4e8ee;
+  --ui-muted: #9aa4b2;
+  --ui-faint: #6f7987;
+  --ui-accent: #5b8ff0;
+  --ui-accent-hover: #7ba6f5;
+  --ui-accent-soft: #1d2b45;
+  --ui-danger: #f07f89;
+  --ui-success: #4cc27a;
+  --ui-warning: #e0b04a;
+  --sh-light: var(--ui-surface);
+  /* 공용 톤 — 앱 CSS가 다크용 배경·보조색을 고를 때 쓴다 */
+  --dm-overlay: rgba(0, 0, 0, .6);
+  --dm-shadow: 0 12px 34px rgba(0, 0, 0, .5);
+  --dm-danger-soft: #3a2024;
+  --dm-success-soft: #173323;
+  --dm-warning-soft: #3a3018;
+}
+
+/* 모드를 바꾸는 순간에는 전환 애니메이션을 끈다(JS가 한 프레임만 붙인다) */
+.hermes-theme-switching, .hermes-theme-switching * { transition: none !important; }
+
+/* 색상 모드 버튼 — 각 앱 헤더의 아이콘 버튼과 같은 크기 */
+.hermes-theme-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--ui-control-h, 34px); height: var(--ui-control-h, 34px);
+  padding: 0; flex: 0 0 auto;
+  border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm, 6px);
+  background: var(--ui-surface); color: var(--ui-muted);
+  cursor: pointer; transition: background var(--ui-fast, .15s), color var(--ui-fast, .15s);
+}
+.hermes-theme-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
+.hermes-theme-btn .ui-icon { width: 16px; height: 16px; }
+
+.hermes-theme-menu {
+  position: fixed; z-index: 10000;
+  min-width: 132px; padding: 4px;
+  border: 1px solid var(--ui-border); border-radius: var(--ui-radius, 8px);
+  background: var(--ui-surface); color: var(--ui-text);
+  box-shadow: 0 10px 28px rgba(16, 24, 40, .16);
+  font-family: var(--ui-font); font-size: 13px;
+}
+:root[data-theme="dark"] .hermes-theme-menu { box-shadow: 0 10px 28px rgba(0, 0, 0, .5); }
+.hermes-theme-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  height: 32px; padding: 0 10px;
+  border: 0; border-radius: var(--ui-radius-sm, 6px);
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.hermes-theme-menu button:hover,
+.hermes-theme-menu button:focus-visible { background: var(--ui-hover); outline: none; }
+.hermes-theme-menu .ui-icon { width: 15px; height: 15px; color: var(--ui-muted); flex: 0 0 auto; }
+.hermes-theme-menu span:first-of-type { flex: 1; }
+.hermes-theme-check { visibility: hidden; color: var(--ui-accent); font-weight: 700; }
+.hermes-theme-menu [aria-checked="true"] .hermes-theme-check { visibility: visible; }
+.hermes-theme-menu [aria-checked="true"] { font-weight: 600; }
+
+/* 다크에서 흔한 부분 — 스크롤바·입력창·선택 영역 */
+:root[data-theme="dark"] ::selection { background: #2c4a80; color: #fff; }
+:root[data-theme="dark"] :is(input, select, textarea) {
+  background-color: var(--ui-surface); color: var(--ui-text); border-color: var(--ui-border);
+}
+:root[data-theme="dark"] :is(input, textarea)::placeholder { color: var(--ui-faint); }
+:root[data-theme="dark"] img:not([src$=".svg"]) { filter: brightness(.94); }
+
+/* hermes-ui.css가 직접 칠한 색(세 앱 공통 컴포넌트) */
+:root[data-theme="dark"] :is(.app-td .card.unread .card-title,
+  .app-wm .card:not(.read) .card-title,
+  .app-sa .card.card-unread .card-title) { color: #f1f4f8; }
+:root[data-theme="dark"] :is(.app-td .card.unread .summary,
+  .app-wm .card:not(.read) .card-summary,
+  .app-sa .card.card-unread :is(.card-summary, .card-details)) { color: #b9c1cc; }
+:root[data-theme="dark"] :is(.app-td .unread-toggle.active, .app-wm #unreadToggle.active,
+  .app-wm .filter-btn.active, .app-sa .btn-unread.active, .app-sa .btn-sort.alt) { border-color: #37558f; }
+:root[data-theme="dark"] :is(.app-td .read-btn.done, .app-wm .read-btn.on, .app-sa .read-btn.done) {
+  background: var(--dm-success-soft);
+}
+:root[data-theme="dark"] .app-td :is(.error, .analysis-alert) { border-color: #5a2a30; background: var(--dm-danger-soft); }
+:root[data-theme="dark"] :is(.app-td .modal, .app-wm .modal-overlay, .app-sa .modal-overlay) { background: var(--dm-overlay); }
+
+/* ── 상단 고정 영역(타이틀 + 검색조건) — 스크롤해도 제자리(2026-09-24 사용자 지시) ──
+   세 앱 공통. 배경은 ::before로 좌우 끝까지 칠해 아래로 지나가는 카드를 가린다
+   (조상에 overflow-x:hidden이 있으면 sticky가 깨지므로 앱은 clip을 쓴다).
+   z-index는 각 앱 모달(wm 50)보다 낮게 둔다. 스크롤되면 JS가 .is-stuck을 붙여 밑줄. */
+.hermes-gnb { position: sticky; top: 0; z-index: 40; display: flow-root; padding-top: 12px; margin-top: -12px; }  /* flow-root: 마지막 줄의 아래 여백까지 배경 안에 넣는다 */
+.hermes-gnb::before {
+  content: ""; position: absolute; z-index: -1; top: 0; bottom: 0; left: -100vmax; right: -100vmax;
+  background: var(--ui-bg);
+}
+/* 붙어 있을 때는 배경을 밑줄 아래로 10px 더 내려 스크롤되는 카드와 틈을 둔다(2026-09-24 사용자 지시) */
+.hermes-gnb.is-stuck::before { bottom: -10px; }
+.hermes-gnb.is-stuck::after {
+  content: ""; position: absolute; left: -100vmax; right: -100vmax; bottom: 0; height: 1px;
+  background: var(--ui-border);
+}

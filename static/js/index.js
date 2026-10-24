@@ -44,8 +44,8 @@ document.addEventListener('click', async (e) => {
   catch (err) { alert('제거 실패: ' + err.message); }
 });
 
-/* 프롬프트 팝업: 요약 프롬프트 / Grok 문체 보정 / 각주 제외 용어 3탭.
-   앞의 두 탭은 조회 전용이다 — 프롬프트는 prompt.txt를, Grok 노트는 app.py를 고친다. */
+/* 프롬프트 팝업: 요약 프롬프트 / Grok 문체 보정 2탭(각주 제외 용어는 2026-10-24 설정 팝업으로 옮김).
+   둘 다 조회 전용이다 — 프롬프트는 prompt.txt를, Grok 노트는 app.py를 고친다. */
 function switchPromptTab(name) {
   document.querySelectorAll('#prompt-panel .prompt-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === name));
@@ -96,7 +96,24 @@ function handlePromptOverlayClick(e) {
 }
 
 /* ── 채널 자동 모니터 모달 ── */
-async function openChannelsModal() {
+/* 설정 팝업 탭(2026-10-24 사용자 지시): 모델 / 채널 / 각주 제외. 마지막 탭을 기억한다(localStorage ytSettingsTab). */
+const SETTINGS_TABS = ['model', 'channels', 'terms'];
+function switchSettingsTab(name) {
+  if (!SETTINGS_TABS.includes(name)) name = 'model';
+  document.querySelectorAll('#channels-panel .prompt-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('#channels-panel .prompt-tabpane').forEach(sec => {
+    const on = sec.dataset.pane === name;
+    sec.classList.toggle('active', on);
+    sec.hidden = !on;
+  });
+  try { localStorage.setItem('ytSettingsTab', name); } catch (e) {}
+  if (name === 'terms') renderTermExclusions();
+}
+async function openChannelsModal(tab) {
+  let t = tab;
+  if (!t) { try { t = localStorage.getItem('ytSettingsTab'); } catch (e) {} }
+  switchSettingsTab(t || 'model');
   document.getElementById('channels-overlay').hidden = false;
   document.body.style.overflow = 'hidden';
   if (_channelsCache) renderChannels(_channelsCache);
@@ -2720,20 +2737,8 @@ document.addEventListener('keydown', e => {
   else if (!document.getElementById('trans-overlay').hidden) closeTranscriptModal();
 });
 
-/* ── Theme toggle ── */
-function toggleTheme() {
-  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-  const next = isLight ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('theme', next);
-  document.getElementById('theme-btn').textContent = next === 'light' ? '☀' : '◐';
-}
-
-// Sync button icon with current theme
-(function() {
-  const theme = localStorage.getItem('theme') || 'light';
-  document.getElementById('theme-btn').textContent = theme === 'light' ? '☀' : '◐';
-})();
+/* ── 색상 모드(시스템·라이트·다크) — 공용 hermes-theme(2026-10-24, 예전 2단 토글 대체) ── */
+HermesTheme.mount(document.getElementById('theme-slot'), { className: 'theme-btn' });
 
 /* reader font init */
 _applyReaderFont();

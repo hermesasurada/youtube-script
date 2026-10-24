@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#f6f7f9" id="theme-color-meta">
+  <!-- 색상 모드(시스템·라이트·다크) — 공용 hermes-theme(2026-10-24 사용자 지시). head에서 바로 불러 깜빡임 없이 -->
+  <script src="/static/js/hermes-theme.js?v={{ static_v('js/hermes-theme.js') }}"></script>
+  <link rel="stylesheet" href="/static/css/hermes-theme.css?v={{ static_v('css/hermes-theme.css') }}">
   <title>유튜브 전사내역</title>
   <!-- 작은 로컬 marked는 선로드하고, 본문용 웹폰트·KaTeX는 요약 뒤에 로딩한다. -->
   <link rel="stylesheet" href="/reader-fonts/core.css?v={{ reader_font_v('core.css') }}">
@@ -26,9 +28,8 @@
       --font-sans: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
       --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg:        #111214;
+    :root[data-theme="dark"] {
+      --bg:        #111214;
         --surface:   #181a1d;
         --surface2:  #22252a;
         --text:      #f4f4f5;
@@ -37,8 +38,13 @@
         --border-strong: #41464f;
         --highlight: #d8655d;
         --highlight-soft: rgba(216,101,93,.14);
-        --row-sel:   rgba(216,101,93,.14);
-      }
+      --row-sel:   rgba(216,101,93,.14);
+    }
+    /* 공용 hermes-theme 메뉴가 쓰는 --ui-* 토큰을 yt 색으로 잇는다 */
+    :root, :root[data-theme="dark"], :root[data-theme="light"] {
+      --ui-surface: var(--surface); --ui-surface-2: var(--surface2); --ui-hover: var(--surface2);
+      --ui-border: var(--border); --ui-text: var(--text); --ui-muted: var(--muted); --ui-faint: var(--muted);
+      --ui-accent: var(--highlight); --ui-font: var(--font-sans); --ui-radius: var(--radius); --ui-radius-sm: var(--radius-sm);
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
@@ -210,7 +216,7 @@
     .hist-icon-btn svg { display: block; }
     .hist-icon-btn-summary { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
     .hist-icon-btn-youtube { color: #c00; }
-    @media (prefers-color-scheme: dark) { .hist-icon-btn-youtube { color: #ff4d4d; } }
+    :root[data-theme="dark"] .hist-icon-btn-youtube { color: #ff4d4d; }
     .hist-icon-btn:disabled, .hist-icon-btn[disabled] { opacity: .3; pointer-events: none; }
 
     /* 읽음 여부 */
@@ -280,6 +286,11 @@
     }
     /* 요약 헤더의 뒤로가기·YouTube·글꼴·글자크기 버튼 높이를 한 기준으로 맞춘다. */
     .modal-hdr > .icon-btn { width: 32px; height: 32px; flex-shrink: 0; }
+    /* 설정 팝업 탭(2026-10-24): 모델 / 채널 / 각주 제외 */
+    .set-tabs { display: flex; gap: 4px; padding: 3px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2); }
+    .set-tab { flex: 1; height: 34px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; }
+    .set-tab[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .icon-btn .ui-icon { width: 18px; height: 18px; }
     /* 각주 제외 용어 칩(모바일) */
     .term-excl-note { color: var(--muted, #7a7f87); font-size: .85rem; margin: 0 0 10px; }
     .term-excl-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; margin-bottom: 12px; }
@@ -305,8 +316,8 @@
     .modal-youtube-link:active { background: #c00; color: #fff; }
     .modal-original-link { color: var(--highlight); }
     .modal-original-link:active { background: var(--highlight); color: #fff; }
-    @media (prefers-color-scheme: dark) { .modal-youtube-link { color: #ff5a5a; } }
-    @media (prefers-color-scheme: dark) { .modal-original-link { color: var(--highlight); } }
+    :root[data-theme="dark"] .modal-youtube-link { color: #ff5a5a; }
+    :root[data-theme="dark"] .modal-original-link { color: var(--highlight); }
     /* 읽기 진행바(헤더 아래, 스크롤에 따라 채워짐) */
     .read-progress {
       flex-shrink: 0; height: 3px; width: 0%;
@@ -662,10 +673,10 @@
     <button class="icon-btn" id="queue-btn" onclick="openQueueM()" aria-label="처리 큐">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
     </button>
-    <button class="icon-btn" id="terms-btn" onclick="openTermsM()" aria-label="각주 제외 용어" title="각주 제외 용어">🏷</button>
-    <button class="icon-btn" id="channels-btn" onclick="openChannels()" aria-label="채널 자동 모니터 · 모델 설정" title="채널 자동 모니터 · 모델 설정">
+    <button class="icon-btn" id="channels-btn" onclick="openChannels()" aria-label="설정 — 모델 · 채널 · 각주 제외" title="설정">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
+    <span id="theme-slot" style="display:contents"></span>
     <button class="icon-btn" id="refresh-btn" onclick="loadHistory(true)" aria-label="새로고침">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     </button>
@@ -761,6 +772,14 @@ window.YS_META_COMPACT = true;
 window.YS_ASSET_VERSIONS={googleCss:"{{ reader_font_v('google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
 <script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
 <script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
+<script>
+  // 색상 모드 버튼(헤더) + 주소창 색(theme-color)을 실제 모드에 맞춘다
+  HermesTheme.mount(document.getElementById('theme-slot'), { className: 'icon-btn' });
+  (function () {
+    const sync = () => { const m = document.getElementById('theme-color-meta'); if (m) m.content = document.documentElement.dataset.theme === 'dark' ? '#111214' : '#f6f7f9'; };
+    window.addEventListener('hermes-theme', sync); sync();
+  })();
+</script>
 <script src="/static/js/model-selector.js?v={{ static_v('js/model-selector.js') }}"></script>
 <script>
 const SVG = {
@@ -1187,19 +1206,16 @@ const _Q_ST = {
   processing: '처리 중', pending: '대기', kf_retry: '캡처 재시도',
   deferred: '재시도 예약', done: '완료', failed: '실패',
 };
-// ── 각주 제외 용어(칩 나열) ───────────────────────────────────────────
-async function openTermsM() {
-  openModal('각주 제외 용어', 'utility');
-  await renderTermsM();
-}
+// ── 각주 제외 용어(칩 나열) — 설정 팝업의 '각주 제외' 탭 ─────────────────
 async function renderTermsM() {
+  const pane = $('modal-body').querySelector('[data-set-pane="terms"]');
+  if (!pane) return;
   const terms = await YS.ensureTermExclusions(true);
   const chips = terms.length
     ? terms.map(t => `<span class="term-excl-chip">${YS.escapeHtml(t)}`
         + `<button type="button" class="term-excl-del" data-term="${YS.attrEscape(t)}" aria-label="제거">✕</button></span>`).join('')
     : '<span class="term-excl-empty">아직 없음 — 요약 각주의 ✕를 누르면 여기에 쌓입니다</span>';
-  $('modal-body').className = 'modal-body';
-  $('modal-body').innerHTML = `<p class="term-excl-note">화면·블로그·새 요약 모두에서 이 용어의 각주를 붙이지 않습니다.</p>`
+  pane.innerHTML = `<p class="term-excl-note">화면·블로그·새 요약 모두에서 이 용어의 각주를 붙이지 않습니다.</p>`
     + `<div class="term-excl-list">${chips}</div>`
     + `<form class="term-excl-form" onsubmit="addTermM(event)"><input id="term-excl-input" type="text" placeholder="용어 직접 추가" maxlength="80" autocomplete="off"><button type="submit" class="term-excl-add">추가</button></form>`;
 }
@@ -1378,13 +1394,41 @@ async function mqCancel(id) {
 }
 
 /* ── 채널 자동 모니터(원격 관리) ── */
-async function openChannels() {
+/* 설정 팝업(2026-10-24 사용자 지시): 모델 / 채널 / 각주 제외 3탭 — 예전 '채널 자동 모니터' 팝업과 헤더 🏷(각주 제외)
+   버튼을 합쳤다. 마지막 탭을 기억한다(localStorage ytSettingsTab, PC와 같은 키). */
+const SET_TABS = [['model', '모델'], ['channels', '채널'], ['terms', '각주 제외']];
+let _setTab = 'model';
+try { const t = localStorage.getItem('ytSettingsTab'); if (SET_TABS.some(x => x[0] === t)) _setTab = t; } catch (e) {}
+function _settingsShell() {
+  const body = $('modal-body');
+  if (body.querySelector('.set-tabs')) return body;
+  body.innerHTML = `<div class="set-tabs" role="tablist">` + SET_TABS.map(([k, label]) =>
+      `<button type="button" class="set-tab" role="tab" data-set-tab="${k}" aria-selected="false">${label}</button>`).join('') + `</div>`
+    + `<section data-set-pane="model"></section><section data-set-pane="channels" hidden></section><section data-set-pane="terms" hidden></section>`;
+  body.querySelectorAll('[data-set-tab]').forEach(b => b.addEventListener('click', () => switchSetTab(b.dataset.setTab)));
+  return body;
+}
+function switchSetTab(name) {
+  if (!SET_TABS.some(x => x[0] === name)) name = 'model';
+  _setTab = name;
+  try { localStorage.setItem('ytSettingsTab', name); } catch (e) {}
+  const body = _settingsShell();
+  body.querySelectorAll('[data-set-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.setTab === name)));
+  body.querySelectorAll('[data-set-pane]').forEach(sec => { sec.hidden = sec.dataset.setPane !== name; });
+  body.scrollTop = 0;
+  if (name === 'terms') renderTermsM();
+}
+function openTermsM() { openChannels('terms'); }
+async function openChannels(tab) {
+  if (tab) _setTab = tab;
   $('fs-ctrl').hidden = true;             // 글자크기 컨트롤은 요약 전용
   $('font-ctrl').hidden = true;           // 글꼴 컨트롤도 요약 전용
-  openModal('채널 자동 모니터', 'utility');
+  openModal('설정', 'utility');
   $('modal-body').className = 'modal-body channels';
+  $('modal-body').innerHTML = '';
+  switchSetTab(_setTab);
   if (_mobileChannelsCache) renderChannelsM(_mobileChannelsCache);
-  else $('modal-body').innerHTML = '<div class="m-utility-loading"><span></span><span></span><span></span></div>';
+  else ['model', 'channels'].forEach(k => { $('modal-body').querySelector(`[data-set-pane="${k}"]`).innerHTML = '<div class="m-utility-loading"><span></span><span></span><span></span></div>'; });
   requestAnimationFrame(() => { loadChannels({ force: !!_mobileChannelsCache }); });
 }
 // 모델 선택기는 common.js의 YS.monitorModels가 상태·저장을, model-selector.js가 화면을 맡는다.
@@ -1392,7 +1436,7 @@ let _mobileChannelsCache = null;
 let _mobileChannelsRequest = null;
 
 function renderChannelsM(d) {
-  const body = $('modal-body');
+  const body = _settingsShell();
   YS.monitorModels.load(d);
   const q = d.queue || {}, parts = [];
   if (q.pending)    parts.push(`대기 ${q.pending}`);
@@ -1423,8 +1467,11 @@ function renderChannelsM(d) {
                 aria-label="자동 수집" onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)"><span class="ch-knob"></span></button>
       </div>`;
   }).join('') : '<div class="ch-empty">등록된 채널이 없습니다.</div>';
-  body.innerHTML = `<p class="m-utility-note">등록 채널의 새 영상을 20분마다 확인해 전사·요약·캡처합니다.</p>`
-    + `<div class="msel-host" id="model-selector"></div>` + `<div class="ch-queue">${esc(qline)}</div>`
+  body.querySelector('[data-set-pane="model"]').innerHTML =
+    `<p class="m-utility-note">새 영상의 요약은 슬롯이 돌아가며 맡고, 캡처 해설은 순서대로 폴백합니다.</p>`
+    + `<div class="msel-host" id="model-selector"></div>` + `<div class="ch-queue">${esc(qline)}</div>`;
+  body.querySelector('[data-set-pane="channels"]').innerHTML =
+    `<p class="m-utility-note">등록 채널의 새 영상을 20분마다 확인해 전사·요약·캡처합니다.</p>`
     + `<section class="ch-list-shell"><div class="m-utility-section-head"><span>등록 채널</span>`
     + `<small id="mobile-channels-count">${chans.filter(c => c.enabled).length} ON · 전체 ${chans.length}</small></div>${rows}</section>`;
   YS.monitorModels.mount($('model-selector'), {
@@ -1452,7 +1499,9 @@ async function loadChannels({ force = false } = {}) {
     if ($('modal').classList.contains('open') && $('modal-body').classList.contains('channels')) renderChannelsM(d);
   } catch (e) {
     if ($('modal-body').classList.contains('channels')) {
-      $('modal-body').innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
+      _settingsShell().querySelectorAll('[data-set-pane="model"], [data-set-pane="channels"]').forEach(sec => {
+        sec.innerHTML = `<div class="ch-empty">오류: ${esc(e.message)}</div>`;
+      });
     }
   }
 }

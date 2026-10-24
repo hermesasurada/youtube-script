@@ -473,18 +473,20 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     assert "ensureTermExclusions," in common_js
     index_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
     mobile = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()
-    assert index_js.count("YS.ensureTermExclusions(") >= 2      # 요약 뷰어 + 프롬프트 패널
+    assert index_js.count("YS.ensureTermExclusions(") >= 2      # 요약 뷰어 + 각주 제외 탭
     assert "YS.ensureTermExclusions()" in mobile
     assert "if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?" in common_js   # ✕는 확인 후 추가
     index_html = open(os.path.join(project, "templates/index.html"), encoding="utf-8").read()
     assert 'id="term-excl-list"' in index_html and 'id="term-excl-input"' in index_html
-    assert 'id="terms-overlay"' not in index_html                  # 별도 팝업 없이 프롬프트 패널의 한 탭으로 둔다
-    assert 'term-excl' in index_html.split('id="prompt-overlay"')[1]
-    # 2026-09-19: 프롬프트 패널이 3탭(요약 프롬프트/Grok 문체 보정/각주 제외 용어)이 되면서
-    # 목록 렌더는 탭 전환 시점으로 옮겼다. 패널을 열면 첫 탭만 그린다.
-    assert 'data-tab="terms"' in index_html
-    assert "renderTermExclusions();" in index_js.split("function switchPromptTab(")[1].split("\n}")[0]
-    assert 'onclick="openTermsM()"' in mobile and "async function renderTermsM()" in mobile
+    assert 'id="terms-overlay"' not in index_html                  # 별도 팝업은 없다
+    # 2026-10-24 사용자 지시: 설정 팝업(구 채널 모니터)을 모델/채널/각주 제외 3탭으로 — 각주 제외는 프롬프트
+    # 패널에서 설정 팝업으로 옮겼고, 목록은 탭을 열 때 그린다. 모바일 헤더의 🏷 버튼은 없앴다.
+    settings = index_html.split('id="channels-overlay"')[1].split('<!-- ═══ File selection modal')[0]
+    assert 'data-tab="terms"' in settings and 'term-excl' in settings
+    assert 'term-excl' not in index_html.split('id="prompt-overlay"')[1].split('id="channels-overlay"')[0]
+    assert "renderTermExclusions();" in index_js.split("function switchSettingsTab(")[1].split("\n}")[0]
+    assert 'id="terms-btn"' not in mobile and "async function renderTermsM()" in mobile
+    assert "['terms', '각주 제외']" in mobile and "if (name === 'terms') renderTermsM();" in mobile
     app_src = open(os.path.join(project, "app.py"), encoding="utf-8").read()
     assert '"/terms/excluded",' in app_src.split("_REMOTE_DATA_ALLOWED = {")[1].split("}")[0]
 

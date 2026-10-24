@@ -1,12 +1,16 @@
 <!DOCTYPE html>
 <html lang="ko">
-<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'light');</script>
 <head>
+<!-- 색상 모드(시스템·라이트·다크) — sa·td·wm·xw 공용 hermes-theme(2026-10-24 사용자 지시). 예전 2단 토글의
+     localStorage 'theme' 값은 처음 한 번 'hermes-theme'으로 옮긴다. head에서 바로 불러야 첫 화면이 깜빡이지 않는다 -->
+<script>try{var o=localStorage.getItem('theme');if(o&&!localStorage.getItem('hermes-theme')){localStorage.setItem('hermes-theme',o);}localStorage.removeItem('theme');}catch(e){}</script>
+<script src="/static/js/hermes-theme.js?v={{ static_v('js/hermes-theme.js') }}"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YouTube Transcription</title>
 <!-- 목록용 기본 글꼴과 작은 로컬 marked만 선로드. 본문 글꼴·KaTeX는 요약 뒤에 로드한다. -->
 <link rel="stylesheet" href="/reader-fonts/core.css?v={{ reader_font_v('core.css') }}">
+<link rel="stylesheet" href="/static/css/hermes-theme.css?v={{ static_v('css/hermes-theme.css') }}">
 <link rel="stylesheet" href="/static/css/index.css?v={{ static_v('css/index.css') }}">
 <link rel="stylesheet" href="/static/css/model-selector.css?v={{ static_v('css/model-selector.css') }}">
 <script>window.YS_ASSET_VERSIONS={googleCss:"{{ reader_font_v('google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
@@ -18,7 +22,7 @@
 <header>
   <h1><svg class="app-logo" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="5" fill="#ff0033"/><path d="M11 6l8 4-8 4z" fill="#fff"/></svg>YouTube <em>Transcription</em></h1>
   <span class="kf-status-badge" id="kf-status" hidden></span>
-  <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="라이트/다크 전환">◐</button>
+  <span class="theme-slot" id="theme-slot"></span>
 </header>
 
 <div class="workspace">
@@ -145,7 +149,7 @@
                 <button class="btn-sm btn-ghost" onclick="openQueueModal()"
                         title="처리 대기 중인 영상 목록 · 순서 변경">🕘 큐</button>
                 <button class="btn-sm btn-ghost btn-with-icon" onclick="openChannelsModal()"
-                        title="채널 자동 모니터 · 요약/캡처 모델 설정"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>채널 모니터</button>
+                        title="설정 — 모델 · 채널 · 각주 제외"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>설정</button>
                 <button class="btn-sm btn-ghost" onclick="openPromptModal()"
                         title="요약 프롬프트 (원격에서는 읽기 전용)">✎ 프롬프트</button>
                 <span class="history-count" id="history-count">—</span>
@@ -301,8 +305,6 @@
                 onclick="switchPromptTab('prompt')">요약 프롬프트</button>
         <button type="button" class="prompt-tab" role="tab" data-tab="grok"
                 onclick="switchPromptTab('grok')">Grok 문체 보정</button>
-        <button type="button" class="prompt-tab" role="tab" data-tab="terms"
-                onclick="switchPromptTab('terms')">각주 제외 용어</button>
       </div>
 
       <section class="prompt-tabpane active" data-pane="prompt">
@@ -317,6 +319,43 @@
         <textarea id="grok-note-text" spellcheck="false" readonly placeholder="불러오는 중…"></textarea>
       </section>
 
+      <div class="prompt-warn" id="prompt-warn" hidden></div>
+      <div class="prompt-modal-actions">
+        <span class="save-status" id="save-status"></span>
+        <button class="btn-sm btn-ghost" type="button" onclick="closePromptModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 설정 modal (2026-10-24 사용자 지시: 모델 / 채널 / 각주 제외 3탭 — 구 '채널 자동 모니터') ═══ -->
+<div class="sum-overlay utility-overlay" id="channels-overlay" hidden onclick="handleChannelsOverlayClick(event)">
+  <div class="sum-panel utility-panel" id="channels-panel">
+    <div class="sum-panel-hdr utility-panel-hdr">
+      <div class="utility-heading">
+        <span class="sum-panel-badge">설정</span>
+        <div><span class="sum-panel-title">설정</span><span class="utility-subtitle">요약·캡처 모델, 자동 수집 채널, 각주 제외 용어</span></div>
+      </div>
+      <button class="btn-sm btn-ghost utility-refresh" onclick="loadChannels({force:true})" title="새로고침">↻ 새로고침</button>
+      <button class="sum-panel-close" onclick="closeChannelsModal()" title="닫기">×</button>
+    </div>
+    <div class="channels-modal-body utility-panel-body">
+      <div class="prompt-tabs settings-tabs" role="tablist">
+        <button type="button" class="prompt-tab active" role="tab" data-tab="model" onclick="switchSettingsTab('model')">모델</button>
+        <button type="button" class="prompt-tab" role="tab" data-tab="channels" onclick="switchSettingsTab('channels')">채널</button>
+        <button type="button" class="prompt-tab" role="tab" data-tab="terms" onclick="switchSettingsTab('terms')">각주 제외</button>
+      </div>
+      <section class="prompt-tabpane active" data-pane="model">
+        <p class="prompt-hint utility-note">새 영상의 요약은 아래 슬롯이 돌아가며 맡고, 캡처(키프레임) 해설은 순서대로 폴백합니다.</p>
+        <div class="utility-section-head"><span>LLM 처리</span><small>요약 순환 · 캡처 폴백</small></div>
+        <div class="msel-host" id="model-selector"></div>
+        <div class="channels-queue" id="channels-queue"></div>
+      </section>
+      <section class="prompt-tabpane" data-pane="channels" hidden>
+        <p class="prompt-hint utility-note">등록된 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다. 채널 확인과 영상 처리는 20분 주기로 실행됩니다.</p>
+        <div class="utility-section-head channels-list-title"><span>등록 채널</span><small id="channels-count">—</small></div>
+        <ul class="channels-list" id="channels-list"></ul>
+      </section>
       <section class="prompt-tabpane" data-pane="terms" hidden>
         <div class="term-excl" id="term-excl">
           <div class="term-excl-head">
@@ -330,33 +369,6 @@
         </div>
       </section>
 
-      <div class="prompt-warn" id="prompt-warn" hidden></div>
-      <div class="prompt-modal-actions">
-        <span class="save-status" id="save-status"></span>
-        <button class="btn-sm btn-ghost" type="button" onclick="closePromptModal()">닫기</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ Channel monitor modal ═══ -->
-<div class="sum-overlay utility-overlay" id="channels-overlay" hidden onclick="handleChannelsOverlayClick(event)">
-  <div class="sum-panel utility-panel" id="channels-panel">
-    <div class="sum-panel-hdr utility-panel-hdr">
-      <div class="utility-heading">
-        <span class="sum-panel-badge">모니터</span>
-        <div><span class="sum-panel-title">채널 자동 모니터</span><span class="utility-subtitle">신규 영상 수집과 후속 처리 정책</span></div>
-      </div>
-      <button class="btn-sm btn-ghost utility-refresh" onclick="loadChannels({force:true})" title="새로고침">↻ 새로고침</button>
-      <button class="sum-panel-close" onclick="closeChannelsModal()" title="닫기">×</button>
-    </div>
-    <div class="channels-modal-body utility-panel-body">
-      <p class="prompt-hint utility-note">등록된 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다. 채널 확인과 영상 처리는 20분 주기로 실행됩니다.</p>
-      <div class="utility-section-head"><span>LLM 처리</span><small>요약 순환 · 캡처 폴백</small></div>
-      <div class="msel-host" id="model-selector"></div>
-      <div class="channels-queue" id="channels-queue"></div>
-      <div class="utility-section-head channels-list-title"><span>등록 채널</span><small id="channels-count">—</small></div>
-      <ul class="channels-list" id="channels-list"></ul>
     </div>
   </div>
 </div>
