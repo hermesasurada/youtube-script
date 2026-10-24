@@ -772,9 +772,10 @@ def _augment_summary_md(md_path: str, headings: list[dict], kept: list[dict], ur
         arr.sort(key=lambda x: x["ts"])
 
     def strip_html(items):
+        # 이미지 아래 캡션(시각 + 한 줄 설명)은 달지 않는다(2026-10-24 사용자 지시) — 설명은 대체 텍스트로만 남긴다
         figs = "".join(
-            f'<figure><img src="{url_base}/{it["file"]}" loading="lazy" alt="">'
-            f'<figcaption><b>{_hms(it["ts"])}</b> {_html.escape(_caption_text(it.get("caption")))}</figcaption></figure>'
+            f'<figure><img src="{url_base}/{it["file"]}" loading="lazy" '
+            f'alt="{_html.escape(_caption_text(it.get("caption")), quote=True)}"></figure>'
             for it in items)
         return f'<div class="kf-strip">{figs}</div>'
 

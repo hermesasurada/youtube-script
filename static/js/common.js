@@ -1608,7 +1608,8 @@
 .kf-strip figure{margin:0;flex:0 0 auto;width:280px;border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;background:var(--surface,#fff);box-shadow:0 1px 3px rgba(0,0,0,.07);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;}
 .kf-strip figure:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.16);border-color:var(--border-strong,var(--border,#ccc));}
 .kf-strip img{display:block;width:100%;height:158px;object-fit:cover;cursor:zoom-in;}
-.kf-strip figcaption{display:flex;align-items:baseline;gap:.45rem;font-size:.74rem;color:var(--muted,#666);padding:.42rem .6rem .48rem;line-height:1.45;}
+/* 캡처 아래 캡션은 보이지 않는다(2026-10-24 사용자 지시) — 예전 요약 md에 남은 figcaption도 화면에서 숨긴다 */
+.kf-strip figcaption{display:none;}
 .kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;font-size:.68rem;font-weight:600;flex-shrink:0;background:var(--highlight-soft,rgba(99,102,241,.1));padding:.06rem .38rem;border-radius: 2px;}
 /* ── 외국어 제목의 원문 병기(번역 제목이 H1, 원문은 그 아래 작게) ── */
 .sum-title-orig{margin:-.55rem 0 1.15rem;font-size:.8em;font-weight:400;line-height:1.5;color:var(--muted,#8a8279);opacity:.85;word-break:keep-all;}
@@ -1779,10 +1780,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
       const strip = im.closest(".kf-strip");
       const imgs = strip ? [...strip.querySelectorAll("img")] : [im];
       lbList = imgs.map((x) => x.src);
-      lbCaps = imgs.map((x) => {                 // 각 이미지의 figcaption(시각·설명)
-        const cap = x.closest("figure")?.querySelector("figcaption");
-        return cap ? cap.innerHTML : "";
-      });
+      lbCaps = imgs.map(() => "");               // 크게 보기에도 캡션은 띄우지 않는다(2026-10-24 사용자 지시)
       _lbBuild();
       lbShow(imgs.indexOf(im), true);       // 열 때는 애니메이션 없이 해당 이미지로
       lb.classList.add("open");
