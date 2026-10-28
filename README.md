@@ -55,6 +55,9 @@ launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 cd ~/projects && git clone --depth 1 --branch 1.3.1 \
   https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git bgutil-pot-provider
 cd bgutil-pot-provider/server && npm ci && npx tsc     # build/main.js 생성
+#    ⚠️ 업스트림은 [::]:4416(모든 인터페이스)으로 열어 LAN에 노출된다 → src/main.ts의
+#    host 두 곳("::", "0.0.0.0")을 "127.0.0.1"로 바꾼 뒤 빌드(2026-10-28 로컬 패치).
+#    새 버전으로 다시 받을 때도 이 패치를 재적용하고 lsof -iTCP:4416로 127.0.0.1인지 확인.
 
 # 3) 상시 구동: launchd 에이전트 com.yhandhs.bgutil-pot (KeepAlive, 포트 4416)
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.yhandhs.bgutil-pot.plist
@@ -65,7 +68,7 @@ curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"v
 #   → bgutil:http-1.3.1 (external) 이 보이면 정상 (script-node/deno는 unavailable이어도 무관)
 ```
 
-- 서버는 Node(`~/.local/bin/node`)로 돌고 로그는 `~/Library/Logs/hermes/bgutil-pot.{out,err}.log`.
+- 서버는 Node(`~/.local/bin/node` → `~/.hermes/node`, 2026-10-28 22.23.4로 보안 업데이트)로 돌고 로그는 `~/Library/Logs/hermes/bgutil-pot.{out,err}.log`.
 - venv를 재생성하면 **1)을 다시 설치**해야 한다. 플러그인만 있고 서버가 죽으면 토큰을 못 받아 403이 다시 는다.
 - 토큰이 있어도 간헐적으로 걸릴 수 있어, 403이면 큐 지연 전에 **새 세션으로 즉시 1회 재시도**한다(`app.py` 전사 / `keyframe_report.py` 캡처).
 
