@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 
 from flask import Flask, Response, redirect, render_template, request, send_file, send_from_directory
+import lan_guard  # 로컬·Tailscale 외 접속 차단(2026-10-30)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -71,6 +72,7 @@ except ImportError:
     yt_dlp = None
 
 app      = Flask(__name__)
+lan_guard.guard_flask(app)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 READER_FONT_DIR = os.path.expanduser("~/projects/hermes-reader-fonts")
