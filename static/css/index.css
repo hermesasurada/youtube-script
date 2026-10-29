@@ -2179,6 +2179,11 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .uploader-modal { width: min(460px, 92vw); }
 .uploader-search-wrap { padding: .6rem .9rem; border-bottom: 1px solid var(--border); }
 .uploader-search-wrap input { width: 100%; height: 32px; box-sizing: border-box; }
+.uploader-sort { display: flex; gap: 4px; margin-top: .5rem; }   /* 정렬 기준(2026-10-29) */
+.uploader-sort button { flex: 1; height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.uploader-sort button:hover { color: var(--text); }
+.uploader-sort button[aria-pressed="true"] { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); font-weight: 600; }
 .uploader-list { display: flex; flex-direction: column; padding: .35rem; }
 .uploader-item { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .55rem .7rem; border: 0;
   background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }

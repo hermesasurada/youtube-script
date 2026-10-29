@@ -406,6 +406,40 @@ function fmtUnreadDur(secs) {
   const h = Math.floor(m / 60);
   return h ? `${h}시간${m % 60 ? ' ' + (m % 60) + '분' : ''}` : `${m}분`;
 }
+// 채널 정렬 기준(2026-10-29 사용자 지시): 안읽은 개수 / 안읽은 영상 길이 합계 / 안읽은 영상 평균 길이.
+// 고른 기준은 localStorage ytUploaderSort에 기억한다(모바일과 공유). 동점이면 다른 쪽 값 → 채널 이름순.
+const _UP_SORT_KEYS = {
+  unread: s => [s.unread, s.unreadSecs],
+  secs:   s => [s.unreadSecs, s.unread],
+  avg:    s => [s.unread ? s.unreadSecs / s.unread : 0, s.unread],
+};
+function _uploaderSortMode() {
+  let m = 'unread';
+  try { m = localStorage.getItem('ytUploaderSort') || m; } catch (e) {}
+  return _UP_SORT_KEYS[m] ? m : 'unread';
+}
+function _sortUploaders(stats, mode) {
+  const key = _UP_SORT_KEYS[mode] || _UP_SORT_KEYS.unread;
+  return [...stats.keys()].sort((a, b) => {
+    const x = key(stats.get(a)), y = key(stats.get(b));
+    return (y[0] - x[0]) || (y[1] - x[1]) || a.localeCompare(b, 'ko');
+  });
+}
+// 행 오른쪽 길이 표시 — 평균 기준이면 평균 길이, 아니면 합계
+function _uploaderDurLabel(s, mode) {
+  if (!s.unread) return null;
+  if (mode === 'avg') {
+    const d = fmtUnreadDur(s.unreadSecs / s.unread);
+    return d ? { text: `평균 ${d}`, title: '안읽은 영상 평균 길이' } : null;
+  }
+  const d = fmtUnreadDur(s.unreadSecs);
+  return d ? { text: d, title: '안읽은 영상 원본 길이 합계' } : null;
+}
+function setUploaderSort(mode) {
+  if (!_UP_SORT_KEYS[mode]) return;
+  try { localStorage.setItem('ytUploaderSort', mode); } catch (e) {}
+  _renderUploaderList();
+}
 function _uploaderStats() {
   const stats = new Map();
   for (const it of _historyItems) {
@@ -432,13 +466,15 @@ function _renderUploaderList() {
   const q = (document.getElementById('uploader-search').value || '').trim().toLowerCase();
   const cur = document.getElementById('hf-uploader').value;
   const stats = _uploaderStats();
-  const names = [...stats.keys()].sort((a, b) =>
-    (stats.get(b).unread - stats.get(a).unread) || a.localeCompare(b, 'ko'));   // 미읽음 많은 채널 먼저
+  const mode = _uploaderSortMode();
+  document.querySelectorAll('#uploader-sort button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.sort === mode)));
+  const names = _sortUploaders(stats, mode);
   const totalUnread = [...stats.values()].reduce((n, s) => n + s.unread, 0);
   const row = (val, label, s) => {
-    const dur = s.unread ? fmtUnreadDur(s.unreadSecs) : '';
+    const dur = _uploaderDurLabel(s, mode);
     const unread = s.unread ? `<span class="up-unread" title="미읽음 ${s.unread}건">${s.unread}</span>`
-      + (dur ? `<span class="up-dur" title="안읽은 영상 원본 길이 합계">${dur}</span>` : '') : '';
+      + (dur ? `<span class="up-dur" title="${dur.title}">${dur.text}</span>` : '') : '';
     return `<button type="button" class="uploader-item${val === cur ? ' selected' : ''}" role="option"
         aria-selected="${val === cur}" data-uploader="${_attrEsc(val)}" onclick="pickUploader(this.dataset.uploader)">
         <span class="up-name">${esc(label)}</span>${unread}<span class="up-total" title="전체 ${s.total}건">${s.total}</span></button>`;

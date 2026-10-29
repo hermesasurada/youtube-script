@@ -380,7 +380,12 @@
       <span id="uploader-modal-title">채널 선택</span>
       <button class="modal-close" onclick="closeUploaderModal()" aria-label="닫기">✕</button>
     </div>
-    <div class="uploader-search-wrap"><input type="search" id="uploader-search" class="hf-title" placeholder="채널 검색" oninput="_renderUploaderList()" autocomplete="off"></div>
+    <div class="uploader-search-wrap"><input type="search" id="uploader-search" class="hf-title" placeholder="채널 검색" oninput="_renderUploaderList()" autocomplete="off">
+      <div class="uploader-sort" id="uploader-sort" role="group" aria-label="채널 정렬">
+        <button type="button" data-sort="unread" onclick="setUploaderSort(this.dataset.sort)">안읽은 개수</button>
+        <button type="button" data-sort="secs" onclick="setUploaderSort(this.dataset.sort)">길이 합계</button>
+        <button type="button" data-sort="avg" onclick="setUploaderSort(this.dataset.sort)">평균 길이</button>
+      </div></div>
     <div class="modal-body"><div class="uploader-list" id="uploader-list" role="listbox" aria-label="채널"></div></div>
   </div>
 </div>

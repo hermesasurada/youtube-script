@@ -114,6 +114,10 @@
     .uploader-pick { padding: .6rem .75rem 1rem; }
     .uploader-q { width: 100%; box-sizing: border-box; height: 38px; padding: 0 .7rem; margin-bottom: .5rem;
       border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 14px; }
+    .uploader-sort { display: flex; gap: 5px; margin-bottom: .5rem; }   /* 정렬 기준(2026-10-29) */
+    .uploader-sort button { flex: 1; height: 34px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+      color: var(--muted); font: inherit; font-size: 13px; white-space: nowrap; }
+    .uploader-sort button[aria-pressed="true"] { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); font-weight: 700; }
     .uploader-list { display: flex; flex-direction: column; }
     .uploader-item { display: flex; align-items: center; gap: .55rem; width: 100%; padding: .7rem .6rem; border: 0;
       border-bottom: 1px solid var(--border); background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; }
@@ -920,21 +924,52 @@ function openUploaderM() {
   openModal('채널 선택', 'utility');
   $('modal-body').className = 'modal-body uploader-pick';
   $('modal-body').innerHTML = '<input type="search" id="uploader-q" class="uploader-q" placeholder="채널 검색" autocomplete="off">'
+    + '<div class="uploader-sort" id="uploader-sort" role="group" aria-label="채널 정렬">'
+    + '<button type="button" data-sort="unread" onclick="setUploaderSortM(this.dataset.sort)">안읽은 개수</button>'
+    + '<button type="button" data-sort="secs" onclick="setUploaderSortM(this.dataset.sort)">길이 합계</button>'
+    + '<button type="button" data-sort="avg" onclick="setUploaderSortM(this.dataset.sort)">평균 길이</button></div>'
     + '<div class="uploader-list" id="uploader-list" role="listbox" aria-label="채널"></div>';
   $('uploader-q').addEventListener('input', _renderUploaderM);
   _renderUploaderM();
 }
+// 채널 정렬 기준(2026-10-29 사용자 지시, 데스크톱과 같은 규칙·같은 localStorage ytUploaderSort)
+const _UP_SORT_KEYS = {
+  unread: s => [s.unread, s.unreadSecs],
+  secs:   s => [s.unreadSecs, s.unread],
+  avg:    s => [s.unread ? s.unreadSecs / s.unread : 0, s.unread],
+};
+function _uploaderSortModeM() {
+  let m = 'unread';
+  try { m = localStorage.getItem('ytUploaderSort') || m; } catch (e) {}
+  return _UP_SORT_KEYS[m] ? m : 'unread';
+}
+function setUploaderSortM(mode) {
+  if (!_UP_SORT_KEYS[mode]) return;
+  try { localStorage.setItem('ytUploaderSort', mode); } catch (e) {}
+  _renderUploaderM();
+}
+function _uploaderDurM(st, mode) {
+  if (!st.unread) return '';
+  return mode === 'avg' ? (fmtUnreadDur(st.unreadSecs / st.unread) ? `평균 ${fmtUnreadDur(st.unreadSecs / st.unread)}` : '')
+                        : fmtUnreadDur(st.unreadSecs);
+}
 function _renderUploaderM() {
   const q = ($('uploader-q').value || '').trim().toLowerCase();
   const stats = _uploaderStatsM();
-  const names = [...stats.keys()].sort((a, b) =>
-    (stats.get(b).unread - stats.get(a).unread) || a.localeCompare(b, 'ko'));
+  const mode = _uploaderSortModeM();
+  document.querySelectorAll('#uploader-sort button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.sort === mode)));
+  const key = _UP_SORT_KEYS[mode];
+  const names = [...stats.keys()].sort((a, b) => {
+    const x = key(stats.get(a)), y = key(stats.get(b));
+    return (y[0] - x[0]) || (y[1] - x[1]) || a.localeCompare(b, 'ko');
+  });
   const all = { total: ALL.length, unread: [...stats.values()].reduce((n, s) => n + s.unread, 0),
                 unreadSecs: [...stats.values()].reduce((n, s) => n + s.unreadSecs, 0) };
   const row = (val, label, st) => `<button type="button" class="uploader-item${val === _uploader ? ' selected' : ''}" role="option"
       aria-selected="${val === _uploader}" data-uploader="${attrEsc(val)}" onclick="pickUploaderM(this.dataset.uploader)">
       <span class="up-name">${esc(label)}</span>${st.unread ? `<span class="up-unread">${st.unread}</span>`
-        + (fmtUnreadDur(st.unreadSecs) ? `<span class="up-dur">${fmtUnreadDur(st.unreadSecs)}</span>` : '') : ''}<span class="up-total">${st.total}</span></button>`;
+        + (_uploaderDurM(st, mode) ? `<span class="up-dur">${_uploaderDurM(st, mode)}</span>` : '') : ''}<span class="up-total">${st.total}</span></button>`;
   const list = names.filter(n => !q || n.toLowerCase().includes(q));
   $('uploader-list').innerHTML = (q ? '' : row('', '전체 채널', all)) + list.map(n => row(n, n, stats.get(n))).join('')
     + (list.length || !q ? '' : '<div class="uploader-empty">일치하는 채널이 없습니다</div>');
