@@ -3667,7 +3667,7 @@ def summary_content():
 
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
-BLOG_RENDER_VERSION = "2026-10-15-person-popover-date"
+BLOG_RENDER_VERSION = "2026-10-29-video-thumbnail"
 
 
 _TERM_NOTE_LABEL_RE = re.compile(
@@ -3994,6 +3994,63 @@ def _include_blog_notes(body_html, notes):
     return ''.join(parts)
 
 
+# 블로그 썸네일 = 메인 화면 카드의 영상 썸네일(2026-10-29 사용자 지시). Blogger는 본문 첫 이미지로 홈 목록
+# 썸네일·og:image를 만들므로 본문 맨 위(원제 줄 바로 뒤)에 넣는다. 이미지는 Cloudflare R2(hermes_blogger.r2)에
+# 올린 공개 주소만 쓴다 — data URI(base64)는 블로그 홈 목록을 끊고, i.ytimg.com 직링크는 쓰지 않는다(wm과 같은 원칙).
+# 같은 그림의 고해상도(maxresdefault)를 먼저 받고, 안 되면 카드가 쓰는 res/thumbs 사본을 그대로 올린다.
+_BLOG_THUMB_CSS = "display:block;max-width:100%;height:auto;margin:0 auto;border-radius:4px;"
+
+
+def _blog_thumb_bytes(yt_id: str) -> bytes | None:
+    if not re.fullmatch(r"[\w-]{5,20}", yt_id or ""):
+        return None
+    try:
+        with urllib.request.urlopen(f"https://i.ytimg.com/vi/{yt_id}/maxresdefault.jpg", timeout=10) as r:
+            data = r.read()
+        if len(data) >= 2048:          # 없는 해상도는 회색 자리표시(~1KB)
+            return data
+    except Exception:
+        pass
+    path = os.path.join(THUMB_DIR, f"{yt_id}.jpg")
+    if not os.path.isfile(path):
+        save_thumbnail(yt_id)
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        return data if len(data) > 1024 else None
+    except OSError:
+        return None
+
+
+def _insert_blog_thumbnail(body_html: str, yt_id: str, video_url: str = "") -> str:
+    """본문 맨 위(원제 줄 뒤, 없으면 감싸개 맨 앞)에 R2에 올린 영상 썸네일을 넣는다. 실패하면 그대로."""
+    if not yt_id or 'data-ys-thumb="1"' in body_html:
+        return body_html
+    try:
+        from hermes_blogger import r2
+        if not r2.configured():
+            log.warning("blog thumbnail skipped: R2 not configured (%s)", r2.ENV_PATH)
+            return body_html
+        data = _blog_thumb_bytes(yt_id)
+        if not data:
+            log.info("blog thumbnail skipped %s: no image", yt_id)
+            return body_html
+        url = r2.put(f"yt/thumb/{yt_id}-{hashlib.sha256(data).hexdigest()[:12]}.jpg", data, "image/jpeg")
+    except Exception as e:  # noqa: BLE001 — 썸네일 실패가 발행을 막지 않는다
+        log.info("blog thumbnail skipped %s: %s", yt_id, e)
+        return body_html
+    img = f'<img src="{_htmlmod.escape(url, quote=True)}" alt="" style="{_BLOG_THUMB_CSS}">'
+    if video_url:
+        img = f'<a href="{_htmlmod.escape(video_url, quote=True)}" target="_blank" rel="noopener">{img}</a>'
+    block = f'<div data-ys-thumb="1" style="margin:0 0 1.4em;">{img}</div>'
+    m = re.search(r'<p data-ys-original-title="1"[^>]*>.*?</p>', body_html, re.S)
+    if not m:
+        m = re.match(r"\s*<div\b[^>]*>", body_html, flags=re.IGNORECASE)
+    if not m:
+        return block + "\n" + body_html
+    return body_html[:m.end()] + "\n" + block + body_html[m.end():]
+
+
 @app.route("/history/publish-blog", methods=["POST"])
 def history_publish_blog():
     """요약을 내 블로그스팟에 바로 발행한다 — 공통 라이브러리 hermes_blogger(wm과 토큰 공유).
@@ -4030,6 +4087,7 @@ def history_publish_blog():
     if not bl.configured():
         return _json({"status": "error", "code": "not_configured",
                       "message": "블로그 연동 미설정 — 서버에서 hermes-blogger auth 실행 필요"})
+    html = _insert_blog_thumbnail(html, item.get("yt_id") or "", item.get("webpage_url") or "")
     uploader = (item.get("uploader") or "").strip()
     labels = [uploader] if uploader and uploader != "—" else []
     post_id = str(item.get("blog_post_id") or "")
