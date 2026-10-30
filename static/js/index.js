@@ -2423,7 +2423,7 @@ document.addEventListener('ys:blog-state', e => {
 /* 발행된 글을 지금 요약·메모로 덮어쓴다. URL은 그대로고 발행시각만 갱신된다. */
 async function _updateBlogPost(btn) {
   if (!_summaryMd || !_summaryItemId) return;
-  if (!confirm('블로그 글을 지금 요약 내용으로 수정할까요? (기존 글이 덮어써집니다)')) return;
+  if (!await YS.askConfirm({ title: '블로그 글 수정', message: '발행된 글을 지금 요약·메모로 수정할까요? (주소는 그대로입니다)', ok: '수정' })) return;
   const label = btn && btn.querySelector('.pub-label');
   const setLbl = (t, color) => { if (label) label.textContent = t; if (btn) btn.style.color = color || ''; };
   const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKo, people: await YS.blogPeople(_summaryItemId) });
@@ -2451,7 +2451,7 @@ async function _updateBlogPost(btn) {
 /* 발행한 블로그 글을 지우고 '블로그 발행' 상태로 되돌린다(2026-10-19). */
 async function _deleteBlogPost(btn) {
   if (!_summaryItemId || !_blogUrl) return;
-  if (!confirm('블로그에서 이 글을 삭제할까요? (공개된 글이 지워지고 되돌릴 수 없습니다)')) return;
+  if (!await YS.askConfirm({ title: '블로그 글 삭제', message: '블로그에서 이 글을 삭제할까요? (공개된 글이 지워지고 되돌릴 수 없습니다)', ok: '삭제', danger: true })) return;
   const label = btn && btn.querySelector('.pub-label');
   if (btn) btn.disabled = true;
   if (label) label.textContent = '삭제 중…';
@@ -2488,7 +2488,7 @@ async function publishSummaryToBlog(btn) {
   if (!_summaryMd || !_summaryItemId) return;
   const label = btn && btn.querySelector('.pub-label');
   const setLbl = (t, color) => { if (label) label.textContent = t; if (btn) btn.style.color = color || ''; };
-  if (!confirm('블로그스팟에 바로 발행할까요? (초안이 아니라 즉시 공개됩니다)')) return;
+  if (!await YS.askConfirm({ title: '블로그 발행', message: '블로그스팟에 바로 발행할까요? (초안이 아니라 즉시 공개됩니다)', ok: '발행' })) return;
   const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKo, people: await YS.blogPeople(_summaryItemId) });
   btn.disabled = true; setLbl('발행 중…');
   try {

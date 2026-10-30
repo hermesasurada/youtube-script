@@ -1856,7 +1856,7 @@ document.addEventListener('ys:blog-state', e => {
 /* 발행된 글을 지금 요약·메모로 덮어쓴다(데스크톱 _updateBlogPost와 같은 엔드포인트). */
 async function updateBlogPostM(btn) {
   if (!_summaryMd || !_summaryItemId) return;
-  if (!confirm('블로그 글을 지금 요약 내용으로 수정할까요? (기존 글이 덮어써집니다)')) return;
+  if (!await YS.askConfirm({ title: '블로그 글 수정', message: '발행된 글을 지금 요약·메모로 수정할까요? (주소는 그대로입니다)', ok: '수정' })) return;
   const lbl = btn.querySelector('.action-label');
   const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM, people: await YS.blogPeople(_summaryItemId) });
   btn.disabled = true; lbl.textContent = '수정 중…';
@@ -1877,7 +1877,7 @@ async function updateBlogPostM(btn) {
 // 발행한 블로그 글 삭제(2026-10-19) — 지우면 '블로그 발행' 상태로 돌아간다.
 async function deleteBlogPostM(btn) {
   if (!_summaryItemId || !_blogUrl) return;
-  if (!confirm('블로그에서 이 글을 삭제할까요? (공개된 글이 지워지고 되돌릴 수 없습니다)')) return;
+  if (!await YS.askConfirm({ title: '블로그 글 삭제', message: '블로그에서 이 글을 삭제할까요? (공개된 글이 지워지고 되돌릴 수 없습니다)', ok: '삭제', danger: true })) return;
   const lbl = btn.querySelector('.action-label');
   btn.disabled = true; lbl.textContent = '삭제 중…';
   try {
@@ -1901,7 +1901,7 @@ async function publishToBlog(btn) {
     return;
   }
   if (!_summaryMd || !_summaryItemId) return;
-  if (!confirm('블로그스팟에 바로 발행할까요? (즉시 공개됩니다)')) return;
+  if (!await YS.askConfirm({ title: '블로그 발행', message: '블로그스팟에 바로 발행할까요? (초안이 아니라 즉시 공개됩니다)', ok: '발행' })) return;
   const lbl = btn.querySelector('.action-label');
   const { html, title } = YS.mdToBloggerHtml(_summaryMd, { translatedTitle: _titleKoM, people: await YS.blogPeople(_summaryItemId) });
   btn.disabled = true; lbl.textContent = '…';

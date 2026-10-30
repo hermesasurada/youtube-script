@@ -476,6 +476,68 @@
     return menu;
   }
 
+  /**
+   * 블로그 발행·수정·삭제 확인 팝업 — wm 발행 팝업(#pubModal)과 같은 모양(2026-10-31 사용자 지시).
+   * 머리(제목 + ✕) · 안내문 · 오른쪽 '취소 / 확인' 버튼. 바깥 클릭·Esc·✕는 취소, Enter는 확인.
+   * 모바일에서도 하단 시트가 아니라 화면 가운데에 띄운다. 결과는 Promise<boolean>.
+   */
+  function askConfirm({ title, message, ok = '확인', danger = false }) {
+    if (typeof document === 'undefined') return Promise.resolve(false);
+    _setupKeyframeUI();
+    document.querySelectorAll('.ys-confirm').forEach(m => m.remove());
+    const prevFocus = document.activeElement;
+    const ov = document.createElement('div');
+    ov.className = 'ys-confirm';
+    const card = document.createElement('div');
+    card.className = 'ys-confirm-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+    const head = document.createElement('div');
+    head.className = 'ys-confirm-head';
+    const t = document.createElement('span');
+    t.id = 'ys-confirm-title';
+    t.textContent = title || '';
+    card.setAttribute('aria-labelledby', t.id);
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'ys-confirm-close'; x.textContent = '✕';
+    x.setAttribute('aria-label', '닫기');
+    head.append(t, x);
+    const msg = document.createElement('p');
+    msg.className = 'ys-confirm-msg';
+    msg.textContent = message || '';
+    const acts = document.createElement('div');
+    acts.className = 'ys-confirm-actions';
+    const no = document.createElement('button');
+    no.type = 'button'; no.className = 'ys-confirm-cancel'; no.textContent = '취소';
+    const yes = document.createElement('button');
+    yes.type = 'button'; yes.className = 'ys-confirm-ok' + (danger ? ' danger' : ''); yes.textContent = ok;
+    acts.append(no, yes);
+    card.append(head, msg, acts);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+    setTimeout(() => yes.focus(), 0);
+    return new Promise(res => {
+      function done(v) {
+        ov.remove();
+        document.removeEventListener('keydown', onKey, true);
+        if (prevFocus && prevFocus.focus) { try { prevFocus.focus({ preventScroll: true }); } catch (e) {} }
+        res(v);
+      }
+      // 뒤 모달(요약 팝업)의 Esc 닫기보다 먼저 받아 이 팝업만 닫는다
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); done(false); }
+        else if (e.key === 'Enter' && document.activeElement !== no && document.activeElement !== x) {
+          e.preventDefault(); e.stopImmediatePropagation(); done(true);
+        }
+      }
+      document.addEventListener('keydown', onKey, true);
+      ov.addEventListener('click', e => { if (e.target === ov) done(false); });
+      x.onclick = () => done(false);
+      no.onclick = () => done(false);
+      yes.onclick = () => done(true);
+    });
+  }
+
   function _setupTermNoteUI() {
     if (global.__ysTermNoteUI || typeof document === 'undefined') return;
     global.__ysTermNoteUI = true;
@@ -1623,6 +1685,7 @@
     splitSummarySections,
     attachSectionEditors,
     openBlogMenu,
+    askConfirm,
     listTermExclusions: () => [..._termExcl],
     termSenses: (term) => _termSenses[term] || [],
   };
@@ -1723,6 +1786,18 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-blog-menu-item.danger .ys-blog-menu-label{color:var(--error,#c0392b);}
 .ys-blog-menu-hint{font-size:.72rem;color:var(--muted,#7a7f87);}
 .ys-blog-menu-head{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--border,#e4e7e4);font-size:.72rem;color:var(--muted,#7a7f87);}
+/* 블로그 발행 확인 팝업 — wm #pubModal과 같은 배치(머리·안내문·오른쪽 버튼), 모바일도 가운데 */
+.ys-confirm{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(16,24,40,.45);}
+.ys-confirm-card{width:100%;max-width:400px;display:flex;flex-direction:column;gap:14px;padding:20px 22px;border:1px solid var(--border,#e4e4e7);border-radius:var(--radius-lg,12px);background:var(--surface,#fff);color:var(--text,#18181b);box-shadow:0 18px 48px -16px rgba(0,0,0,.45);font-family:var(--font-sans,inherit);}
+.ys-confirm-head{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:16px;font-weight:700;letter-spacing:-.01em;}
+.ys-confirm-close{flex:none;width:30px;height:30px;border-radius:10px;border:1px solid var(--border,#e4e4e7);background:var(--surface2,#f1f3f5);color:var(--muted,#71717a);font-size:13px;line-height:1;cursor:pointer;}
+.ys-confirm-close:hover{color:var(--text,#18181b);}
+.ys-confirm-msg{margin:0;font-size:14px;line-height:1.6;color:var(--text,#18181b);white-space:pre-line;word-break:keep-all;}
+.ys-confirm-actions{display:flex;justify-content:flex-end;gap:8px;}
+.ys-confirm-actions button{height:34px;padding:0 16px;border-radius:6px;font:inherit;font-size:14px;cursor:pointer;border:1px solid var(--border,#e4e4e7);background:var(--surface2,#f1f3f5);color:var(--text,#18181b);}
+.ys-confirm-actions .ys-confirm-ok{background:var(--highlight,#b83a3a);border-color:var(--highlight,#b83a3a);color:#fff;font-weight:600;}
+.ys-confirm-actions .ys-confirm-ok.danger{background:var(--error,#c0392b);border-color:var(--error,#c0392b);}
+.ys-confirm-actions .ys-confirm-ok:hover{filter:brightness(1.07);}
 .summary-memo{margin:.85rem 0;padding:8px 12px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
 .summary-memo.empty{padding:0;border:0;background:none;}
 .summary-memo-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95em;line-height:1.65;margin-bottom:5px;}
