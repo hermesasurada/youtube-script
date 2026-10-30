@@ -61,6 +61,7 @@ import document_io
 import humanize_korean
 import notation
 import term_marks
+import term_senses
 import name_fix
 import keyframe_report
 import llm_gateway
@@ -1817,6 +1818,10 @@ def _reindex_summary(save_path: str) -> None:
             _warn_script_mix(save_path, f.read())
     except OSError:
         pass
+    try:
+        term_senses.schedule(save_path)   # 새 각주가 제외 용어와 표기만 같고 뜻이 다른지(뒤에서)
+    except Exception:  # noqa: BLE001 — 부가 기능
+        pass
     md = _md_from_summary_path(save_path)
     if md:
         try:
@@ -2855,7 +2860,7 @@ def summarize():
         )
 
     template = _inject_term_exclusions(data.get("prompt") or DEFAULT_PROMPT,
-                                       db.list_term_exclusions())
+                                       _term_exclusions_for_prompt())
     prompt = template.replace("{transcript}", transcript_blob)
     save_path = _summary_path_for_md(abs_path)
     skip_claude = bool(
@@ -2915,17 +2920,47 @@ def get_prompt():
     return _json({"prompt": prompt, "grok_note": _GROK_STYLE_NOTE})
 
 
-def _inject_term_exclusions(prompt: str, terms: list[str]) -> str:
+_SENSE_PROMPT_CHARS = 40     # 프롬프트에 싣는 뜻 길이 상한 — 뜻을 가르는 데는 첫머리면 충분하다
+
+
+def _term_exclusions_for_prompt() -> list:
+    """프롬프트용 제외 목록: 뜻이 기록된 용어는 (용어, [뜻…]), 아니면 용어 문자열."""
+    out = []
+    for info in db.term_exclusion_senses().values():
+        out.append((info["term"], info["senses"]) if info["senses"] else info["term"])
+    return out
+
+
+def _inject_term_exclusions(prompt: str, terms: list) -> str:
     """사용자 지정 각주 제외 용어를 요약 프롬프트에 심는다.
 
     프롬프트 본문의 고정 제외 목록과 같은 층위로 읽히도록 전사 자리표시자가 있는
-    줄 바로 앞에 한 줄로 넣는다(자리표시자가 없으면 끝에 붙인다).
+    줄 바로 앞에 넣는다(자리표시자가 없으면 끝에 붙인다). 항목은 용어 문자열(모든 뜻을
+    뺀다) 또는 (용어, [뜻…]) — 뜻이 있으면 그 뜻으로 쓰일 때만 빼고, 같은 표기의 다른 뜻은
+    평소 기준대로 각주를 단다(2026-10-30 사용자 지시: 하네스 AI 실행 환경 ↔ 차량 배선).
     """
-    terms = [str(t).strip() for t in (terms or []) if str(t).strip()]
-    if not terms:
+    plain, scoped = [], []
+    for t in terms or []:
+        if isinstance(t, (tuple, list)):
+            term = str(t[0]).strip()
+            senses = [re.sub(r"\s+", " ", str(x)).strip() for x in (t[1] if len(t) > 1 else []) if str(x).strip()]
+            if term and senses:
+                scoped.append(term + "(" + " / ".join(x[:_SENSE_PROMPT_CHARS] for x in senses) + ")")
+            elif term:
+                plain.append(term)
+        elif str(t).strip():
+            plain.append(str(t).strip())
+    if not plain and not scoped:
         return prompt
-    line = ("- 사용자가 지정한 다음 용어도 설명 없이 이해되는 말로 보고 별표와 해설을 붙이지 않는다: "
-            + "·".join(terms) + "\n\n")
+    line = ""
+    if plain:
+        line += ("- 사용자가 지정한 다음 용어도 설명 없이 이해되는 말로 보고 별표와 해설을 붙이지 않는다: "
+                 + "·".join(plain) + "\n")
+    if scoped:
+        line += ("- 사용자가 지정한 다음 용어는 괄호 속 뜻으로 쓰일 때 설명 없이 이해되는 말로 보고 별표와 "
+                 "해설을 붙이지 않는다. 같은 표기라도 다른 뜻으로 쓰이면 평소 기준대로 판단한다: "
+                 + "; ".join(scoped) + "\n")
+    line += "\n"
     idx = prompt.find("{transcript}")
     if idx < 0:
         return prompt.rstrip("\n") + "\n\n" + line.rstrip("\n")
@@ -2949,16 +2984,31 @@ def people_excluded():
 def term_exclusions():
     """각주 제외 용어 목록 조회/추가/삭제. 요약 뷰어의 ✕ 버튼과 프롬프트 패널이 쓴다."""
     if request.method == "GET":
-        return _json({"terms": db.list_term_exclusions()})
+        return _json(_term_exclusion_state())
     data = request.get_json(force=True) or {}
     term = str(data.get("term") or "").strip()
     if not term or len(term) > 80:
         return _json({"error": "용어를 입력하세요(80자 이내)."}, 400)
     if request.method == "POST":
-        added = db.add_term_exclusion(term)
-        return _json({"ok": True, "added": added, "terms": db.list_term_exclusions()})
+        sense = str(data.get("sense") or "").strip()     # ✕를 누른 각주의 설명문(직접 입력은 없음)
+        added = db.add_term_exclusion(term, sense) if sense else db.add_term_exclusion(term)
+        if added and sense:
+            term_senses.schedule_term(term)               # 같은 표기의 다른 각주를 이 뜻과 맞춰 본다
+        return _json({"ok": True, "added": added, **_term_exclusion_state()})
     removed = db.remove_term_exclusion(term)
-    return _json({"ok": True, "removed": removed, "terms": db.list_term_exclusions()})
+    return _json({"ok": True, "removed": removed, **_term_exclusion_state()})
+
+
+def _term_exclusion_state() -> dict:
+    """terms = 제외 용어 표시명, senses = 용어별 뜻(칩 툴팁), keep = 뜻이 달라 남길 각주 키
+    ('용어 키\x01설명 키', common.js `_defKey`와 같은 규칙). 판정이 없는 각주는 예전처럼 뺀다."""
+    try:
+        excl = db.term_exclusion_senses()
+        return {"terms": [v["term"] for v in excl.values()],
+                "senses": {v["term"]: v["senses"] for v in excl.values() if v["senses"]},
+                "keep": term_senses.kept_keys()}
+    except Exception:  # noqa: BLE001 — 뜻 정보가 깨져도 표기 목록은 돌려준다
+        return {"terms": db.list_term_exclusions()}
 
 
 @app.route("/prompt/default")
@@ -3651,6 +3701,7 @@ def summary_content():
     try:
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             content = f.read()
+        term_senses.schedule(abs_path)        # 제외 용어와 표기가 같은 각주의 뜻 판정(뒤에서, 없으면 무동작)
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
         original = _original_video_for_item(item)
         return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
@@ -3673,10 +3724,6 @@ def summary_content():
 BLOG_RENDER_VERSION = "2026-10-29-video-thumbnail"
 
 
-_TERM_NOTE_LABEL_RE = re.compile(
-    r'<p class="term-note">\s*\*?\s*<strong>(.*?)</strong>', re.S)
-
-
 def _excluded_note_mtime(summary_path: str) -> float:
     """이 글의 각주 중 '제외 목록에 들어가 사라진' 것들의 최신 추가 시각(epoch).
 
@@ -3695,13 +3742,17 @@ def _excluded_note_mtime(summary_path: str) -> float:
             text = f.read()
     except OSError:
         return 0.0
+    checks = db.term_sense_checks()
     latest = 0.0
-    for raw in _TERM_NOTE_LABEL_RE.findall(text):
+    for label, definition in term_senses.notes_in(text):
         # 화면과 같은 기준으로 맞춘다: '용어 (원어)' → '용어'
-        label = re.sub(r"\s*\([^()]*\)\s*$", "", re.sub(r"<[^>]+>", "", raw)).strip()
-        hit = times.get(db.normalize_term(label))
-        if hit:
-            latest = max(latest, hit)
+        key = db.normalize_term(label)
+        hit = times.get(key)
+        if not hit:
+            continue
+        same, checked = checks.get((key, db.sense_key(definition)), (True, 0.0))
+        # 뜻이 달라 다시 보이게 된 각주는 판정 시각이 변경 시각이다(발행본에는 빠져 있다)
+        latest = max(latest, hit if same else max(hit, checked))
     return latest
 
 

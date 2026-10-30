@@ -1213,15 +1213,20 @@ const _Q_ST = {
   deferred: '재시도 예약', done: '완료', failed: '실패',
 };
 // ── 각주 제외 용어(칩 나열) — 설정 팝업의 '각주 제외' 탭 ─────────────────
+// 칩 툴팁: ✕로 뺀 용어는 저장된 뜻(같은 표기의 다른 뜻은 남는다), 직접 입력한 용어는 모든 뜻
+function _termSenseTitle(t) {
+  const senses = YS.termSenses(t);
+  return senses.length ? '이 뜻일 때만 뺌: ' + senses.join(' / ') : '모든 뜻에서 뺌(직접 입력)';
+}
 async function renderTermsM() {
   const pane = $('modal-body').querySelector('[data-set-pane="terms"]');
   if (!pane) return;
   const terms = await YS.ensureTermExclusions(true);
   const chips = terms.length
-    ? terms.map(t => `<span class="term-excl-chip">${YS.escapeHtml(t)}`
+    ? terms.map(t => `<span class="term-excl-chip" title="${YS.attrEscape(_termSenseTitle(t))}">${YS.escapeHtml(t)}`
         + `<button type="button" class="term-excl-del" data-term="${YS.attrEscape(t)}" aria-label="제거">✕</button></span>`).join('')
     : '<span class="term-excl-empty">아직 없음 — 요약 각주의 ✕를 누르면 여기에 쌓입니다</span>';
-  pane.innerHTML = `<p class="term-excl-note">화면·블로그·새 요약 모두에서 이 용어의 각주를 붙이지 않습니다.</p>`
+  pane.innerHTML = `<p class="term-excl-note">화면·블로그·새 요약 모두에서 이 용어의 각주를 붙이지 않습니다. 각주의 ✕로 뺀 용어는 그 뜻일 때만 빼고(표기가 같아도 뜻이 다르면 남김), 직접 입력한 용어는 모든 뜻을 뺍니다.</p>`
     + `<div class="term-excl-list">${chips}</div>`
     + `<form class="term-excl-form" onsubmit="addTermM(event)"><input id="term-excl-input" type="text" placeholder="용어 직접 추가" maxlength="80" autocomplete="off"><button type="submit" class="term-excl-add">추가</button></form>`;
 }

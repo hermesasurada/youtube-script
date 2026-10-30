@@ -19,12 +19,17 @@ async function loadSavedPrompt() {
 }
 
 // ── 각주 제외 용어(프롬프트 패널 하단 칩) ─────────────────────────────
+// 칩 툴팁: ✕로 뺀 용어는 저장된 뜻(같은 표기의 다른 뜻은 남는다), 직접 입력한 용어는 모든 뜻
+function _termSenseTitle(t) {
+  const senses = YS.termSenses(t);
+  return senses.length ? '이 뜻일 때만 뺌: ' + senses.join(' / ') : '모든 뜻에서 뺌(직접 입력)';
+}
 async function renderTermExclusions() {
   const list = document.getElementById('term-excl-list');
   if (!list) return;
   const terms = await YS.ensureTermExclusions(true);
   list.innerHTML = terms.length
-    ? terms.map(t => `<span class="term-excl-chip">${YS.escapeHtml(t)}`
+    ? terms.map(t => `<span class="term-excl-chip" title="${YS.attrEscape(_termSenseTitle(t))}">${YS.escapeHtml(t)}`
         + `<button type="button" class="term-excl-del" data-term="${YS.attrEscape(t)}" title="목록에서 제거">✕</button></span>`).join('')
     : '<span class="term-excl-empty">아직 없음 — 요약 각주의 ✕를 누르거나 아래에 입력</span>';
 }

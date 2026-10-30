@@ -443,10 +443,13 @@ def test_term_exclusions_route_and_prompt_injection(monkeypatch):
     """/terms/excluded GET·POST·DELETE, 그리고 요약 프롬프트에 제외 목록이 심긴다."""
     store = []
     monkeypatch.setattr(db, "list_term_exclusions", lambda: list(store))
+    monkeypatch.setattr(db, "term_exclusion_senses",
+                        lambda: {db.normalize_term(t): {"term": t, "senses": []} for t in store})
+    monkeypatch.setattr(app.term_senses, "kept_keys", lambda: [])
     monkeypatch.setattr(db, "add_term_exclusion", lambda t: (store.append(t) or True) if t not in store else False)
     monkeypatch.setattr(db, "remove_term_exclusion", lambda t: (store.remove(t) or True) if t in store else False)
     c = app.app.test_client()
-    assert c.get("/terms/excluded").get_json() == {"terms": []}
+    assert c.get("/terms/excluded").get_json() == {"terms": [], "senses": {}, "keep": []}
     r = c.post("/terms/excluded", json={"term": "크롤링"}).get_json()
     assert r["added"] is True and r["terms"] == ["크롤링"]
     assert c.post("/terms/excluded", json={"term": "  "}).status_code == 400
@@ -460,6 +463,63 @@ def test_term_exclusions_route_and_prompt_injection(monkeypatch):
     assert out.index("크롤링·색인") < out.index("{transcript}")      # 전사 앞에 들어간다
     assert app._inject_term_exclusions(tpl, []) == tpl
     assert "크롤링" in app._inject_term_exclusions("규칙만 있음", ["크롤링"])
+
+
+def test_term_exclusion_senses_db(tmp_path, monkeypatch):
+    """2026-10-30: ✕로 뺀 용어는 뜻(각주 설명문)을 기록하고, 뜻이 늘면 '다른 뜻' 판정만 다시 한다."""
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
+    db._local.c = None
+    db.init()
+    ai = "AI 모델의 도구 사용·기억·권한·작업 흐름을 관리하는 실행 환경"
+    assert db.add_term_exclusion("하네스", ai) is True
+    assert db.add_term_exclusion("하네스", ai + " ") is False                 # 같은 뜻(공백 차이)은 무시
+    assert db.term_exclusion_senses()[db.normalize_term("하네스")]["senses"] == [ai]
+    key = db.normalize_term("하네스")
+    assert db.term_sense_checks()[(key, db.sense_key(ai))][0] is True       # ✕를 누른 뜻 자체는 '같음'
+    car = "차량 내부에서 전력과 신호를 전달하는 전선 묶음"
+    db.set_term_sense_check(key, car, False)
+    assert app.term_senses.kept_keys() == [f"{key}\u0001{db.sense_key(car)}"]
+    assert db.add_term_exclusion("하네스", "모델 주변을 감싸 실행을 돕는 장치") is True   # 두 번째 뜻
+    assert app.term_senses.kept_keys() == []                                 # '다른 뜻' 판정은 다시
+    assert db.add_term_exclusion("크롤링") is True                           # 직접 입력 = 모든 뜻
+    assert db.term_exclusion_senses()[db.normalize_term("크롤링")]["senses"] == []
+    assert db.remove_term_exclusion("하네스") is True
+    assert db.term_sense_checks() == {}
+    db._local.c = None
+
+
+def test_term_senses_parse_and_judge(monkeypatch):
+    import term_senses
+    text = ('<div class="term-notes"><p class="term-note">* <strong>하네스 (harness)</strong> — 차량의 '
+            '<em>배선</em> 장치</p><p class="term-note">* <strong>CUDA</strong>: NVIDIA &amp; GPU 플랫폼</p></div>')
+    assert term_senses.notes_in(text) == [("하네스", "차량의 배선 장치"), ("CUDA", "NVIDIA & GPU 플랫폼")]
+    excl = {db.normalize_term("하네스"): {"term": "하네스", "senses": ["AI 실행 환경"]},
+            db.normalize_term("CUDA"): {"term": "CUDA", "senses": []}}       # 뜻 없는 용어는 판정 대상 아님
+    assert term_senses.pending(text, excl, {}) == [(db.normalize_term("하네스"), "하네스", "차량의 배선 장치")]
+    answers = iter(["둘은 분야가 다르다.\nDIFFERENT", "SAME.", "모르겠음", None])
+    monkeypatch.setattr(term_senses, "_ask", lambda *a, **k: next(answers))   # 실제 Spark는 부르지 않는다
+    assert term_senses.judge("하네스", "차량의 배선 장치", ["AI 실행 환경"]) is False
+    assert term_senses.judge("하네스", "모델을 감싼 실행 구조", ["AI 실행 환경"]) is True
+    assert term_senses.judge("하네스", "?", ["AI 실행 환경"]) is None       # 판정 불가 → 예전처럼 뺀다
+    assert term_senses.judge("하네스", "??", ["AI 실행 환경"]) is None      # 백엔드 실패
+    assert term_senses.judge("하네스", "AI 실행  환경", ["AI 실행 환경"]) is True   # 같은 설명은 묻지 않는다
+
+
+def test_scoped_term_exclusions_in_prompt():
+    tpl = "규칙\n{transcript}\n"
+    out = app._inject_term_exclusions(tpl, ["크롤링", ("하네스", ["AI 모델의 실행 환경"])])
+    assert "붙이지 않는다: 크롤링\n" in out
+    assert "하네스(AI 모델의 실행 환경)" in out and "다른 뜻으로 쓰이면 평소 기준대로" in out
+    assert out.index("하네스(") < out.index("{transcript}")
+
+
+def test_excluded_mark_regex_respects_word_boundary():
+    """'PR'을 빼도 CRISPR*·GDPR*의 별표는 남는다(2026-10-30 실데이터 16건)."""
+    common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"), encoding="utf-8").read()
+    body = common[common.index("function _excludedMarkRegex"):common.index("function _stripExcludedMarks")]
+    assert "(?<![A-Za-z가-힣" in body and "skip" in body
+    apply = common[common.index("function applyTermExclusions(root)"):][:900]
+    assert "_termKeep.has(" in apply and "_stripExcludedMarks(root, kept)" in apply
 
 
 def test_term_exclusion_ui_is_wired_on_every_surface():

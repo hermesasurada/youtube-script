@@ -231,33 +231,44 @@
   // ── 사용자 지정 각주 제외 용어(서버 /terms/excluded) ─────────────────────
   // 요약 뷰어의 각주 행 ✕ 버튼으로 쌓인다. 화면 렌더·블로그 발행에서 해당 각주와
   // 본문 별표를 지우고, 서버는 새 요약 프롬프트에도 같은 목록을 심는다.
+  // 2026-10-30: 뜻 단위 — ✕를 누른 각주의 설명문이 그 용어의 뜻으로 저장되고, 같은 표기라도
+  // 서버(term_senses.py)가 뜻이 다르다고 판정한 각주(_termKeep)는 남긴다(하네스: AI ↔ 차량 배선).
   const _termExcl = new Set();
+  const _termKeep = new Set();          // '용어 키\u0001설명 키' — 서버 term_senses.kept_keys()와 같은 규칙
+  let _termSenses = {};                 // 표시명 → [뜻…] (설정 탭 칩 툴팁)
   let _termExclLoading = null;
   function _normTerm(s) {
     return String(s || '').replace(/\u00a0/g, ' ').replace(/[\u2010-\u2015]/g, '-')
       .replace(/\s+/g, ' ').trim().toLowerCase();
   }
-  function _setTermExclusions(list) {
+  /** 각주 설명문 비교 키 — 영숫자·한글만 남긴 소문자(db.sense_key와 같은 규칙). */
+  function _defKey(s) {
+    return String(s || '').toLowerCase().replace(/[^0-9a-z가-힣]/g, '');
+  }
+  function _setTermExclusions(d) {
     _termExcl.clear();
-    (list || []).forEach(t => { const k = _normTerm(t); if (k) _termExcl.add(k); });
+    _termKeep.clear();
+    ((d && d.terms) || []).forEach(t => { const k = _normTerm(t); if (k) _termExcl.add(k); });
+    ((d && d.keep) || []).forEach(k => _termKeep.add(k));
+    _termSenses = (d && d.senses) || {};
   }
   async function ensureTermExclusions(force) {
     if (_termExclLoading && !force) return _termExclLoading;
     _termExclLoading = fetch('/terms/excluded', { headers: { Accept: 'application/json' } })
       .then(r => (r.ok ? r.json() : { terms: [] }))
-      .then(d => { _setTermExclusions(d.terms); return d.terms || []; })
+      .then(d => { _setTermExclusions(d); return d.terms || []; })
       .catch(() => []);
     return _termExclLoading;
   }
-  async function apiTermExclusion(term, remove) {
+  async function apiTermExclusion(term, remove, sense) {
     const r = await fetch('/terms/excluded', {
       method: remove ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ term }),
+      body: JSON.stringify(sense ? { term, sense } : { term }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
-    _setTermExclusions(d.terms);
+    _setTermExclusions(d);
     return d;
   }
   function _noteLabel(note) {
@@ -265,9 +276,20 @@
     const raw = (strong ? strong.textContent : note.textContent.replace(/^\s*\*\s*/, '')).trim();
     return raw.replace(/\s*\([^()]*\)\s*$/, '').trim();   // '용어 (원어)' → '용어'
   }
-  function _excludedMarkRegex() {
-    if (!_termExcl.size) return null;
-    const alts = [..._termExcl].map(t => t
+  /** 각주 행의 설명문 — 용어(strong)와 ✕ 버튼을 뺀 나머지(term_senses.notes_in과 같은 기준). */
+  function _noteDef(note) {
+    const c = note.cloneNode(true);
+    const strong = c.querySelector('strong');
+    if (strong) strong.remove();
+    c.querySelectorAll('.term-note-x').forEach(b => b.remove());
+    return c.textContent.replace(/\s+/g, ' ').replace(/^[\s*—–:：-]+/, '').trim();
+  }
+  function _excludedMarkRegex(skip) {
+    const terms = [..._termExcl].filter(t => !(skip && skip.has(t)));
+    if (!terms.length) return null;
+    // 더 긴 낱말의 끝부분은 건드리지 않는다(2026-10-30: 'PR'이 CRISPR*·GDPR*, 'AX'가 softmax*,
+    // 'AWS'가 laws*의 별표를 지웠다). 숫자로 시작하지 않는 용어는 앞의 숫자는 허용 — 25bp*.
+    const alts = terms.map(t => `(?<![A-Za-z가-힣${/^[0-9]/.test(t) ? '0-9' : ''}])` + t
       .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       .replace(/[ -]/g, '[\\s\\-\\u2010-\\u2015]*'));
     // 본문 표기는 `증류(distillation)*`처럼 원어를 괄호로 병기하는 경우가 많아, 용어와
@@ -280,8 +302,8 @@
    * 텍스트 노드에 놓이므로(`**증류(distillation)**\*`), 블록의 전체 텍스트에서 위치를
    * 찾은 뒤 그 별표가 실제로 들어 있는 노드에서만 한 글자를 지운다.
    */
-  function _stripExcludedMarks(root) {
-    const rx = _excludedMarkRegex();
+  function _stripExcludedMarks(root, skip) {
+    const rx = _excludedMarkRegex(skip);
     if (!rx || typeof document === 'undefined') return;
     const blocks = root.querySelectorAll(
       'p:not(.term-note), li, h1, h2, h3, h4, h5, blockquote, td, th, figcaption, summary');
@@ -341,11 +363,15 @@
   /** 현재 DOM에서 제외 용어의 각주 행과 본문 별표를 지운다(렌더 직후·✕ 클릭 직후 공용). */
   function applyTermExclusions(root) {
     if (!root || !_termExcl.size) return;
+    const kept = new Set();        // 뜻이 달라 남긴 각주의 용어 — 그 별표도 남긴다
     root.querySelectorAll('p.term-note').forEach(note => {
-      if (_termExcl.has(_normTerm(_noteLabel(note)))) note.remove();
+      const k = _normTerm(_noteLabel(note));
+      if (!_termExcl.has(k)) return;
+      if (_termKeep.has(k + '\u0001' + _defKey(_noteDef(note)))) { kept.add(k); return; }
+      note.remove();               // 판정 전이거나 같은 뜻 — 예전처럼 뺀다
     });
     root.querySelectorAll('.term-notes').forEach(box => { if (!box.querySelector('p.term-note')) box.remove(); });
-    _stripExcludedMarks(root);
+    _stripExcludedMarks(root, kept);
   }
   /** 각주 행마다 ✕(이 용어를 제외 목록에 추가) 버튼을 단다. 블로그 HTML에서는 뗀다. */
   function _decorateTermNotes(root) {
@@ -357,7 +383,8 @@
       btn.type = 'button';
       btn.className = 'term-note-x';
       btn.dataset.term = label;
-      btn.title = `'${label}' 각주를 앞으로 붙이지 않기`;
+      btn.dataset.sense = _noteDef(note);      // 이 뜻으로만 뺀다(같은 표기의 다른 뜻은 남는다)
+      btn.title = `이 뜻의 '${label}' 각주를 앞으로 붙이지 않기`;
       btn.setAttribute('aria-label', btn.title);
       btn.textContent = '✕';
       note.appendChild(btn);
@@ -458,10 +485,10 @@
       e.preventDefault(); e.stopPropagation();
       const term = btn.dataset.term || '';
       if (!term || btn.disabled) return;
-      if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?\n앞으로 화면·블로그·새 요약에서 이 용어의 각주를 붙이지 않습니다.`)) return;
+      if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?\n앞으로 화면·블로그·새 요약에서 이 뜻의 '${term}' 각주를 붙이지 않습니다.\n표기가 같아도 뜻이 다른 각주는 남깁니다.`)) return;
       btn.disabled = true;
       try {
-        await apiTermExclusion(term, false);
+        await apiTermExclusion(term, false, btn.dataset.sense || '');
         applyTermExclusions(document.body);
         _ysToast(`'${term}' — 앞으로 각주를 붙이지 않습니다`);
       } catch (err) {
@@ -1597,6 +1624,7 @@
     attachSectionEditors,
     openBlogMenu,
     listTermExclusions: () => [..._termExcl],
+    termSenses: (term) => _termSenses[term] || [],
   };
 
   // ── 키프레임 스트립(가로 스크롤) + 라이트박스(원본 보기) ────────────
