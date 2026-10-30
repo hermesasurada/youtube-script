@@ -2534,3 +2534,17 @@ def test_ad_title_skipped_by_monitor():
         assert cm.is_ad_title(t), t
     for t in ("ADR 상장 의미", "SK하이닉스 AD램?", "[ADR] 해설", "#광고판 산업", "광고 시장 전망"):
         assert not cm.is_ad_title(t), t
+
+
+def test_remote_phone_can_load_reader_fonts():
+    """원격(Tailscale) 접속에서도 공용 본문 글꼴이 받아져야 한다 — 허용 목록에서 빠져 302로 튕기면 폰의
+    글꼴 선택이 전부 대체 글꼴로 나왔다(2026-10-30 사용자 지적: 조선일보명조 모양이 다름)."""
+    client = app.app.test_client()
+    remote = {"REMOTE_ADDR": "100.64.0.9"}
+    phone = {"User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile"}
+    for path in ("/reader-fonts/core.css", "/reader-fonts/ChosunilboNM.woff", "/reader-fonts/google.css"):
+        resp = client.get(path, environ_base=remote, headers=phone)
+        assert resp.status_code == 200, path
+        resp.close()
+    # 허용 목록 밖의 경로는 여전히 이력 페이지로 보낸다
+    assert client.get("/prompt/save", environ_base=remote, headers=phone).status_code == 302

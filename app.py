@@ -1451,6 +1451,7 @@ def _restrict_remote_access():
             or p.startswith("/queue/")     # 처리 큐 조회/추가/순서변경(원격 관리 허용)
             or p.startswith("/m/")
             or p.startswith("/static/")
+            or p.startswith("/reader-fonts/")  # 공용 본문 글꼴 — 빠지면 폰에서 글꼴이 전부 대체 글꼴로 나온다(2026-10-30)
             or p.startswith("/sframe/")
             or p.startswith("/thumb/")):   # 썸네일 사본(비공개 전환 영상 폴백)
         return
