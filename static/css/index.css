@@ -1973,9 +1973,6 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .sum-panel[data-reader-font="sans"] .sum-md {
   font-family: "Noto Sans KR", var(--font-sans);
 }
-.sum-panel[data-reader-font="serif"] .sum-md {
-  font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
-}
 /* Pretendard — 이미 self-host 중인 가변 폰트(한글 자간이 촘촘해 본문 가독성이 좋다) */
 .sum-panel[data-reader-font="pretendard"] .sum-md {
   font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", var(--font-sans);
@@ -1984,28 +1981,12 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 }
 /* 조선일보명조 — self-host 원본(신문 본문 명조) */
 .sum-panel[data-reader-font="chosun"] .sum-md {
-  font-family: "Chosunilbo_myungjo", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+  font-family: "Chosunilbo_myungjo", serif;
   letter-spacing: -0.01em;
   word-break: keep-all;
 }
 .sum-panel[data-reader-font="chosun"] .sum-md p,
 .sum-panel[data-reader-font="chosun"] .sum-md li { line-height: 1.85; }
-/* 고운바탕 — 신문·사설 본문 느낌 */
-.sum-panel[data-reader-font="gowun"] .sum-md {
-  font-family: "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
-  letter-spacing: -0.01em;
-  word-break: keep-all;
-}
-.sum-panel[data-reader-font="gowun"] .sum-md p,
-.sum-panel[data-reader-font="gowun"] .sum-md li { line-height: 1.82; }
-/* 나눔명조 */
-.sum-panel[data-reader-font="nanum"] .sum-md {
-  font-family: "Nanum Myeongjo", "Gowun Batang", "Noto Serif KR", serif;
-  letter-spacing: -0.01em;
-  word-break: keep-all;
-}
-.sum-panel[data-reader-font="nanum"] .sum-md p,
-.sum-panel[data-reader-font="nanum"] .sum-md li { line-height: 1.8; }
 /* SUIT·Wanted Sans — 본문 고딕(2026-10-20 추가) */
 .sum-panel[data-reader-font="suit"] .sum-md {
   font-family: "SUIT Variable", "Pretendard Variable", var(--font-sans);
@@ -2015,20 +1996,8 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   font-family: "Wanted Sans Variable", "Pretendard Variable", var(--font-sans);
   word-break: keep-all;
 }
-/* 마루 부리 — 네이버, 화면 장문용 명조(2026-10-20 추가) */
-.sum-panel[data-reader-font="maru"] .sum-md {
-  font-family: "MaruBuri", "Gowun Batang", "Noto Serif KR", serif;
-  letter-spacing: -0.01em;
-  word-break: keep-all;
-}
-.sum-panel[data-reader-font="maru"] .sum-md p,
-.sum-panel[data-reader-font="maru"] .sum-md li { line-height: 1.82; }
 .sum-panel[data-reader-font="system"] .sum-md {
   font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
-}
-.sum-panel[data-reader-font="mono"] .sum-md {
-  font-family: var(--font-mono);
-  letter-spacing: -0.01em;
 }
 /* code blocks keep mono even in serif mode */
 .sum-panel .sum-md code,

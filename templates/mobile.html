@@ -378,49 +378,25 @@
     .modal[data-reader-font="sans"] .modal-body.markdown {
       font-family: "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
     }
-    .modal[data-reader-font="serif"] .modal-body.markdown {
-      font-family: "Noto Serif KR", "Apple Myungjo", Georgia, serif;
-    }
     /* Pretendard — self-host 가변 폰트(자간이 촘촘해 좁은 화면에서 특히 잘 읽힌다) */
     .modal[data-reader-font="pretendard"] .modal-body.markdown {
       font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", -apple-system, sans-serif;
       letter-spacing: -.003em; word-break: keep-all;
     }
     .modal[data-reader-font="chosun"] .modal-body.markdown {
-      font-family: "Chosunilbo_myungjo", "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
+      font-family: "Chosunilbo_myungjo", serif;
       letter-spacing: -.01em; word-break: keep-all;
     }
     .modal[data-reader-font="chosun"] .modal-body.markdown p,
     .modal[data-reader-font="chosun"] .modal-body.markdown li { line-height: 1.85; }
-    .modal[data-reader-font="gowun"] .modal-body.markdown {
-      font-family: "Gowun Batang", "Nanum Myeongjo", "Noto Serif KR", serif;
-      letter-spacing: -.01em; word-break: keep-all;
-    }
-    .modal[data-reader-font="gowun"] .modal-body.markdown p,
-    .modal[data-reader-font="gowun"] .modal-body.markdown li { line-height: 1.82; }
-    .modal[data-reader-font="nanum"] .modal-body.markdown {
-      font-family: "Nanum Myeongjo", "Gowun Batang", "Noto Serif KR", serif;
-      letter-spacing: -.01em; word-break: keep-all;
-    }
-    .modal[data-reader-font="nanum"] .modal-body.markdown p,
-    .modal[data-reader-font="nanum"] .modal-body.markdown li { line-height: 1.8; }
     .modal[data-reader-font="suit"] .modal-body.markdown {
       font-family: "SUIT Variable", "Pretendard Variable", -apple-system, sans-serif; word-break: keep-all;
     }
     .modal[data-reader-font="wanted"] .modal-body.markdown {
       font-family: "Wanted Sans Variable", "Pretendard Variable", -apple-system, sans-serif; word-break: keep-all;
     }
-    .modal[data-reader-font="maru"] .modal-body.markdown {
-      font-family: "MaruBuri", "Gowun Batang", "Noto Serif KR", serif;
-      letter-spacing: -.01em; word-break: keep-all;
-    }
-    .modal[data-reader-font="maru"] .modal-body.markdown p,
-    .modal[data-reader-font="maru"] .modal-body.markdown li { line-height: 1.82; }
     .modal[data-reader-font="system"] .modal-body.markdown {
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
-    }
-    .modal[data-reader-font="mono"] .modal-body.markdown {
-      font-family: var(--font-mono); letter-spacing: -.01em;
     }
     /* ── 처리 큐(모달 내) ── */
     .mq-add { display: flex; gap: .4rem; margin-bottom: .4rem; }
@@ -736,13 +712,8 @@
           <option value="sans">Noto Sans KR</option>
           <option value="suit">SUIT</option>
           <option value="wanted">Wanted Sans</option>
-          <option value="maru">마루 부리</option>
           <option value="chosun">조선일보명조</option>
-          <option value="serif">Noto Serif KR</option>
-          <option value="gowun">고운바탕</option>
-          <option value="nanum">나눔명조</option>
           <option value="system">시스템</option>
-          <option value="mono">고정폭</option>
         </select>
       </label>
       <div class="fs-ctrl" id="fs-ctrl" hidden>
@@ -1627,12 +1598,12 @@ function adjustFs(delta) {
 }
 
 // 데스크톱과 같은 본문 글꼴 설정을 공유하고 로컬에 기억한다.
+// 2026-10-30: 마루 부리·Noto Serif KR·고운바탕·나눔명조·고정폭 제거(사용자 지시 — 공용 글꼴 자원과 함께). 지운 값이 저장돼 있으면 기본값으로
 const _READER_FONTS = {
-  pretendard: 'Pretendard', sans: 'Noto Sans KR', suit: 'SUIT', wanted: 'Wanted Sans', maru: '마루 부리',
-  chosun: '조선일보명조', serif: 'Noto Serif KR', gowun: '고운바탕', nanum: '나눔명조', system: '시스템', mono: '고정폭',
+  pretendard: 'Pretendard', sans: 'Noto Sans KR', suit: 'SUIT', wanted: 'Wanted Sans',
+  chosun: '조선일보명조', system: '시스템',
 };
 let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
-if (_readerFont === 'news') _readerFont = 'gowun';
 if (!_READER_FONTS[_readerFont]) _readerFont = 'sans';
 function _applyReaderFont() {
   $('modal').dataset.readerFont = _readerFont;
