@@ -2043,6 +2043,27 @@ def test_collapse_detected_on_multi_sentence_cycle(tmp_path):
     assert collapsed and "4문장 묶음" in detail
 
 
+def test_collapse_detected_on_short_loop_of_full_window_segments(tmp_path):
+    """2026-10-31 월가아재 62분: 한 문장이 30초 세그먼트로 3번 되풀이돼 93초가 비었다 — 120초 기준 미만이라 통과했었다.
+    무음·음악 구간의 정형 환각('We'll be right back.'·'자막은 설정에서…')은 빠진 말이 없으니 세지 않는다."""
+    def build(text):
+        segs = [(f"문장 {i}", i * 4.0, i * 4.0 + 4) for i in range(30)]
+        t = 120.0
+        segs.append((text, t, t + 3)); t += 3
+        for _ in range(3):
+            segs.append((text, t, t + 30)); t += 30
+        segs += [(f"뒤 {i}", t + i * 4, t + i * 4 + 4) for i in range(10)]
+        return segs
+    collapsed, detail = app._looks_collapsed(_whisper_json_timed(tmp_path, build("금리에 훨씬 민감해지기 시작한 상태에서")))
+    assert collapsed and "세그먼트로 되풀이" in detail
+    for filler in ("We'll be right back.", "자막은 설정에서 선택하실 수 있습니다.", "한글자막 by 한효정"):
+        assert app._looks_collapsed(_whisper_json_timed(tmp_path, build(filler)))[0] is False, filler
+    # 긴 세그먼트가 한 번뿐이면(정상 발화의 긴 문장) 붕괴가 아니다
+    segs = [(f"문장 {i}", i * 4.0, i * 4.0 + 4) for i in range(30)] + [("긴 문장", 120, 148), ("긴 문장", 148, 175)]
+    segs += [(f"뒤 {i}", 175 + i * 4, 179 + i * 4) for i in range(10)]
+    assert app._looks_collapsed(_whisper_json_timed(tmp_path, segs))[0] is False
+
+
 def test_cycle_not_triggered_by_varied_backchannels_or_short_outro(tmp_path):
     """맞장구 사이 문장이 매번 다르면 묶음이 아니고, 끝인사 몇십 초 반복(#710 '감사합니다/네' 45초)은 붕괴로 보지 않는다."""
     segs, t = [], 0.0

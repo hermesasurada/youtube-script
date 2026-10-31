@@ -527,6 +527,19 @@ def _detect_language(audio_path: str, total: float, threads: str) -> tuple[str, 
 
 _COLLAPSE_MIN_RUN    = 50     # 같은 문장이 이만큼 연달아 나오면 붕괴로 본다
 _COLLAPSE_MIN_SECS   = 120    # 같은 문장이 이만큼의 시간을 덮어도 붕괴다(세그먼트가 길 때)
+# 같은 문장이 창 하나(30초)를 통째로 차지하는 세그먼트로 되풀이되면 짧아도 붕괴다(2026-10-31 월가아재 62분:
+# 한 문장이 30초 세그먼트 3개로 반복돼 93초가 비었는데 120초 기준에 못 미쳐 그대로 저장됐다). 정상 발화는
+# 한 문장이 25초 넘는 세그먼트가 되지 않고, 같은 문장이 연달아 그렇게 나오는 일은 더더욱 없다.
+_COLLAPSE_LONG_SEG   = 25     # 이 길이(초) 이상인 세그먼트가
+_COLLAPSE_LONG_REPS  = 2      # 같은 문장의 연속 반복 안에서 이만큼 나오면 붕괴
+# 단, 무음·음악 구간의 정형 환각('We'll be right back.'·'자막은 설정에서…')은 빠진 말이 없으니 세지 않는다
+# — 구간 분할 재전사(VAD 없음)는 오히려 무음 환각을 되살린다.
+_SUBTITLE_CREDIT_RE  = re.compile(r"^(?:자막은 설정에서 선택하실 수 있습니다|(?:한글)?자막 ?(?:by|제공|제작)\b.*)[.!。 ]*$", re.I)
+
+
+def _is_filler_line(text: str) -> bool:
+    return bool(_HALLUCINATION_LINE_RE.match(text) or _NOISE_MARK_RE.fullmatch(text)
+                or _SUBTITLE_CREDIT_RE.match(text))
 # 2~6문장 묶음이 통째로 되풀이되는 붕괴(2026-10-17, CNBC Lutnick·Jensen Huang 33분 — 4문장이 430번 돌았는데
 # 같은 문장 '연속'만 보던 판정을 통과했다. 기존 전사 1,420편에서 10편이 이 모양이었다).
 _COLLAPSE_CYCLE_MAX  = 6      # 묶음 길이(문장 수) 상한
@@ -604,10 +617,15 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
         return False, ""
     prev, run, worst, worst_txt, dropped = "", 0, 0, "", 0
     run_start, worst_secs, worst_secs_txt = 0.0, 0.0, ""
+    long_reps, long_hit = 0, None
     for t, a, b in items:
         if t == prev:
             run += 1
             dropped += 1
+            if b - a >= _COLLAPSE_LONG_SEG and not _is_filler_line(t):
+                long_reps += 1
+                if long_reps >= _COLLAPSE_LONG_REPS and long_hit is None:
+                    long_hit = (a, t)
             if run > worst:
                 worst, worst_txt = run, t
             # 횟수와 별개로 '같은 문장이 덮는 시간'도 잰다 — whisper가 30초짜리 긴 세그먼트로
@@ -617,6 +635,7 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
         else:
             run = 0
             run_start = a
+            long_reps = 0
         prev = t
     ratio = dropped / len(texts)
     reps, period, span, sample = _repeat_cycle(items)
@@ -630,6 +649,9 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
     # 언제나 긴 연속 반복을 동반한다(그 사례는 18,740회 대 정상 22회로 자릿수가 다르다).
     if worst >= _COLLAPSE_MIN_RUN:
         return True, f"같은 문장 {worst}회 연속, 중복 {ratio:.0%} ({worst_txt[:40]})"
+    if long_hit is not None:
+        return True, (f"같은 문장이 {_COLLAPSE_LONG_SEG}초+ 세그먼트로 되풀이({_format_duration(long_hit[0])}), "
+                      f"중복 {ratio:.0%} ({long_hit[1][:40]})")
     return False, ""
 
 
