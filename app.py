@@ -922,7 +922,9 @@ def _archive_audio(audio_path: str) -> None:
         return
     day = os.path.join(AUDIO_ARCHIVE_DIR, datetime.now().strftime("%Y%m%d"))
     os.makedirs(day, exist_ok=True)
-    os.replace(audio_path, os.path.join(day, os.path.basename(audio_path)))
+    dest = os.path.join(day, os.path.basename(audio_path))
+    os.replace(audio_path, dest)
+    os.utime(dest)   # 보관 기한은 전사(보관) 시각 기준 — yt-dlp가 파일 시각을 게시일로 맞추는 설정이어도 흔들리지 않게
     log.info("source audio archived: %s", os.path.basename(audio_path))
     _prune_audio_archive()
 
