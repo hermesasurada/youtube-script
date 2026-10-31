@@ -2638,3 +2638,70 @@ def test_downloaded_audio_is_archived_then_pruned(monkeypatch, tmp_path):
         assert not old.exists() and not old_day.exists(), "보관 기한이 지난 오디오가 남았다"
     finally:
         app.jobs.pop(job_id, None)
+
+
+def test_whisper_first_pass_uses_ctx64_vad_and_chunks_skip_vad(tmp_path, monkeypatch):
+    """2026-10-31 옵션 적용: 1차는 --max-context 64 + VAD + no-speech 0.6, 구간 분할은 VAD를 끈다
+    (--offset-t/--duration이 VAD로 줄인 타임라인에 적용되기 때문). VAD 모델이 없으면 VAD 없이 돈다."""
+    import io
+    import queue as _queue
+    import threading as _threading
+
+    vad = tmp_path / "vad.bin"; vad.write_bytes(b"x")
+    monkeypatch.setattr(app, "VAD_MODEL_PATH", str(vad))
+    monkeypatch.setattr(app, "_VAD_ENABLED", True)
+    monkeypatch.setattr(app, "_FIRST_CONTEXT", 64)
+    monkeypatch.setattr(app, "_NO_SPEECH_THOLD", "0.6")
+    cmds = []
+
+    class P:
+        def __init__(self, cmd, **k):
+            cmds.append(cmd); self.stdout = io.BytesIO(b""); self.returncode = 0
+        def wait(self, timeout=None):
+            return 0
+    monkeypatch.setattr(app.subprocess, "Popen", P)
+    jid = "t-vad"
+    app.jobs[jid] = {"queue": _queue.Queue(), "stop_event": _threading.Event()}
+    try:
+        app._run_whisper(jid, "a.mp3", "ko", "4", 300)
+        first = cmds[-1]
+        assert first[first.index("--max-context") + 1] == "64"
+        assert first[first.index("--no-speech-thold") + 1] == "0.6"
+        assert "--vad" in first and first[first.index("--vad-model") + 1] == str(vad)
+        app._run_whisper(jid, "a.mp3", "ko", "4", 300, max_context=0, offset_ms=0, duration_ms=600_000,
+                         output_prefix="p", vad=False)
+        assert "--vad" not in cmds[-1] and cmds[-1][cmds[-1].index("--max-context") + 1] == "0"
+        monkeypatch.setattr(app, "_VAD_ENABLED", False)        # 비상 스위치: 예전 경로
+        monkeypatch.setattr(app, "_FIRST_CONTEXT", -1)
+        app._run_whisper(jid, "a.mp3", "ko", "4", 300)
+        assert "--vad" not in cmds[-1] and "--max-context" not in cmds[-1]
+        monkeypatch.setattr(app, "_VAD_ENABLED", True)
+        monkeypatch.setattr(app, "VAD_MODEL_PATH", str(tmp_path / "missing.bin"))   # 모델 없으면 폴백
+        app._run_whisper(jid, "a.mp3", "ko", "4", 300)
+        assert "--vad" not in cmds[-1]
+    finally:
+        app.jobs.pop(jid, None)
+
+
+def test_collapse_with_ctx64_first_pass_goes_straight_to_chunks(monkeypatch):
+    """1차가 이미 컨텍스트 64면 붕괴 시 같은 재전사를 건너뛰고 구간 분할로 간다. 끄면(-1) 예전처럼 ctx64 먼저."""
+    import queue as _queue
+    import threading as _threading
+
+    for first_ctx, expect in ((64, ["pass1", "chunk"]), (-1, ["pass1", "ctx64", "chunk"])):
+        calls = []
+        monkeypatch.setattr(app, "_FIRST_CONTEXT", first_ctx)
+        monkeypatch.setattr(app, "_run_whisper", lambda *a, **k: calls.append(
+            "ctx64" if k.get("max_context") == app._COLLAPSE_CONTEXT else "pass1") or 0)
+        monkeypatch.setattr(app, "_run_whisper_chunked", lambda *a, **k: calls.append("chunk") or 0)
+        monkeypatch.setattr(app, "_looks_collapsed", lambda p: (True, "붕괴"))
+        monkeypatch.setattr(app, "_coverage_ratio", lambda p, t: 1.0)
+        monkeypatch.setattr(app, "_finish_transcription", lambda *a, **k: None)
+        monkeypatch.setattr(app, "get_file_duration", lambda p: 300)
+        jid = f"t-col{first_ctx}"
+        app.jobs[jid] = {"queue": _queue.Queue(), "stop_event": _threading.Event()}
+        try:
+            app._transcribe_and_finish(jid, "a.mp3", "ko", "4", 300, "x.md")
+        finally:
+            app.jobs.pop(jid, None)
+        assert calls == expect, (first_ctx, calls)

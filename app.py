@@ -538,6 +538,22 @@ _COLLAPSE_CONTEXT    = 64     # 붕괴 시 재전사에 쓸 컨텍스트 상한(
 # 세그먼트가 실제로 덮는 시간이 전체의 이 비율에 못 미치면 구간 분할로 다시 돈다.
 _MIN_COVERAGE        = float(os.environ.get("WHISPER_MIN_COVERAGE", "0.6"))
 _CHUNK_SEC           = int(os.environ.get("WHISPER_CHUNK_SEC", "600"))   # 분할 재전사 구간(초)
+# 1차 전사 옵션(2026-10-31 A/B 18편, llm-ab-harness VERDICTS §7): 1차부터 컨텍스트 64 + VAD +
+# no-speech 0.6 → ko CER 4.7→3.3%, en WER 10.7→8.7%, 1차 붕괴 8→2편, 소요 79→39분, 무음 인트로
+# 상투 환각 제거. 1차가 이미 컨텍스트 제한이면 붕괴 시 컨텍스트 64 재전사를 건너뛰고 바로 구간 분할.
+# 비상 스위치(예전 경로로 복귀): WHISPER_VAD=0 · WHISPER_FIRST_CONTEXT=-1(무제한) · WHISPER_NO_SPEECH=0.8.
+_FIRST_CONTEXT       = int(os.environ.get("WHISPER_FIRST_CONTEXT", "64"))   # 음수 = 무제한
+_NO_SPEECH_THOLD     = os.environ.get("WHISPER_NO_SPEECH", "0.6")
+_VAD_ENABLED         = os.environ.get("WHISPER_VAD", "1") != "0"
+VAD_MODEL_PATH       = os.environ.get("WHISPER_VAD_MODEL", os.path.join(WHISPER_DIR, "ggml-silero-v6.2.0.bin"))
+# VAD는 1차 전체 전사에만 쓴다 — --offset-t/--duration이 VAD로 줄인 타임라인에 적용돼 구간 분할과
+# 섞이면 엉뚱한 구간을 자른다. 커버리지(_coverage_ratio)는 붕괴 재전사 결과(VAD 없음)에만 쓰인다.
+_VAD_ARGS            = ["--vad-threshold", "0.4", "--vad-min-silence-duration-ms", "500",
+                        "--vad-speech-pad-ms", "200"]
+
+
+def _vad_ready() -> bool:
+    return _VAD_ENABLED and os.path.isfile(VAD_MODEL_PATH)
 
 
 def _repeat_cycle(items: list[tuple[str, float, float]]) -> tuple[int, int, float, str]:
@@ -620,8 +636,9 @@ def _looks_collapsed(json_path: str) -> tuple[bool, str]:
 def _run_whisper(job_id: str, audio_path: str, language: str,
                  threads: str, total: float, max_context: int | None = None,
                  *, offset_ms: int | None = None, duration_ms: int | None = None,
-                 output_prefix: str | None = None) -> int:
-    """whisper.cpp 1회 실행. offset/duration/output_prefix는 구간 분할 재전사용."""
+                 output_prefix: str | None = None, vad: bool | None = None) -> int:
+    """whisper.cpp 1회 실행. offset/duration/output_prefix는 구간 분할 재전사용.
+    max_context=None이면 1차 기본값(_FIRST_CONTEXT), vad=None이면 구간 지정이 없을 때만 VAD."""
     q    = jobs[job_id]["queue"]
     stop = jobs[job_id]["stop_event"]
 
@@ -657,9 +674,15 @@ def _run_whisper(job_id: str, audio_path: str, language: str,
                "--language", language, "--threads", threads,
                "--output-json", "--temperature", "0",
                "--best-of", "5", "--beam-size", "5",
-               "--no-speech-thold", "0.8", "--flash-attn"]
+               "--no-speech-thold", _NO_SPEECH_THOLD, "--flash-attn"]
+        if max_context is None and _FIRST_CONTEXT >= 0:
+            max_context = _FIRST_CONTEXT
         if max_context is not None:
             cmd += ["--max-context", str(max_context)]
+        if vad is None:
+            vad = not offset_ms and not duration_ms
+        if vad and _vad_ready():
+            cmd += ["--vad", "--vad-model", VAD_MODEL_PATH, *_VAD_ARGS]
         if offset_ms:
             cmd += ["--offset-t", str(int(offset_ms))]
         if duration_ms:
@@ -791,7 +814,7 @@ def _run_whisper_chunked(job_id: str, audio_path: str, language: str,
         q.put(f"구간 분할 재전사 {i + 1}/{n} ({_format_duration(off / 1000)}~)")
         rc = _run_whisper(job_id, audio_path, language, threads, total, max_context=0,
                           offset_ms=off, duration_ms=min(step, total_ms - off),
-                          output_prefix=prefix)
+                          output_prefix=prefix, vad=False)
         if rc != 0:
             log.warning("chunked whisper failed at chunk %d/%d (rc=%s)", i + 1, n, rc)
         elif os.path.isfile(prefix + ".json"):
@@ -1124,16 +1147,23 @@ def _transcribe_and_finish(job_id: str, audio_path: str, lang: str,
         if collapsed:
             log.warning("whisper collapse detected: %s — %s",
                         os.path.basename(audio_path), detail)
-            q.put(f"반복 붕괴 감지({detail}) — 컨텍스트 제한으로 재전사")
-            rc = _run_whisper(job_id, audio_path, lang, thr, total,
-                              max_context=_COLLAPSE_CONTEXT)
-            still, detail2 = _looks_collapsed(audio_path + ".json")
-            coverage = _coverage_ratio(audio_path + ".json", total) if rc == 0 else 0.0
+            direct = 0 <= _FIRST_CONTEXT <= _COLLAPSE_CONTEXT
+            if direct:
+                # 1차가 이미 컨텍스트 제한 — 같은 재전사는 소용없으니 바로 구간 분할로 간다.
+                q.put(f"반복 붕괴 감지({detail}) — {_CHUNK_SEC // 60}분 구간으로 분할 재전사")
+                still, detail2, coverage = True, detail, 0.0
+            else:
+                q.put(f"반복 붕괴 감지({detail}) — 컨텍스트 제한으로 재전사")
+                rc = _run_whisper(job_id, audio_path, lang, thr, total,
+                                  max_context=_COLLAPSE_CONTEXT)
+                still, detail2 = _looks_collapsed(audio_path + ".json")
+                coverage = _coverage_ratio(audio_path + ".json", total) if rc == 0 else 0.0
             # 반복이 사라졌어도 내용이 비면 실패다 — 세그먼트가 덮는 시간으로 판정한다.
             if rc == 0 and not stop.is_set() and (still or coverage < _MIN_COVERAGE):
                 log.warning("collapse retry insufficient: %s — 붕괴=%s, 커버리지 %.0f%% → 구간 분할 재전사",
                             os.path.basename(audio_path), "예" if still else "아니오", coverage * 100)
-                q.put(f"재전사 결과가 비어 있음(커버리지 {coverage:.0%}) — {_CHUNK_SEC // 60}분 구간으로 분할 재전사")
+                if not direct:
+                    q.put(f"재전사 결과가 비어 있음(커버리지 {coverage:.0%}) — {_CHUNK_SEC // 60}분 구간으로 분할 재전사")
                 rc = _run_whisper_chunked(job_id, audio_path, lang, thr, total)
                 coverage = _coverage_ratio(audio_path + ".json", total) if rc == 0 else 0.0
                 log.info("chunked retry coverage: %.0f%%", coverage * 100)
