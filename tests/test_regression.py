@@ -2608,3 +2608,33 @@ def test_remote_phone_can_load_reader_fonts():
         resp.close()
     # 허용 목록 밖의 경로는 여전히 이력 페이지로 보낸다
     assert client.get("/prompt/save", environ_base=remote, headers=phone).status_code == 302
+
+
+def test_downloaded_audio_is_archived_then_pruned(monkeypatch, tmp_path):
+    """전사가 끝난 다운로드 오디오는 바로 지우지 않고 보관함에 90일 둔다(2026-10-31 사용자 지시)."""
+    archive = tmp_path / "audio_archive"
+    monkeypatch.setattr(app, "AUDIO_ARCHIVE_DIR", str(archive))
+    monkeypatch.setattr(app, "AUDIO_RETENTION_DAYS", 90)
+    monkeypatch.setattr(app, "DELETE_AUDIO_AFTER", True)
+    monkeypatch.setattr(app, "_parse_transcript", lambda p, off=0: "[00:00] " + "가" * 3000)
+    monkeypatch.setattr(app, "_save_md", lambda *a, **k: None)
+    monkeypatch.setattr(app, "save_thumbnail", lambda *a, **k: None)
+    old_day = archive / "20260701"
+    old_day.mkdir(parents=True)
+    old = old_day / "old.mp3"
+    old.write_bytes(b"x")
+    os.utime(old, (time.time() - 91 * 86400,) * 2)
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"mp3")
+
+    job_id = "archive-audio"
+    _make_job(job_id, meta={"duration": 1800})
+    try:
+        app._finish_transcription(job_id, str(audio), 0, str(tmp_path / "ok.md"), delete_audio=True)
+        assert app.jobs[job_id]["status"] == "done"
+        assert not audio.exists()
+        kept = list(archive.glob("*/a.mp3"))
+        assert len(kept) == 1 and kept[0].read_bytes() == b"mp3"
+        assert not old.exists() and not old_day.exists(), "보관 기한이 지난 오디오가 남았다"
+    finally:
+        app.jobs.pop(job_id, None)

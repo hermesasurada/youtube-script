@@ -230,6 +230,12 @@ def _kf_unregister(kid: int) -> None:
 # 전사 완료 후 다운로드한 오디오(mp3)를 삭제할지 여부. KEEP_AUDIO=1 이면 보존.
 # 단, 사용자가 직접 올린 로컬 파일(file 잡)은 이 값과 무관하게 항상 보존한다.
 DELETE_AUDIO_AFTER = os.environ.get("KEEP_AUDIO", "0") != "1"
+# 전사가 끝난 오디오는 바로 지우지 않고 보관함에 RETENTION_DAYS일 둔다(2026-10-31 사용자 지시 — 전사 재검토·
+# whisper 설정 A/B를 다시 받지 않고 하려고. 128kbps mp3 시간당 약 55MB, 월 150~180시간 → 늘 25~30GB).
+# 보관함은 res/audio_archive/YYYYMMDD/ — /files 목록은 res 아래 한 단계만 훑으므로 보관 파일이 섞이지 않는다.
+# AUDIO_RETENTION_DAYS=0이면 예전처럼 바로 지운다. 실패한 잡의 오디오는 재시도가 새로 받으므로 계속 지운다.
+AUDIO_ARCHIVE_DIR    = os.environ.get("AUDIO_ARCHIVE_DIR", os.path.join(RES_DIR, "audio_archive"))
+AUDIO_RETENTION_DAYS = int(os.environ.get("AUDIO_RETENTION_DAYS", "90"))
 
 # view_count, like_count 제외
 _META_KEYS = [
@@ -908,6 +914,50 @@ def save_thumbnail(yt_id: str, *, force: bool = False) -> str | None:
     return None
 
 
+def _archive_audio(audio_path: str) -> None:
+    """전사가 끝난 다운로드 오디오를 보관함(날짜 폴더)으로 옮기고 보관 기한이 지난 파일을 지운다."""
+    if AUDIO_RETENTION_DAYS <= 0:
+        os.remove(audio_path)
+        log.info("source audio removed: %s", os.path.basename(audio_path))
+        return
+    day = os.path.join(AUDIO_ARCHIVE_DIR, datetime.now().strftime("%Y%m%d"))
+    os.makedirs(day, exist_ok=True)
+    os.replace(audio_path, os.path.join(day, os.path.basename(audio_path)))
+    log.info("source audio archived: %s", os.path.basename(audio_path))
+    _prune_audio_archive()
+
+
+def _prune_audio_archive() -> None:
+    """보관함에서 AUDIO_RETENTION_DAYS일 지난 오디오(수정 시각 기준)와 빈 날짜 폴더를 지운다."""
+    cutoff = time.time() - AUDIO_RETENTION_DAYS * 86400
+    removed = freed = 0
+    try:
+        days = os.listdir(AUDIO_ARCHIVE_DIR)
+    except OSError:
+        return
+    for sub in days:
+        d = os.path.join(AUDIO_ARCHIVE_DIR, sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in os.listdir(d):
+            path = os.path.join(d, fname)
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    freed += os.path.getsize(path)
+                    os.remove(path)
+                    removed += 1
+            except OSError:
+                pass
+        try:
+            if not os.listdir(d):
+                os.rmdir(d)
+        except OSError:
+            pass
+    if removed:
+        log.info("audio archive pruned: %d files (%.0f MB, >%dd)", removed, freed / 1024 / 1024,
+                 AUDIO_RETENTION_DAYS)
+
+
 def _cleanup_failed_artifacts(audio_path: str, json_path: str, delete_audio: bool) -> None:
     """전사 실패 시 남은 오디오·whisper JSON을 지운다.
 
@@ -1010,12 +1060,11 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                 os.remove(json_path)
             except OSError:
                 pass
-            # 전사본(.md)이 단일 진실 소스. 다운로드한 오디오는 저장 확정 후 삭제(용량 회수).
+            # 전사본(.md)이 단일 진실 소스. 다운로드한 오디오는 저장 확정 후 보관함으로 옮겨 90일 뒤 지운다.
             # delete_audio=True(URL 잡)이고 KEEP_AUDIO 미설정일 때만. 사용자 업로드 파일은 보존.
             if delete_audio and DELETE_AUDIO_AFTER:
                 try:
-                    os.remove(audio_path)
-                    log.info("source audio removed: %s", os.path.basename(audio_path))
+                    _archive_audio(audio_path)
                 except OSError as e:
                     log.warning("audio cleanup failed: %s (%s)", os.path.basename(audio_path), e)
             # 썸네일 사본 확보(비공개 전환 대비). 실패해도 전사 결과엔 영향 없음.
