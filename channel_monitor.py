@@ -21,7 +21,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import argparse
 import json
 import os
@@ -436,6 +436,17 @@ def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
 
 
 # ── 폴링(감지 → 큐 적재) ───────────────────────────────────────────────
+def _parse_ts(stamp) -> datetime | None:
+    """RSS published·channels.resumed_at(ISO, 시간대 포함) → aware datetime. 실패면 None."""
+    if not stamp:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def poll_channels(dry: bool = False) -> int:
     """활성 채널 폴 → 신규 pending 적재. 새로 pending에 넣은 건수 반환."""
     channels = db.list_channels()
@@ -463,9 +474,19 @@ def poll_channels(dry: bool = False) -> int:
             continue
 
         new_for_ch = 0
+        resumed = _parse_ts(ch.get("resumed_at"))
         for v in vids:
             if db.find_by_yt_id(v["yt_id"]) or db.in_queue(v["yt_id"]):
                 continue                          # 이미 전사됨 / 이미 큐에 있음
+            # 자동수집을 껐다 다시 켰으면 켜기 전에 올라온 영상(꺼진 동안 쌓인 것)은
+            # 처리하지 않는다(2026-11-01 사용자 지시). 필요하면 큐 팝업에서 직접 넣는다.
+            pub = _parse_ts(v.get("published"))
+            if resumed and pub and pub < resumed:
+                log(f"[poll] {title}: 제외 [재개 전] {v['title'][:40]}")
+                if not dry:
+                    db.enqueue_video(v["yt_id"], v["url"], v["title"], cid,
+                                     status="skipped", reason="수집 재개 전 영상")
+                continue
             if is_ad_title(v["title"]):
                 log(f"[poll] {title}: 제외 [ad] {v['title'][:40]}")
                 if not dry:

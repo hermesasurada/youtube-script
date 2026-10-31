@@ -12,7 +12,7 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from document_io import parse_frontmatter, read_markdown
@@ -418,6 +418,13 @@ def init() -> None:
                 PRIMARY KEY (key, def_key)
             )""")
             c.execute("PRAGMA user_version = 26")
+        if ver < 27:
+            # v27: 자동수집을 다시 켠 시각(UTC ISO). 꺼진 동안 올라온 영상은 처리하지 않고
+            # 켠 뒤 올라온 영상만 처리한다(2026-11-01 사용자 지시). NULL = 끈 적 없음.
+            ccols = {r[1] for r in c.execute("PRAGMA table_info(channels)").fetchall()}
+            if "resumed_at" not in ccols:
+                c.execute("ALTER TABLE channels ADD COLUMN resumed_at TEXT")
+            c.execute("PRAGMA user_version = 27")
 
 
 def get_summary_notes(md_path: str) -> dict:
@@ -839,8 +846,15 @@ def add_channel(channel_id: str, handle: str = "", title: str = "",
 
 
 def set_channel_enabled(cid: int, enabled: bool) -> bool:
+    """자동수집 ON/OFF. 꺼져 있던 채널을 켜면 그 시각을 resumed_at에 남긴다 —
+    폴러가 그보다 먼저 올라온 영상(꺼진 동안 쌓인 것)을 처리하지 않고 넘긴다."""
     with _lock:
-        cur = _conn().execute(
+        conn = _conn()
+        if enabled:
+            conn.execute(
+                "UPDATE channels SET resumed_at = ? WHERE id = ? AND enabled = 0",
+                (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"), cid))
+        cur = conn.execute(
             "UPDATE channels SET enabled = ? WHERE id = ?", (1 if enabled else 0, cid)
         )
         return cur.rowcount > 0

@@ -2726,3 +2726,33 @@ def test_collapse_with_ctx64_first_pass_goes_straight_to_chunks(monkeypatch):
         finally:
             app.jobs.pop(jid, None)
         assert calls == expect, (first_ctx, calls)
+
+
+def test_reenabled_channel_skips_videos_posted_while_off(monkeypatch):
+    """자동수집을 껐다 켜면 켜기 전에 올라온 영상은 넘기고 켠 뒤 영상만 큐에 넣는다."""
+    db.init()
+    cid = db.add_channel("UCresumeTEST", handle="resume", title="재개 테스트")
+    db.set_channel_baseline(cid)
+    assert db.get_channel(cid)["resumed_at"] is None
+    db.set_channel_enabled(cid, False)
+    db.set_channel_enabled(cid, True)
+    resumed = db.get_channel(cid)["resumed_at"]
+    assert resumed
+    db.set_channel_enabled(cid, True)            # 이미 켜진 채널을 다시 켜도 시각은 그대로
+    assert db.get_channel(cid)["resumed_at"] == resumed
+
+    before = "2000-01-01T00:00:00+00:00"
+    after = "2999-01-01T00:00:00+00:00"
+    vids = [
+        {"yt_id": "RSM_OLD", "title": "꺼진 동안", "url": "https://www.youtube.com/watch?v=RSM_OLD", "published": before},
+        {"yt_id": "RSM_NEW", "title": "켠 뒤", "url": "https://www.youtube.com/watch?v=RSM_NEW", "published": after},
+    ]
+    monkeypatch.setattr(channel_monitor, "rss_recent", lambda c: vids if c == "UCresumeTEST" else [])
+    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, m: (True, ""))
+    monkeypatch.setattr(channel_monitor, "recheck_deferred", lambda chs, dry=False: 0)
+    monkeypatch.setattr(db, "list_channels", lambda: [db.get_channel(cid)])
+    assert channel_monitor.poll_channels() == 1
+    rows = {r["yt_id"]: r for r in db._conn().execute(
+        "SELECT yt_id, status, reason FROM watch_queue WHERE yt_id LIKE 'RSM_%'").fetchall()}
+    assert rows["RSM_OLD"]["status"] == "skipped" and rows["RSM_OLD"]["reason"] == "수집 재개 전 영상"
+    assert rows["RSM_NEW"]["status"] == "pending"
