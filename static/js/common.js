@@ -1028,8 +1028,10 @@
   // 제목(h1·메타정보 표의 제목 칸)은 인명 링크 대상이 아니다(2026-10-15 사용자 지시) — 메타정보 표는 통째로 건너뛴다.
   // 제목 머리 영역(원제 병기 .sum-title-orig·업로더 칩 줄 .ys-meta)도 건너뛴다(2026-10-31 사용자 지시) — 여기서 첫 등장을
   // 가져가면 본문의 같은 인명에는 소개가 안 붙었다(Robert Caro·Mustafa Suleyman·Daniela Amodei).
+  // 한눈 요약(.ys-tldr 카드, 카드로 안 바뀐 '## 한눈 요약' 섹션)도 건너뛴다(같은 날 사용자 지시) — 기본 접힘이라
+  // 첫 등장을 거기 붙이면 본문에서는 소개 링크가 안 보였다.
   const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, '
-    + '.sum-head-sticky, .sum-title-orig, .ys-meta, [data-person-skip]';
+    + '.sum-head-sticky, .sum-title-orig, .ys-meta, .ys-tldr, [data-person-skip]';
   // 표기(forms)를 본문 텍스트에서 찾아 **글 전체에서 첫 등장 한 번만** makeSpan(표기, 목록 순번)으로 감싼다.
   // 화면(decoratePeople)과 블로그 내보내기(_bloggerPeople)가 같은 규칙을 쓴다. seen = 이미 표시한 순번.
   function _wrapPeopleNames(root, list, seen, makeSpan) {
@@ -1041,6 +1043,12 @@
     const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp('(' + forms.map(x => esc(x.f)).join('|') + ')', 'g');
     const byForm = new Map(forms.map(x => [x.f, x.i]));
+    root.querySelectorAll('h2, h3').forEach(h => {          // '## 2. 한눈 요약' 섹션 전체(카드로 안 바뀐 경우)
+      if (!/한눈\s*요약|TL;?DR/i.test(h.textContent || '')) return;
+      for (let el = h.nextElementSibling; el && !/^H[1-6]$/.test(el.tagName); el = el.nextElementSibling) {
+        el.dataset.personSkip = '1';
+      }
+    });
     root.querySelectorAll('h2, h3').forEach(h => {          // '## 1. 메타정보' 바로 뒤 표(제목·업로더 칸)
       if (!/메타\s*정보/.test(h.textContent || '')) return;
       let el = h.nextElementSibling;
