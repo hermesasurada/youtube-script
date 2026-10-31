@@ -1255,9 +1255,9 @@
     // 줄간격은 '글자 높이(1em) + 줄 사이 여백'이다. 문단 사이 간격(margin)은 그대로 두고
     // 줄 사이 여백만 2/3로 줄였다(0.9em → 0.6em, 2026-09-14 사용자 지시).
     p:    'margin:0 0 1.6em;line-height:1.6;font-weight:400;font-size:15px;',
-    term: 'margin:-.85em 0 1.45em;padding-left:.72em;border-left:2px solid #d8dadd;'
+    term: 'margin:-.85em 0 1.45em;padding-left:.4em;border-left:2px solid #d8dadd;'
         + 'font-size:12.5px;line-height:1.55;font-weight:400;color:#7a7f87;',
-    termGroup: 'margin:-.85em 0 1.45em;padding:.28em .8em;border-left:2px solid #d8dadd;'
+    termGroup: 'margin:-.85em 0 1.45em;padding:.28em .8em .28em .45em;border-left:2px solid #d8dadd;'
         + 'background:#f7f7f6;',
     termRow: 'margin:0;padding:0;font-size:12.5px;line-height:1.55;'
         + 'font-weight:400;color:#7a7f87;',
@@ -1817,8 +1817,8 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .summary-memo button{font:inherit;font-size:.8rem;white-space:nowrap;padding:7px 12px;margin-right:6px;border:1px solid var(--border,#d9deda);border-radius:6px;background:var(--surface,#fff);color:var(--text,#34443a);cursor:pointer;}
 .summary-memo textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;font:inherit;line-height:1.6;padding:10px;margin:8px 0;border:1px solid var(--border,#ccd5ce);border-radius:6px;background:var(--surface,#fff);color:var(--text,#242424);}
 /* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */
-.sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.72rem;border-left:2px solid var(--border,#d8dadd);}
-.sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
+.sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.4rem;border-left:2px solid var(--border,#d8dadd);}
+.sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem .25rem .4rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
 .sum-md .term-notes .term-note,.md-body .term-notes .term-note,.markdown .term-notes .term-note{margin:0!important;padding:0!important;border-left:0!important;}
 .sum-md .term-note strong,.md-body .term-note strong,.markdown .term-note strong{color:inherit;}
 .term-note .term-note-x{margin-left:.35rem;border:0;background:transparent;color:var(--muted,#9aa0ac);cursor:pointer;font:inherit;font-size:.85em;line-height:1;padding:0 .25rem;opacity:0;transition:opacity .12s,color .12s;vertical-align:baseline;}
