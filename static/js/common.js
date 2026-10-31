@@ -1026,7 +1026,10 @@
      yt·td 인명 소개에서 모두 뺀다(각주 제외와 같은 방식, 되돌리기 가능). 소개는 서버 캐시에서 온다. */
   let _people = [];
   // 제목(h1·메타정보 표의 제목 칸)은 인명 링크 대상이 아니다(2026-10-15 사용자 지시) — 메타정보 표는 통째로 건너뛴다.
-  const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, [data-person-skip]';
+  // 제목 머리 영역(원제 병기 .sum-title-orig·업로더 칩 줄 .ys-meta)도 건너뛴다(2026-10-31 사용자 지시) — 여기서 첫 등장을
+  // 가져가면 본문의 같은 인명에는 소개가 안 붙었다(Robert Caro·Mustafa Suleyman·Daniela Amodei).
+  const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, '
+    + '.sum-head-sticky, .sum-title-orig, .ys-meta, [data-person-skip]';
   // 표기(forms)를 본문 텍스트에서 찾아 **글 전체에서 첫 등장 한 번만** makeSpan(표기, 목록 순번)으로 감싼다.
   // 화면(decoratePeople)과 블로그 내보내기(_bloggerPeople)가 같은 규칙을 쓴다. seen = 이미 표시한 순번.
   function _wrapPeopleNames(root, list, seen, makeSpan) {
