@@ -20,3 +20,15 @@ def test_sparse_flags_music_only_video(monkeypatch):
     t = "\n".join(["[00:00] ♪♪♪", "[02:10] We'll be right back.", "[03:40] Thank you.",
                    "[03:10] I'm going to use the same method to make the other side."])
     assert app._transcript_sparse(jid, t).startswith("전사 내용이 비어 있습니다")
+
+
+def test_sparse_flags_silent_short_clip(monkeypatch):
+    """1분 미만도 실제 말이 몇 낱말도 안 되면 음성 없는 영상(2026-11-01, Rocket Lab 37초 무음 클립)."""
+    jid = "t-sparse-short"
+    monkeypatch.setitem(app.jobs, jid, {"clip_duration": 37})
+    for t in ("", "[00:00] ♪♪♪", "[00:05] Thank you.\n[00:20] We'll be right back."):
+        detail = app._transcript_sparse(jid, t)
+        assert detail.startswith("전사 내용이 비어 있습니다") and "음성 없는 영상" in detail
+    # 짧아도 말이 있으면 통과
+    assert app._transcript_sparse(jid, "[00:00] Neutron stage two is now on the pad at LC-3.") == ""
+    assert app._transcript_sparse(jid, "[00:00] 뉴트론 2단이 발사대에 도착했습니다.") == ""

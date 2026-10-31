@@ -195,6 +195,7 @@ GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
 #  B) 전사 본문이 분당 이 글자수 미만이면(사실상 무음/공백) 실패로 내려 요약·캡처를 막는다.
 MIN_AUDIO_RATIO   = float(os.environ.get("MIN_AUDIO_RATIO", "0.5"))
 MIN_CHARS_PER_MIN = float(os.environ.get("MIN_CHARS_PER_MIN", "40"))
+MIN_SHORT_CHARS   = int(os.environ.get("MIN_SHORT_CHARS", "10"))   # 1분 미만 영상: 실제 말이 이보다 짧으면 무음
 _TS_TAG_RE = re.compile(r"\[\d{1,2}:\d{2}(?::\d{2})?\]")   # 전사 본문의 시각 마커
 
 # 전사(whisper)는 무거우므로 동시 실행을 제한해 스래싱 방지.
@@ -1057,6 +1058,12 @@ def _transcript_sparse(job_id: str, transcript: str | None) -> str:
     if mins >= 1 and len(body) / mins < MIN_CHARS_PER_MIN:
         return (f"전사 내용이 비어 있습니다: {len(body)}자 / "
                 f"{_format_duration(secs)} (분당 {len(body) / mins:.0f}자)")
+    # 1분 미만은 분당 기준이 너무 흔들려 따로 본다 — 실제 말이 몇 낱말도 안 되면 음성 없는 영상
+    # (2026-11-01 사용자 지시, Rocket Lab 37초 무음 클립이 빈 요약으로 저장됐다). '음성 없는 영상'은
+    # 채널 모니터가 영구 실패로 보는 문구라 재시도하지 않는다.
+    if 0 < mins < 1 and len(body) < MIN_SHORT_CHARS:
+        return (f"전사 내용이 비어 있습니다: {len(body)}자 / {_format_duration(secs)}"
+                f" — 1분 미만 음성 없는 영상")
     return ""
 
 
@@ -1070,7 +1077,7 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
         # 저장까지 하면 요약 LLM 호출과 캡처가 낭비되고 빈 요약본이 이력에 남는다.
         if transcript is not None:
             detail = _transcript_sparse(job_id, transcript)
-            if detail and jobs[job_id].get("no_speech"):
+            if detail and jobs[job_id].get("no_speech") and "음성 없는 영상" not in detail:
                 detail += f" — 두 언어({jobs[job_id]['no_speech']}) 모두 백지, 음성 없는 영상"
             if detail:
                 _set_job_error(job_id, "transcribe", detail)
