@@ -1032,7 +1032,8 @@
   // 가져가면 본문의 같은 인명에는 소개가 안 붙었다(Robert Caro·Mustafa Suleyman·Daniela Amodei).
   // 한눈 요약(.ys-tldr 카드, 카드로 안 바뀐 '## 한눈 요약' 섹션)도 건너뛴다(같은 날 사용자 지시) — 기본 접힘이라
   // 첫 등장을 거기 붙이면 본문에서는 소개 링크가 안 보였다.
-  const _PERSON_SKIP = 'h1, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, '
+  // 제목·소제목(h1~h6)엔 인명 링크를 달지 않는다(소제목은 2026-11-01 사용자 지시) — 본문 첫 등장에 붙는다.
+  const _PERSON_SKIP = 'h1, h2, h3, h4, h5, h6, a, code, pre, figcaption, .person-name, .term-note, .kf-strip, button, .ys-tldr-title, '
     + '.sum-head-sticky, .sum-title-orig, .ys-meta, .ys-tldr, [data-person-skip]';
   // 표기(forms)를 본문 텍스트에서 찾아 **글 전체에서 첫 등장 한 번만** makeSpan(표기, 목록 순번)으로 감싼다.
   // 화면(decoratePeople)과 블로그 내보내기(_bloggerPeople)가 같은 규칙을 쓴다. seen = 이미 표시한 순번.
