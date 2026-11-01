@@ -61,6 +61,7 @@ import document_io
 import humanize_korean
 import notation
 import term_marks
+import brief_rebuild
 import term_senses
 import name_fix
 import keyframe_report
@@ -2031,14 +2032,14 @@ def _title_tr_order(first_id: int = 0) -> tuple[tuple[str, str], ...]:
 
 
 def _title_tr_with_claude(prompt: str, label: str, model: str | None = None,
-                        effort: str = "default") -> tuple[str, str]:
+                        effort: str = "default", purpose: str = "title") -> tuple[str, str]:
     claude_model = model or _claude_model()
     command = [_resolve_claude_bin(), "-p", "--model", claude_model,
                "--output-format", "json"] + llm_gateway.claude_minimal_args()
     if effort != "default":
         command += ["--effort", effort]
     command.append(prompt)
-    with llm_gateway.llm_track("claude", claude_model, purpose="title",
+    with llm_gateway.llm_track("claude", claude_model, purpose=purpose,
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
         r = llm_gateway.run_command(command, timeout=TITLE_TR_TIMEOUT)
@@ -2053,13 +2054,13 @@ def _title_tr_with_claude(prompt: str, label: str, model: str | None = None,
 
 
 def _title_tr_with_grok(prompt: str, label: str, model: str | None = None,
-                        effort: str = "default") -> tuple[str, str]:
+                        effort: str = "default", purpose: str = "title") -> tuple[str, str]:
     if not (GROK_BIN and os.path.exists(GROK_BIN)):
         return "", "grok 실행파일 없음"
     selected_model = llm_gateway.grok_call_model(model, GROK_MODEL)
     if effort not in llm_gateway.llm_catalog.levels(model or "grok"):
         effort = "default"
-    with llm_gateway.llm_track("grok", selected_model or None, purpose="title",
+    with llm_gateway.llm_track("grok", selected_model or None, purpose=purpose,
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
         tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
@@ -2091,9 +2092,9 @@ def _title_tr_with_grok(prompt: str, label: str, model: str | None = None,
 
 
 def _title_tr_with_gpt(prompt: str, label: str, model: str | None = None,
-                        effort: str = "default") -> tuple[str, str]:
+                        effort: str = "default", purpose: str = "title") -> tuple[str, str]:
     gpt_model = model or _gpt_model()
-    with llm_gateway.llm_track("codex", gpt_model, purpose="title",
+    with llm_gateway.llm_track("codex", gpt_model, purpose=purpose,
                                title=label, backend="cli",
                                reasoning=None if effort == "default" else effort) as call:
         try:
@@ -2119,6 +2120,35 @@ _TITLE_TR_PROVIDERS = {
     "grok": _title_tr_with_grok,
     "gpt": _title_tr_with_gpt,
 }
+
+
+def _rebuild_brief(body: str, family: str, model: str | None, title: str | None) -> str:
+    """한눈 요약을 완성된 본문에서 다시 뽑아 바꿔 끼운다 — 소제목 하나당 불릿 하나(2026-11-02 사용자 지시).
+
+    요약을 낸 모델(계열·구체 모델, 추론 기본값)로 한 번 더 부른다. 소제목이 없거나, 호출이 실패하거나,
+    불릿 수가 소제목 수와 다르거나, 한자·이질 문자가 섞이면 첫 요약의 한눈 요약을 그대로 둔다 —
+    요약 저장을 막지 않는다. 비상 스위치 YT_BRIEF_REBUILD=0."""
+    if os.environ.get("YT_BRIEF_REBUILD", "1") == "0":
+        return body
+    try:
+        built = brief_rebuild.build_prompt(body)
+        call = _TITLE_TR_PROVIDERS.get(family)
+        if not built or not call:
+            return body
+        prompt, n = built
+        out, err = call(prompt, title or "한눈 요약", model, "default", purpose="brief")
+        bullets = brief_rebuild.parse(out, n) if not err else None
+        if not bullets:
+            log.warning("한눈 요약 재생성 건너뜀(%s): %s", family, err or f"불릿 수 불일치(소제목 {n}개)")
+            return body
+        leaks = _script_leaks("\n".join(bullets), body)
+        if leaks:
+            log.warning("한눈 요약 재생성 건너뜀(%s): 문자 누출 %s", family, leaks[0][:80])
+            return body
+        return _polish_summary(brief_rebuild.replace(body, bullets))
+    except Exception as e:  # noqa: BLE001 — 한눈 요약 때문에 요약 저장이 깨지면 안 된다
+        log.warning("한눈 요약 재생성 실패(%s): %s", family, e)
+        return body
 
 
 def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | None:
@@ -2527,7 +2557,7 @@ _GROK_STYLE_NOTE = """[문체 보정 — 아래 규칙은 본 지시문보다 �
   (다음 단계는 효과를 시험하는 일이다 ✗ → 다음 단계는 효과를 시험하는 것이다 ○)
 - 화자나 주체가 바뀌면 그 문장 첫머리에서 밝힌다("Nadella는", "진행자는"). 같은 주체가 이어지는 동안에는 반복하지 않는다.
 - 같은 인명·용어는 요약 전체에서 한 가지 표기만 쓴다. harness면 끝까지 harness, 하니스면 끝까지 하니스. 인명 철자는 전사에 나온 대로 한 번 정하고 바꾸지 않는다.
-- 한눈 요약의 불릿 하나는 한두 문장으로 끝낸다. 네 문장이 필요하면 불릿을 나눈다.
+- 한눈 요약의 불릿 하나는 한두 문장으로 끝낸다.
 - 이 보정은 표현에만 해당한다. 사실·수치·화자 귀속 규칙은 본 지시문을 그대로 따른다.
 
 """
@@ -2718,6 +2748,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
             cleaned = _clean_summary(final if final is not None else "".join(chunks))
             body = _polish_summary(cleaned)
             if not error_msg and body:
+                body = _rebuild_brief(body, "opus", slot_model, title)
                 label = _model_label(used_model or slot_model)
                 if body != cleaned and client_has_output:
                     reset = reset_client()
@@ -2773,6 +2804,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
             failures.append(f"{label}: {err or '빈 응답'}")
             log.warning("summarize %s 실패 → 다음 모델: %s", key, failures[-1])
             continue
+        body = _rebuild_brief(body, key, slot_model, title)
         full, save_err = save_full(body, label)
         if save_err:
             yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
@@ -2826,6 +2858,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         log.warning("summarize → Grok CLI%s", " (skip_claude)" if skip_claude else " 폴백 시도")
         gtext, gerr = _summarize_with_grok(prompt, title=title)
         if gtext:
+            gtext = _rebuild_brief(gtext, "grok", GROK_MODEL or None, title)
             # Claude 부분 출력이 이미 전송됐을 수 있으므로 클라이언트가 본문을 비우게 한다.
             yield "event: reset\ndata: \"\"\n\n"
             log.info("summarize grok 성공 (%d자)", len(gtext))
@@ -2922,6 +2955,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
     if not body:
         yield from _yield_grok("Claude 빈 응답")
         return
+    body = _rebuild_brief(body, "opus", _claude_model(), title)
     cline = _compress_line(body, transcript_chars)
     full = _model_line(_model_label(used_model or _claude_model())) + cline + body
     if body != cleaned and chunks:
