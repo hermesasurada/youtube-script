@@ -1969,36 +1969,17 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   min-width: 6.2rem;
 }
 .sum-font-ctrl select:focus { outline: none; }
-/* data-reader-font on .sum-panel → body text family (headings inherit) */
-.sum-panel[data-reader-font="sans"] .sum-md {
-  font-family: "Noto Sans KR", var(--font-sans);
-}
-/* Pretendard — 이미 self-host 중인 가변 폰트(한글 자간이 촘촘해 본문 가독성이 좋다) */
-.sum-panel[data-reader-font="pretendard"] .sum-md {
-  font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", var(--font-sans);
-  letter-spacing: -0.003em;
-  word-break: keep-all;
-}
-/* 조선일보명조 — self-host 원본(신문 본문 명조) */
-.sum-panel[data-reader-font="chosun"] .sum-md {
-  font-family: "Chosunilbo_myungjo", serif;
-  letter-spacing: -0.01em;
-  word-break: keep-all;
-}
+/* data-reader-font + --reader-font on .sum-panel → body text family (headings inherit).
+   글꼴 값은 공용 fonts.js가 싣는다 — 아래는 글꼴별 미세 조정뿐이라 공용 목록에 더한 글꼴도 그대로 적용된다(2026-11-01). */
+.sum-panel[data-reader-font] .sum-md { font-family: var(--reader-font); }
+/* Pretendard — 한글 자간이 촘촘해 본문 가독성이 좋다 */
+.sum-panel[data-reader-font="pretendard"] .sum-md { letter-spacing: -0.003em; word-break: keep-all; }
+/* 조선일보명조 — 신문 본문 명조 */
+.sum-panel[data-reader-font="chosun"] .sum-md { letter-spacing: -0.01em; word-break: keep-all; }
 .sum-panel[data-reader-font="chosun"] .sum-md p,
 .sum-panel[data-reader-font="chosun"] .sum-md li { line-height: 1.85; }
-/* SUIT·Wanted Sans — 본문 고딕(2026-10-20 추가) */
-.sum-panel[data-reader-font="suit"] .sum-md {
-  font-family: "SUIT Variable", "Pretendard Variable", var(--font-sans);
-  word-break: keep-all;
-}
-.sum-panel[data-reader-font="wanted"] .sum-md {
-  font-family: "Wanted Sans Variable", "Pretendard Variable", var(--font-sans);
-  word-break: keep-all;
-}
-.sum-panel[data-reader-font="system"] .sum-md {
-  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
-}
+.sum-panel[data-reader-font="suit"] .sum-md,
+.sum-panel[data-reader-font="wanted"] .sum-md { word-break: keep-all; }
 /* code blocks keep mono even in serif mode */
 .sum-panel .sum-md code,
 .sum-panel .sum-md pre {

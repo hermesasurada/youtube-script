@@ -374,30 +374,15 @@
       background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888' d='M1 1l4 4 4-4'/></svg>");
       background-repeat: no-repeat; background-position: right center;
     }
-    /* 데스크톱 요약 팝업과 같은 글꼴 키를 사용한다. */
-    .modal[data-reader-font="sans"] .modal-body.markdown {
-      font-family: "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
-    }
-    /* Pretendard — self-host 가변 폰트(자간이 촘촘해 좁은 화면에서 특히 잘 읽힌다) */
-    .modal[data-reader-font="pretendard"] .modal-body.markdown {
-      font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", -apple-system, sans-serif;
-      letter-spacing: -.003em; word-break: keep-all;
-    }
-    .modal[data-reader-font="chosun"] .modal-body.markdown {
-      font-family: "Chosunilbo_myungjo", serif;
-      letter-spacing: -.01em; word-break: keep-all;
-    }
+    /* 데스크톱 요약 팝업과 같은 글꼴 값을 쓴다 — 글꼴 값(--reader-font)은 공용 fonts.js가 싣고, 아래는 글꼴별 미세 조정뿐.
+       공용 목록에 더한 글꼴도 규칙 없이 적용된다(2026-11-01). */
+    .modal[data-reader-font] .modal-body.markdown { font-family: var(--reader-font); }
+    .modal[data-reader-font="pretendard"] .modal-body.markdown { letter-spacing: -.003em; word-break: keep-all; }
+    .modal[data-reader-font="chosun"] .modal-body.markdown { letter-spacing: -.01em; word-break: keep-all; }
     .modal[data-reader-font="chosun"] .modal-body.markdown p,
     .modal[data-reader-font="chosun"] .modal-body.markdown li { line-height: 1.85; }
-    .modal[data-reader-font="suit"] .modal-body.markdown {
-      font-family: "SUIT Variable", "Pretendard Variable", -apple-system, sans-serif; word-break: keep-all;
-    }
-    .modal[data-reader-font="wanted"] .modal-body.markdown {
-      font-family: "Wanted Sans Variable", "Pretendard Variable", -apple-system, sans-serif; word-break: keep-all;
-    }
-    .modal[data-reader-font="system"] .modal-body.markdown {
-      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
-    }
+    .modal[data-reader-font="suit"] .modal-body.markdown,
+    .modal[data-reader-font="wanted"] .modal-body.markdown { word-break: keep-all; }
     /* ── 처리 큐(모달 내) ── */
     .mq-add { display: flex; gap: .4rem; margin-bottom: .4rem; }
     .mq-add input { flex: 1 1 auto; min-width: 0; height: 36px; padding: 0 .7rem; font: inherit; font-size: 13px;
@@ -707,14 +692,7 @@
         <span>원본</span>
       </a>
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
-        <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
-          <option value="pretendard">Pretendard</option>
-          <option value="sans">Noto Sans KR</option>
-          <option value="suit">SUIT</option>
-          <option value="wanted">Wanted Sans</option>
-          <option value="chosun">조선일보명조</option>
-          <option value="system">시스템</option>
-        </select>
+        <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴"></select>
       </label>
       <div class="fs-ctrl" id="fs-ctrl" hidden>
         <button class="fs-btn" onclick="adjustFs(-1)" aria-label="글자 작게">−</button>
@@ -742,6 +720,8 @@
     </footer>
   </div>
 
+<!-- 본문 글꼴 목록은 공용 fonts.js가 정본(2026-11-01) -->
+<script src="/reader-fonts/fonts.js?v={{ reader_font_v('fonts.js') }}"></script>
 <script>
 window.YS_META_COMPACT = true;
 window.YS_ASSET_VERSIONS={googleCss:"{{ reader_font_v('google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
@@ -1602,20 +1582,19 @@ function adjustFs(delta) {
   _applyReaderFs();
 }
 
-// 데스크톱과 같은 본문 글꼴 설정을 공유하고 로컬에 기억한다.
-// 2026-10-30: 마루 부리·Noto Serif KR·고운바탕·나눔명조·고정폭 제거(사용자 지시 — 공용 글꼴 자원과 함께). 지운 값이 저장돼 있으면 기본값으로
-const _READER_FONTS = {
-  pretendard: 'Pretendard', sans: 'Noto Sans KR', suit: 'SUIT', wanted: 'Wanted Sans',
-  chosun: '조선일보명조', system: '시스템',
-};
-let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
-if (!_READER_FONTS[_readerFont]) _readerFont = 'sans';
+// 데스크톱과 같은 본문 글꼴 설정(sumReaderFont)을 공유하고 로컬에 기억한다. 목록·글꼴 값은 공용 fonts.js가 정본
+// (2026-11-01 사용자 지시) — 공용 목록에 더한 글꼴이 그대로 나타난다. 옛 저장값 'sans'는 Noto Sans KR이었다.
+const _RF = window.HermesReaderFonts
+  || {list: [], get: () => null, resolve: () => null, apply() {}, fillSelect() {}, ensureWeb() {}};
+let _readerFont = _RF.resolve(localStorage.getItem('sumReaderFont'), {legacy: {sans: 'noto'}, fallback: 'noto'});
 function _applyReaderFont() {
-  $('modal').dataset.readerFont = _readerFont;
-  if ($('font-select').value !== _readerFont) $('font-select').value = _readerFont;
+  _RF.apply($('modal'), _readerFont);
+  const sel = $('font-select');
+  if (!sel.options.length) _RF.fillSelect(sel);
+  if (sel.value !== _readerFont) sel.value = _readerFont;
 }
 function setReaderFont(key) {
-  if (!_READER_FONTS[key]) return;
+  if (!_RF.get(key)) return;
   _readerFont = key;
   localStorage.setItem('sumReaderFont', key);
   _applyReaderFont();

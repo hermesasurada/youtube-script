@@ -13,6 +13,8 @@
 <link rel="stylesheet" href="/static/css/hermes-theme.css?v={{ static_v('css/hermes-theme.css') }}">
 <link rel="stylesheet" href="/static/css/index.css?v={{ static_v('css/index.css') }}">
 <link rel="stylesheet" href="/static/css/model-selector.css?v={{ static_v('css/model-selector.css') }}">
+<!-- 본문 글꼴 목록은 공용 fonts.js가 정본(2026-11-01) -->
+<script src="/reader-fonts/fonts.js?v={{ reader_font_v('fonts.js') }}"></script>
 <script>window.YS_ASSET_VERSIONS={googleCss:"{{ reader_font_v('google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
 <script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
 <script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
@@ -178,14 +180,7 @@
           <button class="sum-fs-btn" onclick="adjustReaderFs(1)" aria-label="글자 크게">+</button>
         </span>
         <label class="sum-font-ctrl" title="본문 글꼴">
-          <select id="sum-font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴">
-            <option value="pretendard">Pretendard</option>
-            <option value="sans">Noto Sans KR</option>
-            <option value="suit">SUIT</option>
-            <option value="wanted">Wanted Sans</option>
-            <option value="chosun">조선일보명조</option>
-            <option value="system">시스템</option>
-          </select>
+          <select id="sum-font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴"></select>
         </label>
         <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
       </div>

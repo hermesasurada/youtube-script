@@ -66,7 +66,9 @@
       if (!_secondaryAssetsStarted) {
         _secondaryAssetsStarted = true;
         setTimeout(() => {
-          void _loadStyle('/reader-fonts/google.css' + fontVersion, 'ys-reader-fonts');
+          // 공용 fonts.js가 있으면 그 버전 붙은 주소로 한 번만 붙인다(글꼴을 고를 때 먼저 붙었을 수 있다)
+          if (global.HermesReaderFonts) global.HermesReaderFonts.ensureWeb();
+          else void _loadStyle('/reader-fonts/google.css' + fontVersion, 'ys-reader-fonts');
           void _loadStyle('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css', 'ys-katex-css');
           void _loadScript('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js',
                            'ys-katex-js', () => !!global.katex);

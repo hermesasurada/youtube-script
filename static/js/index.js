@@ -2556,26 +2556,19 @@ function adjustReaderFs(dir) {
 
 
 /* ── 본문 글꼴 선택 — 일반/몰입 공통, localStorage 기억 ── */
-// 2026-10-20: 송명 빼고 SUIT·Wanted Sans·마루 부리 추가, 이름표는 wm·sa·td와 통일(키는 그대로 — sans=Noto Sans KR)
-// 2026-10-30: 마루 부리·Noto Serif KR·고운바탕·나눔명조·고정폭 제거(사용자 지시 — 공용 글꼴 자원과 함께). 지운 값이 저장돼 있으면 기본값으로
-const _READER_FONTS = {
-  pretendard: 'Pretendard',
-  sans:       'Noto Sans KR',
-  suit:       'SUIT',
-  wanted:     'Wanted Sans',
-  chosun: '조선일보명조',
-  system: '시스템',
-};
-let _readerFont = localStorage.getItem('sumReaderFont') || 'sans';
-if (!_READER_FONTS[_readerFont]) _readerFont = 'sans';
+// 목록·글꼴 값은 공용 hermes-reader-fonts/fonts.js가 정본(2026-11-01 사용자 지시) — 공용 목록에 글꼴을 더하면
+// 여기 고칠 것 없이 나타난다. 옛 저장값 'sans'는 Noto Sans KR이었다. 목록에 없는 값(지운 글꼴)은 기본값으로.
+const _RF = window.HermesReaderFonts
+  || {list: [], get: () => null, resolve: () => null, apply() {}, fillSelect() {}, ensureWeb() {}};
+let _readerFont = _RF.resolve(localStorage.getItem('sumReaderFont'), {legacy: {sans: 'noto'}, fallback: 'noto'});
 function _applyReaderFont() {
-  const panel = document.getElementById('sum-panel');
-  if (panel) panel.dataset.readerFont = _readerFont;
+  _RF.apply(document.getElementById('sum-panel'), _readerFont);
   const sel = document.getElementById('sum-font-select');
+  if (sel && !sel.options.length) _RF.fillSelect(sel);
   if (sel && sel.value !== _readerFont) sel.value = _readerFont;
 }
 function setReaderFont(key) {
-  if (!_READER_FONTS[key]) return;
+  if (!_RF.get(key)) return;
   _readerFont = key;
   localStorage.setItem('sumReaderFont', key);
   _applyReaderFont();
