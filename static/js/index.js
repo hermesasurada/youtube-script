@@ -123,7 +123,7 @@ async function openChannelsModal(tab) {
   document.body.style.overflow = 'hidden';
   if (_channelsCache) renderChannels(_channelsCache);
   else document.getElementById('channels-list').innerHTML =
-    '<li class="utility-loading"><span></span><span></span><span></span></li>';
+    '<div class="utility-loading"><span></span><span></span><span></span></div>';
   requestAnimationFrame(() => { loadChannels({force: !!_channelsCache}); });
 }
 function closeChannelsModal() {
@@ -152,38 +152,8 @@ function renderChannels(d) {
   if (q.done)       parts.push(`완료 ${q.done}`);
   if (q.failed)     parts.push(`실패 ${q.failed}`);
   qEl.textContent = parts.length ? parts.join(' · ') : '큐 비어있음';
-  const chans = d.channels || [];
-  const count = document.getElementById('channels-count');
-  if (count) count.textContent = `${chans.filter(c => c.enabled).length} ON · 전체 ${chans.length}`;
-  if (!chans.length) { list.innerHTML = '<li class="channels-empty">등록된 채널이 없습니다.</li>'; return; }
-  list.innerHTML = `<li class="channel-list-head" aria-hidden="true"><span>채널</span><span>캡처</span><span>증류</span><span>자동</span></li>` + chans.map(c => {
-    const on = !!c.enabled;
-    const sub = (c.handle ? '@' + c.handle : c.channel_id) +
-                (c.last_checked ? ` · 확인 ${esc(c.last_checked.slice(5, 16))}` : '');
-    const noLimit = c.min_duration === 0
-      ? ' <span class="channel-nolimit" title="길이제한 면제 — 짧은 영상도 수집">∞</span>'
-      : (c.min_duration != null
-        ? ` <span class="channel-nolimit" title="최소 길이 ${Math.round(c.min_duration / 60)}분 — 그 미만은 수집 제외">${Math.round(c.min_duration / 60)}분+</span>` : '');
-    const dis = c.distill == null ? true : !!c.distill;
-    const cap = c.capture == null ? true : !!c.capture;
-    return `<li class="channel-row">
-      <div class="channel-meta">
-        <span class="channel-name">${esc(c.title || c.handle || c.channel_id)}${noLimit}</span>
-        <span class="channel-sub">${esc(sub)}</span>
-      </div>
-      <button class="channel-distill ${cap ? 'on' : ''}" role="switch" aria-checked="${cap}"
-              title="영상 캡처(키프레임) 포함 — 끄면 이 채널 영상은 요약만"
-              onclick="toggleChannelCapture(${c.id}, ${cap ? 'false' : 'true'}, this)">캡처</button>
-      <button class="channel-distill ${dis ? 'on' : ''}" role="switch" aria-checked="${dis}"
-              title="지식증류(옵시디언 볼트) 대상 — 끄면 증류에서 제외"
-              onclick="toggleChannelDistill(${c.id}, ${dis ? 'false' : 'true'}, this)">증류</button>
-      <button class="channel-toggle ${on ? 'on' : ''}" role="switch" aria-checked="${on}"
-              title="자동 수집 ON/OFF"
-              onclick="toggleChannel(${c.id}, ${on ? 'false' : 'true'}, this)">
-        <span class="channel-toggle-knob"></span>
-      </button>
-    </li>`;
-  }).join('');
+  // 채널 목록(로고·검색·자동>캡처>증류 스위치)은 PC·모바일 공용 channel-list.js가 그린다.
+  YS.channelList.mount(list, d, {countEl: document.getElementById('channels-count')});
 }
 
 async function _fetchChannels(force = false) {
@@ -207,7 +177,7 @@ async function loadChannels({force = false} = {}) {
     if (!document.getElementById('channels-overlay').hidden) renderChannels(d);
   } catch (e) {
     if (!document.getElementById('channels-overlay').hidden) {
-      list.innerHTML = `<li class="channels-empty">오류: ${esc(e.message)}</li>`;
+      list.innerHTML = `<div class="channels-empty">오류: ${esc(e.message)}</div>`;
     }
   }
 }
@@ -215,69 +185,6 @@ async function loadChannels({force = false} = {}) {
 const _prefetchChannels = () => { _fetchChannels(false).catch(() => {}); };
 if ('requestIdleCallback' in window) requestIdleCallback(_prefetchChannels, {timeout: 1800});
 else setTimeout(_prefetchChannels, 700);
-async function toggleChannelCapture(id, enable, btn) {
-  btn.disabled = true;
-  try {
-    const d = await (await fetch('/channels/' + id, {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({capture: enable}),
-    })).json();
-    if (d.error) throw new Error(d.error);
-    btn.classList.toggle('on', d.capture);
-    btn.setAttribute('aria-checked', String(d.capture));
-    btn.setAttribute('onclick', `toggleChannelCapture(${id}, ${d.capture ? 'false' : 'true'}, this)`);
-    const cached = _channelsCache && _channelsCache.channels.find(c => c.id === id);
-    if (cached) cached.capture = d.capture;
-  } catch (e) {
-    alert('변경 실패: ' + e.message);
-  } finally { btn.disabled = false; }
-}
-
-async function toggleChannel(id, enable, btn) {
-  btn.disabled = true;
-  try {
-    const d = await (await fetch('/channels/' + id, {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({enabled: enable}),
-    })).json();
-    if (d.error) throw new Error(d.error);
-    btn.classList.toggle('on', d.enabled);
-    btn.setAttribute('aria-checked', String(d.enabled));
-    btn.setAttribute('onclick', `toggleChannel(${id}, ${d.enabled ? 'false' : 'true'}, this)`);
-    const cached = _channelsCache && _channelsCache.channels.find(c => c.id === id);
-    if (cached) {
-      cached.enabled = d.enabled;
-      const count = document.getElementById('channels-count');
-      if (count) count.textContent = `${_channelsCache.channels.filter(c => c.enabled).length} ON · 전체 ${_channelsCache.channels.length}`;
-    }
-  } catch (e) {
-    alert('토글 실패: ' + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-/* 지식증류 대상 토글 — 끄면 hermes 증류 파이프라인이 그 채널 문서를 건너뛴다. */
-async function toggleChannelDistill(id, enable, btn) {
-  btn.disabled = true;
-  try {
-    const d = await (await fetch('/channels/' + id, {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({distill: enable}),
-    })).json();
-    if (d.error) throw new Error(d.error);
-    btn.classList.toggle('on', d.distill);
-    btn.setAttribute('aria-checked', String(d.distill));
-    btn.setAttribute('onclick', `toggleChannelDistill(${id}, ${d.distill ? 'false' : 'true'}, this)`);
-    const cached = _channelsCache && _channelsCache.channels.find(c => c.id === id);
-    if (cached) cached.distill = d.distill;
-  } catch (e) {
-    alert('증류 설정 실패: ' + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 /* {transcript} 자리표시자 검증 후 저장. 누락 시 차단(요약 시 전사 본문이 안 들어감). */
 
 const IS_REMOTE = document.body.classList.contains('remote-mode');

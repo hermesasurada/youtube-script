@@ -812,43 +812,6 @@ select option { background: var(--surface); color: var(--text); }
 .model-order-rank { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); }
 .channels-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
 .channels-empty { color: var(--muted); font-size: 13px; padding: .5rem .2rem; }
-.channel-row {
-  display: flex; align-items: center; gap: .75rem;
-  padding: .6rem .7rem;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-}
-.channel-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
-.channel-name { font-size: 13.5px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 길이제한 면제(min_duration=0) 뱃지 */
-.channel-nolimit { display: inline-block; margin-left: 2px; padding: 0 5px; border-radius: 8px;
-  font-size: 11px; font-weight: 700; line-height: 15px; vertical-align: 1px;
-  color: #b0413e; background: color-mix(in srgb, #b0413e 12%, transparent);
-  cursor: help; }
-.channel-sub  { font-size: 11px; font-family: var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.channel-toggle {
-  flex-shrink: 0; width: 40px; height: 22px; padding: 0;
-  background: var(--surface2); border: 1px solid var(--border-strong); border-radius: 999px;
-  cursor: pointer; position: relative; transition: background .15s, border-color .15s;
-}
-.channel-toggle-knob {
-  position: absolute; top: 50%; left: 2px; transform: translateY(-50%);
-  width: 16px; height: 16px; border-radius: 50%; background: var(--muted);
-  transition: left .15s, background .15s;
-}
-.channel-toggle.on { background: var(--highlight-soft); border-color: var(--highlight); }
-.channel-toggle.on .channel-toggle-knob { left: 20px; background: var(--highlight); }
-.channel-toggle:disabled { opacity: .5; cursor: default; }
-/* 지식증류 대상 — 자동수집 토글과 성격이 달라 칩 형태로 구분(켜짐일 때만 강조) */
-.channel-distill {
-  flex-shrink: 0; height: 22px; padding: 0 .5rem; margin-right: .1rem;
-  background: transparent; border: 1px solid var(--border); border-radius: 999px;
-  color: var(--muted); font-family: inherit; font-size: 11px; line-height: 1;
-  cursor: pointer; transition: color .15s, background .15s, border-color .15s;
-}
-.channel-distill:hover { border-color: var(--border-strong); color: var(--text); }
-.channel-distill.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
-.channel-distill:disabled { opacity: .5; cursor: default; }
-
 /* Summary toolbar */
 .summary-toolbar {
   flex-shrink: 0;
@@ -2415,7 +2378,7 @@ header h1 { font-size: 15px; }
 .hist-thumb-dur { border-radius: 5px; }
 
 .sum-overlay { background: rgba(10, 12, 15, .58); backdrop-filter: blur(5px); }
-.sum-panel { max-width: 960px; border-radius: var(--radius-lg); }
+.sum-panel { max-width: 860px; border-radius: var(--radius-lg); }   /* 일반형 폭 960→860(2026-11-01 사용자 지시) — 캡처 2장 배치는 그대로라 이미지도 함께 작아진다. 몰입형은 .sum-panel.immersive */
 .sum-panel-hdr { gap: .55rem; padding: .75rem 1rem; }
 .sum-panel-badge {
   border: 0; border-radius: 999px; padding: .22rem .55rem;
@@ -2459,23 +2422,6 @@ header h1 { font-size: 15px; }
 #channels-panel { max-width: 720px; }
 .channels-queue { border: 0; border-radius: var(--radius); }
 .channels-list { gap: 0; border-top: 1px solid var(--border); }
-.channel-list-head,
-.channel-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 48px 48px 42px;
-  align-items: center; gap: .45rem;
-}
-.channel-list-head {
-  padding: .45rem .65rem; color: var(--muted); font-size: 10px;
-  font-weight: 700; letter-spacing: .04em; text-align: center;
-}
-.channel-list-head span:first-child { text-align: left; }
-.channel-row {
-  padding: .65rem; border: 0; border-top: 1px solid var(--border); border-radius: 0;
-}
-.channel-row:first-of-type { border-top: 0; }
-.channel-distill { justify-self: center; }
-.channel-toggle { justify-self: end; }
-
 /* ── Utility panels: 처리 큐 · 채널 모니터 · 프롬프트 ──────────────── */
 .utility-overlay {
   background: rgba(15, 17, 20, .68);
@@ -2612,13 +2558,6 @@ header h1 { font-size: 15px; }
   border: 1px solid var(--border); border-top: 1px solid var(--border);
   border-radius: 10px; background: var(--surface);
 }
-.channel-list-head { background: var(--surface2); }
-.channel-row { background: transparent; }
-.channel-row:hover { background: color-mix(in oklab, var(--surface2) 62%, transparent); }
-.channel-distill { border-color: transparent; background: var(--surface2); }
-.channel-distill.on { border-color: transparent; }
-.channel-toggle { border-color: transparent; }
-
 :where(button, input, select, textarea, a):focus-visible {
   outline: 2px solid var(--highlight); outline-offset: 2px;
 }
@@ -2695,3 +2634,6 @@ header h1 { font-size: 15px; }
 /* 텍스트 버튼 안의 선 아이콘(채널 모니터 톱니 — wm 설정 버튼과 같은 그림) */
 .btn-with-icon { display: inline-flex; align-items: center; gap: 5px; }
 .btn-with-icon .btn-icon { flex: 0 0 auto; }
+
+/* 설정 > 채널 탭: 목록은 channel-list.js(공용)가 그린다 — 옛 ul 목록 상자 규칙을 걷어낸다 */
+#channels-list.chl { display: flex; gap: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }

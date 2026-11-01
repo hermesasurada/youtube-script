@@ -3417,12 +3417,68 @@ def queue_item_cancel(qid: int):
 
 @app.route("/channels")
 def channels_list():
-    """모니터링 채널 목록 + 큐 요약(모달용)."""
+    """모니터링 채널 목록 + 큐 요약(모달용). 채널마다 자동 처리 실적(done·last_done)을 붙인다."""
     try:
-        return _json({"channels": db.list_channels(), "queue": db.queue_counts(),
+        stats = db.channel_stats()
+        chans = [{**c, **stats.get(c["channel_id"], {"done": 0, "last_done": None})}
+                 for c in db.list_channels()]
+        return _json({"channels": chans, "queue": db.queue_counts(),
                       **_monitor_model_payload()})
     except Exception as e:
         return _json({"error": str(e)}, 500)
+
+
+# ── 채널 로고(설정-채널 탭) ── 채널 페이지 og:image(yt3) 를 작게 받아 res/channel_logos 에 둔다.
+# 처음 요청 때 받고 30일마다 새로 받는다. 못 받으면 1시간 동안 다시 시도하지 않고 404 →
+# 화면은 채널 이름 첫 글자로 대신한다.
+CHANNEL_LOGO_DIR = os.path.join(RES_DIR, "channel_logos")
+_LOGO_MAX_AGE = 30 * 86400
+_logo_fail: dict[str, float] = {}
+_logo_lock = threading.Semaphore(4)   # 처음 열 때 수십 개가 한꺼번에 오므로 동시 4개까지만
+
+
+def _fetch_channel_logo(channel_id: str, dest: str) -> bool:
+    req = urllib.request.Request(
+        f"https://www.youtube.com/channel/{channel_id}",
+        headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en"})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        page = r.read().decode("utf-8", "replace")
+    m = re.search(r'<meta property="og:image" content="([^"]+)"', page)
+    if not m or "yt3." not in m.group(1):
+        return False
+    img_url = re.sub(r"=s\d+-", "=s96-", _htmlmod.unescape(m.group(1)), count=1)
+    with urllib.request.urlopen(urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"}),
+                                timeout=12) as r:
+        data = r.read()
+    if len(data) < 200:
+        return False
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, dest)
+    return True
+
+
+@app.route("/channels/logo/<channel_id>")
+def channel_logo(channel_id: str):
+    if not re.fullmatch(r"UC[\w-]{20,24}", channel_id):
+        return Response(status=404)
+    dest = os.path.join(CHANNEL_LOGO_DIR, channel_id + ".jpg")
+    fresh = os.path.exists(dest) and time.time() - os.path.getmtime(dest) < _LOGO_MAX_AGE
+    if not fresh and time.time() - _logo_fail.get(channel_id, 0) > 3600:
+        with _logo_lock:
+            try:
+                if not _fetch_channel_logo(channel_id, dest):
+                    _logo_fail[channel_id] = time.time()
+            except Exception as e:
+                log.info("channel logo %s: %s", channel_id, e)
+                _logo_fail[channel_id] = time.time()
+    if not os.path.exists(dest):
+        return Response(status=404)
+    resp = send_file(dest, mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "public, max-age=604800"
+    return resp
 
 
 @app.route("/channels/model-orders", methods=["PATCH"])

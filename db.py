@@ -1720,6 +1720,15 @@ def last_queue_activity_epoch() -> float | None:
         return None
 
 
+def channel_stats() -> dict:
+    """채널별 자동 처리 실적 {channel_id: {"done": 편수, "last_done": 마지막 완료 시각}}.
+    설정-채널 탭에서 채널이 실제로 굴러가는지 한눈에 보이게 한다."""
+    rows = _conn().execute(
+        "SELECT channel_id, COUNT(*) n, MAX(updated_at) last FROM watch_queue "
+        "WHERE status = 'done' GROUP BY channel_id").fetchall()
+    return {r["channel_id"]: {"done": r["n"], "last_done": r["last"]} for r in rows}
+
+
 def queue_counts() -> dict:
     rows = _conn().execute(
         "SELECT status, COUNT(*) n FROM watch_queue GROUP BY status"

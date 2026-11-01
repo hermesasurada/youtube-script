@@ -19,6 +19,7 @@
 <script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
 <script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
 <script src="/static/js/model-selector.js?v={{ static_v('js/model-selector.js') }}"></script>
+<script src="/static/js/channel-list.js?v={{ static_v('js/channel-list.js') }}"></script>
 <body class="{% if remote %}remote-mode{% endif %}">
 
 <header>
@@ -344,7 +345,7 @@
       <section class="prompt-tabpane" data-pane="channels" hidden>
         <p class="prompt-hint utility-note">등록된 채널에 새 영상이 올라오면 자동으로 전사·요약·캡처합니다. 채널 확인과 영상 처리는 20분 주기로 실행됩니다.</p>
         <div class="utility-section-head channels-list-title"><span>등록 채널</span><small id="channels-count">—</small></div>
-        <ul class="channels-list" id="channels-list"></ul>
+        <div class="channels-list" id="channels-list"></div>
       </section>
       <section class="prompt-tabpane" data-pane="terms" hidden>
         <div class="term-excl" id="term-excl">

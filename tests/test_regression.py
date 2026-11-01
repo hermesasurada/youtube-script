@@ -2756,3 +2756,22 @@ def test_reenabled_channel_skips_videos_posted_while_off(monkeypatch):
         "SELECT yt_id, status, reason FROM watch_queue WHERE yt_id LIKE 'RSM_%'").fetchall()}
     assert rows["RSM_OLD"]["status"] == "skipped" and rows["RSM_OLD"]["reason"] == "수집 재개 전 영상"
     assert rows["RSM_NEW"]["status"] == "pending"
+
+
+def test_settings_channel_tab_uses_shared_list_with_logo_search_and_order():
+    """설정-채널 탭은 PC·모바일 모두 공용 channel-list.js(로고·검색·자동>캡처>증류)를 쓴다."""
+    root = os.path.dirname(app.__file__)
+    src = open(os.path.join(root, "static/js/channel-list.js"), encoding="utf-8").read()
+    keys = [src.index(f"key: '{k}'") for k in ("enabled", "capture", "distill")]
+    assert keys == sorted(keys)                       # 자동 > 캡처 > 증류
+    assert "/channels/logo/" in src and 'type="search"' in src
+    assert "last_checked" not in src
+    for name in ("templates/index.html", "templates/mobile.html"):
+        assert "channel-list.js" in open(os.path.join(root, name), encoding="utf-8").read()
+    for name in ("static/js/index.js", "templates/mobile.html"):
+        body = open(os.path.join(root, name), encoding="utf-8").read()
+        assert "YS.channelList.mount" in body and "last_checked" not in body
+    client = app.app.test_client()
+    assert client.get("/channels/logo/not-a-channel").status_code == 404
+    chans = client.get("/channels").get_json()["channels"]
+    assert all("done" in c and "last_done" in c for c in chans)
