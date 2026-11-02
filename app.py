@@ -2123,32 +2123,35 @@ _TITLE_TR_PROVIDERS = {
 
 
 def _rebuild_brief(body: str, family: str, model: str | None, title: str | None) -> str:
-    """한눈 요약을 완성된 본문에서 다시 뽑아 바꿔 끼운다 — 소제목 하나당 불릿 하나(2026-11-02 사용자 지시).
+    """한눈 요약을 완성된 본문에서 뽑아 채운다 — 소제목 하나당 불릿 하나(2026-11-02 사용자 지시).
 
-    요약을 낸 모델(계열·구체 모델, 추론 기본값)로 한 번 더 부른다. 소제목이 없거나, 호출이 실패하거나,
-    불릿 수가 소제목 수와 다르거나, 한자·이질 문자가 섞이면 첫 요약의 한눈 요약을 그대로 둔다 —
-    요약 저장을 막지 않는다. 비상 스위치 YT_BRIEF_REBUILD=0."""
+    첫 요약은 '## 2. 한눈 요약' 머리글만 비워 둔다(같은 날 B안 — 한눈 요약을 두 번 쓰던 중복 제거).
+    요약을 낸 모델(계열·구체 모델, 추론 기본값)로 한 번 더 부르고, 실패·불릿 수 불일치·한자 누출이면
+    한 번만 다시 시도한다. 그래도 안 되면 빈 머리글만 걷어 내고 요약은 그대로 저장한다 — 요약 저장을
+    막지 않는다. 비상 스위치 YT_BRIEF_REBUILD=0(이때는 한눈 요약 없이 저장)."""
     if os.environ.get("YT_BRIEF_REBUILD", "1") == "0":
-        return body
+        return brief_rebuild.drop_empty(body)
     try:
         built = brief_rebuild.build_prompt(body)
         call = _TITLE_TR_PROVIDERS.get(family)
         if not built or not call:
-            return body
+            return brief_rebuild.drop_empty(body)
         prompt, n = built
-        out, err = call(prompt, title or "한눈 요약", model, "default", purpose="brief")
-        bullets = brief_rebuild.parse(out, n) if not err else None
-        if not bullets:
-            log.warning("한눈 요약 재생성 건너뜀(%s): %s", family, err or f"불릿 수 불일치(소제목 {n}개)")
-            return body
-        leaks = _script_leaks("\n".join(bullets), body)
-        if leaks:
-            log.warning("한눈 요약 재생성 건너뜀(%s): 문자 누출 %s", family, leaks[0][:80])
-            return body
-        return _polish_summary(brief_rebuild.replace(body, bullets))
+        for attempt in (1, 2):
+            out, err = call(prompt, title or "한눈 요약", model, "default", purpose="brief")
+            bullets = brief_rebuild.parse(out, n) if not err else None
+            if not bullets:
+                log.warning("한눈 요약 생성 실패 %d/2(%s): %s", attempt, family,
+                            err or f"불릿 수 불일치(소제목 {n}개)")
+                continue
+            leaks = _script_leaks("\n".join(bullets), body)
+            if leaks:
+                log.warning("한눈 요약 생성 실패 %d/2(%s): 문자 누출 %s", attempt, family, leaks[0][:80])
+                continue
+            return _polish_summary(brief_rebuild.replace(body, bullets))
     except Exception as e:  # noqa: BLE001 — 한눈 요약 때문에 요약 저장이 깨지면 안 된다
-        log.warning("한눈 요약 재생성 실패(%s): %s", family, e)
-        return body
+        log.warning("한눈 요약 생성 실패(%s): %s", family, e)
+    return brief_rebuild.drop_empty(body)
 
 
 def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | None:
@@ -2557,7 +2560,6 @@ _GROK_STYLE_NOTE = """[문체 보정 — 아래 규칙은 본 지시문보다 �
   (다음 단계는 효과를 시험하는 일이다 ✗ → 다음 단계는 효과를 시험하는 것이다 ○)
 - 화자나 주체가 바뀌면 그 문장 첫머리에서 밝힌다("Nadella는", "진행자는"). 같은 주체가 이어지는 동안에는 반복하지 않는다.
 - 같은 인명·용어는 요약 전체에서 한 가지 표기만 쓴다. harness면 끝까지 harness, 하니스면 끝까지 하니스. 인명 철자는 전사에 나온 대로 한 번 정하고 바꾸지 않는다.
-- 한눈 요약의 불릿 하나는 한두 문장으로 끝낸다.
 - 이 보정은 표현에만 해당한다. 사실·수치·화자 귀속 규칙은 본 지시문을 그대로 따른다.
 
 """

@@ -37,7 +37,8 @@ def doc_id(summary_path: str) -> str:
 
 def _detect_text(md: str) -> str:
     """찾기 입력: 메타 표·HTML 캡처를 뺀 본문(한눈 요약부터)."""
-    body = md.split("## 2.", 1)[1] if "## 2." in md else md
+    mark = "## 2." if "## 2." in md else "## 3."     # 한눈 요약 생성이 실패하면 2절이 없다
+    body = md.split(mark, 1)[1] if mark in md else md
     body = re.sub(r'<div class="kf-strip">.*?</div>', "", body, flags=re.S)
     body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
     return body.strip()
@@ -82,6 +83,8 @@ def process(summary_path: str, *, dry_run: bool = False, on_change=None) -> dict
                 cur = open(summary_path, encoding="utf-8", errors="replace").read()
                 # 제목(H1)·메타정보 표는 인명 교정 대상이 아니다(2026-10-15 사용자 지시) — '## 2.'(한눈 요약)부터만 바꾼다.
                 cut = cur.find("\n## 2.")
+                if cut < 0:                                   # 한눈 요약 생성이 실패하면 2절이 없다
+                    cut = cur.find("\n## 3.")
                 head, body = (cur[:cut], cur[cut:]) if cut >= 0 else ("", cur)
                 body, n = name_resolver.replace_names(body, mapping)
                 new = head + body

@@ -202,10 +202,12 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
 
 def test_brief_summary_is_excluded_from_term_notes():
     """`## 2. 한눈 요약`에는 각주를 달지 않는다 — 프롬프트와 렌더 양쪽에서 보장."""
+    import brief_rebuild
     root = os.path.dirname(app.__file__)
-    for name in ("prompt.txt", "prompt_default.txt"):
+    for name in ("prompt.txt", "prompt_default.txt"):      # 첫 요약은 한눈 요약 머리글만 비워 둔다
         text = open(os.path.join(root, name), encoding="utf-8").read()
-        assert "여기에는 용어 각주를 달지 않는다" in text, name
+        assert "머리글 한 줄만 쓰고 아래는 비워 둔다" in text, name
+    assert "용어 각주 표식" in brief_rebuild.PROMPT          # 한눈 요약은 별도 호출이 쓴다
     common = open(os.path.join(root, "static/js/common.js"), encoding="utf-8").read()
     assert "_stripBriefMarks" in common and "한눈 요약은 각주 대상이 아니다" in common
 

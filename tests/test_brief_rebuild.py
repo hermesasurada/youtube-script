@@ -71,7 +71,21 @@ def test_unusual_structure_is_left_alone():
     assert B.replace("# 제목\n\n본문만", ["x"]) == "# 제목\n\n본문만"
 
 
-def test_app_falls_back_to_first_brief(monkeypatch):
+EMPTY = DOC.replace("- 옛 불릿 하나\n- 옛 불릿 둘\n", "")     # 첫 요약은 머리글만 비워 둔다(B안)
+NO_HEAD = DOC.replace("## 2. 한눈 요약\n\n- 옛 불릿 하나\n- 옛 불릿 둘\n\n", "")
+
+
+def test_missing_heading_is_inserted_and_empty_section_dropped():
+    assert B.build_prompt(NO_HEAD)[1] == 2
+    out = B.replace(NO_HEAD, ["새 하나", "새 둘"])
+    assert "| 제목 | X |\n\n## 2. 한눈 요약\n\n- 새 하나\n- 새 둘\n\n## 3. 핵심 내용" in out
+    assert B.replace(EMPTY, ["새"]).count("## 2. 한눈 요약") == 1
+    assert "한눈 요약" not in B.drop_empty(EMPTY) and "## 3. 핵심 내용" in B.drop_empty(EMPTY)
+    assert "한눈 요약" not in B.drop_empty(EMPTY.replace("## 2. 한눈 요약\n", "## 2. 한눈 요약\n(추후 작성)\n"))
+    assert B.drop_empty(DOC) == DOC and B.drop_empty(NO_HEAD) == NO_HEAD
+
+
+def test_app_retries_once_then_drops_empty_heading(monkeypatch):
     import app
     calls = []
 
@@ -79,15 +93,17 @@ def test_app_falls_back_to_first_brief(monkeypatch):
         calls.append((model, purpose))
         return "- 하나뿐", ""
     monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus", fake)
-    assert app._rebuild_brief(DOC, "opus", "m", "t") == DOC           # 불릿 수가 다르면 그대로
-    assert calls == [("m", "brief")]
+    out = app._rebuild_brief(EMPTY, "opus", "m", "t")
+    assert calls == [("m", "brief"), ("m", "brief")]                 # 한 번만 다시 시도
+    assert "한눈 요약" not in out and "## 3. 핵심 내용" in out        # 빈 카드를 남기지 않는다
+    assert app._rebuild_brief(DOC, "opus", "m", "t") == DOC           # 불릿이 있던 옛 형식은 그대로
 
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus",
-                        lambda *a, **k: ("- **매출**이 40% 늘었다.\n- 비용은 두 배다.", ""))
-    out = app._rebuild_brief(DOC, "opus", "m", "t")
-    assert "- **매출**이 40% 늘었다.\n- 비용은 두 배다." in out and "옛 불릿" not in out
+    replies = iter([("", "timeout"), ("- **매출**이 40% 늘었다.\n- 비용은 두 배다.", "")])
+    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus", lambda *a, **k: next(replies))
+    out = app._rebuild_brief(EMPTY, "opus", "m", "t")
+    assert "## 2. 한눈 요약\n\n- **매출**이 40% 늘었다.\n- 비용은 두 배다.\n\n## 3." in out
 
     monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
-    assert app._rebuild_brief(DOC, "opus", "m", "t") == DOC           # 예외도 저장을 막지 않는다
+    assert "한눈 요약" not in app._rebuild_brief(EMPTY, "opus", "m", "t")   # 예외도 저장을 막지 않는다
     monkeypatch.setenv("YT_BRIEF_REBUILD", "0")
     assert app._rebuild_brief(DOC, "opus", "m", "t") == DOC

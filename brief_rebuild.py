@@ -1,9 +1,10 @@
 """한눈 요약을 본문(핵심 내용)에서 다시 뽑는다 — 소제목 하나당 불릿 하나(2026-11-02 사용자 지시).
 
-요약 한 번에 위에서부터 쓰면 한눈 요약이 본문보다 먼저 나와 본문과 어긋날 수 있다. 그래서 요약을
-받은 뒤 '## 3. 핵심 내용'만 근거로 모델을 한 번 더 불러 '## 2. 한눈 요약'을 바꿔 끼운다.
-LLM 호출은 app이 한다(이 모듈은 프롬프트·검증·교체만). 무엇이든 어긋나면 None — 호출한 쪽은
-첫 요약의 한눈 요약을 그대로 둔다(본업인 요약 저장을 막지 않는다).
+요약 한 번에 위에서부터 쓰면 한눈 요약이 본문보다 먼저 나와 본문과 어긋날 수 있다. 그래서 첫 요약은
+'## 2. 한눈 요약' 머리글만 비워 두고(같은 날 B안 — 두 번 쓰던 중복 제거), 요약을 받은 뒤
+'## 3. 핵심 내용'만 근거로 모델을 한 번 더 불러 그 자리를 채운다. 모델이 머리글을 빠뜨리면 핵심 내용
+앞에 넣는다. LLM 호출은 app이 한다(이 모듈은 프롬프트·검증·교체만). 무엇이든 어긋나면 None —
+호출한 쪽은 drop_empty()로 빈 머리글만 걷어 내고 요약은 그대로 저장한다.
 """
 from __future__ import annotations
 
@@ -37,15 +38,21 @@ PROMPT = """아래는 영상 요약의 '핵심 내용' 본문이다. 이 본문�
 
 
 def _span(body: str):
-    """(한눈 요약 내용 시작, 끝, 핵심 내용 본문) — 구조가 다르면 None."""
-    brief = BRIEF_HEAD_RE.search(body or "")
+    """(한눈 요약 내용 시작, 끝, 핵심 내용 본문) — 구조가 다르면 None.
+
+    한눈 요약 머리글이 없으면 시작=끝=핵심 내용 머리글 자리(replace가 머리글째 넣는다)."""
     main = BODY_HEAD_RE.search(body or "")
-    if not brief or not main or main.start() < brief.end():
+    if not main:
+        return None
+    after = NEXT_H2_RE.search(body, main.end())
+    main_body = body[main.end():after.start() if after else len(body)]
+    brief = BRIEF_HEAD_RE.search(body)
+    if not brief:
+        return main.start(), main.start(), main_body
+    if main.start() < brief.end():
         return None
     nxt = NEXT_H2_RE.search(body, brief.end())
-    end = nxt.start() if nxt else len(body)
-    after = NEXT_H2_RE.search(body, main.end())
-    return brief.end(), end, body[main.end():after.start() if after else len(body)]
+    return brief.end(), nxt.start() if nxt else len(body), main_body
 
 
 def headings(body: str) -> list[str]:
@@ -87,4 +94,20 @@ def replace(body: str, bullets: list[str]) -> str:
     if not span or not bullets:
         return body
     start, end, _ = span
-    return body[:start] + "\n\n" + "\n".join(f"- {b}" for b in bullets) + "\n\n" + body[end:]
+    items = "\n".join(f"- {b}" for b in bullets)
+    if not BRIEF_HEAD_RE.search(body):
+        return body[:start] + "## 2. 한눈 요약\n\n" + items + "\n\n" + body[end:]
+    return body[:start] + "\n\n" + items + "\n\n" + body[end:]
+
+
+def drop_empty(body: str) -> str:
+    """불릿 없는 '## 2. 한눈 요약' 섹션(빈 머리글·'추후 작성' 같은 자리표시)을 걷어 낸다 —
+    재생성이 실패했을 때 빈 카드가 남지 않게. 불릿이 있으면 그대로 둔다."""
+    brief = BRIEF_HEAD_RE.search(body or "")
+    if not brief:
+        return body
+    nxt = NEXT_H2_RE.search(body, brief.end())
+    end = nxt.start() if nxt else len(body)
+    if any(_BULLET_RE.match(line) for line in body[brief.end():end].splitlines()):
+        return body
+    return body[:brief.start()] + body[end:]
