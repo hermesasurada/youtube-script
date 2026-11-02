@@ -784,6 +784,7 @@ async function loadHistory(force) {
 function applyFilter() {
   const q = $('q').value.trim().toLowerCase();
   FILTERED = ALL.filter(i => {
+    if (YS.isPendingDelete(i.item_id)) return false;   // 되돌리기 대기 중인 삭제
     if (_uploader && i.uploader !== _uploader) return false;
     if (q && !(i.title||'').toLowerCase().includes(q) && !(i.uploader||'').toLowerCase().includes(q)) return false;
     if (_unreadOnly && i.is_read) return false;
@@ -1082,26 +1083,39 @@ async function toggleRead(btn) {
     }
   }
 
-  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거
-  if (_unreadOnly && newRead) applyFilter();
+  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거 — 토스트로 되돌리기(2026-11-03, 데스크톱과 같음)
+  if (_unreadOnly && newRead) {
+    applyFilter();
+    YS.undoToast('읽음 처리했습니다', { onUndo: () => _undoReadM(itemId) });
+  }
 }
 
-async function deleteCard(btn) {
-  const itemId = Number(btn.dataset.id);
-  const title  = btn.dataset.title || '이 항목';
-  if (!confirm(`"${title}" 을(를) 삭제하시겠습니까?\n\n전사 파일과 요약 파일이 모두 삭제됩니다.`)) return;
-
-  btn.disabled = true;
+async function _undoReadM(itemId) {
   try {
-    const result = await YS.apiDeleteItem(itemId);
-    if (!result) { btn.disabled = false; return; }
+    const result = await YS.apiMarkRead(itemId, false);
+    if (!result) throw new Error();
     if (result.revision) HISTORY_REVISION = result.revision;
-  } catch { btn.disabled = false; return; }
-
-  // ALL 배열에서 제거 후 다시 필터 적용
-  const idx = ALL.findIndex(i => i.item_id === itemId);
-  if (idx !== -1) ALL.splice(idx, 1);
+  } catch { alert('되돌리기 실패'); return; }
+  const item = ALL.find(i => i.item_id === itemId);
+  if (item) item.is_read = false;
   applyFilter();
+}
+
+// 확인창 없이 바로 빼고 6초 되돌리기 뒤 서버 삭제(2026-11-03, 데스크톱과 같음)
+function deleteCard(btn) {
+  const itemId = Number(btn.dataset.id);
+  const idx = ALL.findIndex(i => i.item_id === itemId);
+  if (idx === -1) return;
+  const item = ALL[idx];
+  YS.deleteWithUndo(itemId, {
+    hide() { ALL = ALL.filter(i => i.item_id !== itemId); applyFilter(); },
+    restore() {
+      if (!ALL.some(i => i.item_id === itemId)) ALL.splice(Math.min(idx, ALL.length), 0, item);
+      applyFilter();
+    },
+    committed(result) { if (result.revision) HISTORY_REVISION = result.revision; },
+    failed() { loadHistory(true); },
+  });
 }
 
 /* ── 모달 ── */

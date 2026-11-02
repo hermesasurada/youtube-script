@@ -439,6 +439,7 @@ function applyHistoryFilter(keepPage = false) {
   document.getElementById('hf-clear-btn').classList.toggle('visible', titleQ.length > 0);
 
   _historyFiltered = _historyItems.filter(item => {
+    if (YS.isPendingDelete(item.item_id)) return false;   // 되돌리기 대기 중인 삭제
     if (uploader && item.uploader !== uploader)  return false;
     if (titleQ   && !item.title.toLowerCase().includes(titleQ)) return false;
     if (_histUnreadOnly && item.is_read) return false;
@@ -585,28 +586,41 @@ async function toggleRead(btn) {
     }
   }
 
-  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거(현재 페이지 유지)
-  if (_histUnreadOnly && newRead) applyHistoryFilter(true);
+  // 미읽음 필터 활성 중이면 읽음 처리된 카드 제거(현재 페이지 유지) — 카드가 사라져 버튼으로
+  // 되돌릴 수 없으니 토스트로 복원 기회를 준다(2026-11-03 사용자 지시, sa·wm과 같은 방식).
+  if (_histUnreadOnly && newRead) {
+    applyHistoryFilter(true);
+    YS.undoToast('읽음 처리했습니다', { onUndo: () => _undoRead(itemId) });
+  }
 }
 
-async function deleteCard(btn) {
-  const itemId = Number(btn.dataset.id);
-  const title  = btn.dataset.title || '이 항목';
-  if (!confirm(`"${title}" 을(를) 삭제하시겠습니까?\n\n전사 파일과 요약 파일이 모두 삭제됩니다.`)) return;
-
-  btn.disabled = true;
+async function _undoRead(itemId) {
   try {
-    const result = await YS.apiDeleteItem(itemId);
-    if (!result) { btn.disabled = false; return; }
+    const result = await YS.apiMarkRead(itemId, false);
+    if (!result) throw new Error();
     if (result.revision) _historyRevision = result.revision;
-  } catch { btn.disabled = false; return; }
-
-  // _historyItems에서 제거
-  const idx = _historyItems.findIndex(i => i.item_id === itemId);
-  if (idx !== -1) _historyItems.splice(idx, 1);
-
-  // 카드 DOM 제거 후 목록 다시 렌더(현재 페이지 유지)
+  } catch { alert('되돌리기 실패'); return; }
+  const item = _historyItems.find(i => i.item_id === itemId);
+  if (item) item.is_read = false;
   applyHistoryFilter(true);
+}
+
+// 삭제는 확인창 없이 카드를 바로 빼고, 6초 동안 되돌리기를 준 뒤 서버에서 지운다
+// (2026-11-03 사용자 지시, sa·wm과 같은 방식 — yt 삭제는 파일까지 지워 서버 복원이 없어 확정을 늦춘다).
+function deleteCard(btn) {
+  const itemId = Number(btn.dataset.id);
+  const idx = _historyItems.findIndex(i => i.item_id === itemId);
+  if (idx === -1) return;
+  const item = _historyItems[idx];
+  YS.deleteWithUndo(itemId, {
+    hide() { _historyItems = _historyItems.filter(i => i.item_id !== itemId); applyHistoryFilter(true); },
+    restore() {
+      if (!_historyItems.some(i => i.item_id === itemId)) _historyItems.splice(Math.min(idx, _historyItems.length), 0, item);
+      applyHistoryFilter(true);
+    },
+    committed(result) { if (result.revision) _historyRevision = result.revision; },
+    failed() { loadHistory(true); },
+  });
 }
 
 /* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg.com)로

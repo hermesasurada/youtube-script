@@ -396,6 +396,88 @@
       note.appendChild(btn);
     });
   }
+  /* 되돌리기 토스트(2026-11-03 사용자 지시, sa·wm과 같은 방식). 한 번에 하나만 대기한다 —
+     새 토스트가 뜨거나 시간이 지나거나 페이지를 떠나면 대기 중이던 동작을 확정(onCommit)하고,
+     '되돌리기'를 누르면 onUndo만 부른다. 삭제처럼 서버에서 되돌릴 수 없는 동작은 확정 때
+     비로소 요청을 보내도록 onCommit에 둔다(대기 중엔 서버가 그대로라 되돌리기는 화면만 복구). */
+  const UNDO_MS = 6000;
+  let _undo = null;
+  const _pendingDeletes = new Set();
+  function _undoEl() {
+    let el = document.getElementById('ys-undo-toast');
+    if (el) return el;
+    if (!document.getElementById('ys-undo-style')) {
+      const st = document.createElement('style');
+      st.id = 'ys-undo-style';
+      st.textContent = '#ys-undo-toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,calc(100% + 40px));'
+        + 'display:flex;align-items:center;gap:.9rem;background:#222;color:#fff;padding:.55rem .6rem .55rem 1rem;'
+        + 'border-radius:8px;font-size:.88rem;z-index:99999;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;'
+        + 'box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:calc(100vw - 28px);box-sizing:border-box;}'
+        + '#ys-undo-toast.on{opacity:.96;transform:translate(-50%,0);pointer-events:auto;}'
+        + '#ys-undo-toast span{flex:1;min-width:0;}'
+        + '#ys-undo-toast button{flex:none;font:inherit;font-weight:600;color:#8ab4f8;background:transparent;border:0;'
+        + 'padding:.2rem .45rem;border-radius:5px;cursor:pointer;white-space:nowrap;}'
+        + '#ys-undo-toast button:hover{background:rgba(255,255,255,.08);}'
+        + '@media (max-width:480px){#ys-undo-toast{left:14px;right:14px;transform:translateY(calc(100% + 40px));}'
+        + '#ys-undo-toast.on{transform:none;}}';
+      document.head.appendChild(st);
+    }
+    el = document.createElement('div');
+    el.id = 'ys-undo-toast';
+    el.setAttribute('role', 'status');
+    el.innerHTML = '<span></span><button type="button">되돌리기</button>';
+    el.querySelector('button').addEventListener('click', () => _finishUndo(true));
+    document.body.appendChild(el);
+    return el;
+  }
+  function _finishUndo(undo) {
+    const u = _undo;
+    if (!u) return;
+    _undo = null;   // 더블탭으로 두 번 되돌리지 않게 먼저 비운다
+    clearTimeout(u.timer);
+    const el = document.getElementById('ys-undo-toast');
+    if (el) el.classList.remove('on');
+    try { (undo ? u.onUndo : u.onCommit)?.(); } catch (e) { console.error(e); }
+  }
+  function undoToast(msg, { onUndo, onCommit, ms = UNDO_MS } = {}) {
+    if (typeof document === 'undefined' || !document.body) { onCommit?.(); return; }
+    _finishUndo(false);
+    const el = _undoEl();
+    el.querySelector('span').textContent = msg;
+    _undo = { onUndo, onCommit, timer: setTimeout(() => _finishUndo(false), ms) };
+    void el.offsetWidth;   // 처음 만든 직후에도 등장 전환이 보이게(rAF는 백그라운드 탭에서 멈춘다)
+    el.classList.add('on');
+  }
+  if (typeof window !== 'undefined') {
+    // 떠나거나 앱을 내리면 대기 중인 삭제를 확정한다(apiDeleteItem은 keepalive라 페이지가 닫혀도 전송된다).
+    window.addEventListener('pagehide', () => _finishUndo(false));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') _finishUndo(false);
+    });
+  }
+  /* 목록 카드 삭제: 화면에서 바로 빼고, 6초 뒤(또는 다음 동작·페이지 이탈 때) 서버에 삭제를 보낸다.
+     대기 중인 항목은 목록을 다시 받아도 숨긴다(isPendingDelete). */
+  function deleteWithUndo(itemId, { hide, restore, committed, failed }) {
+    _pendingDeletes.add(itemId);
+    hide?.();
+    undoToast('삭제했습니다', {
+      onUndo() { _pendingDeletes.delete(itemId); restore?.(); },
+      async onCommit() {
+        try {
+          const result = await apiDeleteItem(itemId);
+          if (!result) throw new Error('삭제 실패');
+          committed?.(result);
+        } catch (e) {
+          _ysToast('삭제 실패 — 목록을 다시 불러옵니다');
+          failed?.(e);
+        } finally {
+          _pendingDeletes.delete(itemId);
+        }
+      },
+    });
+  }
+  function isPendingDelete(itemId) { return _pendingDeletes.has(itemId); }
+
   function _ysToast(msg) {
     if (typeof document === 'undefined' || !document.body) return;
     let el = document.getElementById('ys-toast');
@@ -979,6 +1061,7 @@
   async function apiDeleteItem(ref) {
     const r = await fetch('/history/item', {
       method: 'DELETE',
+      keepalive: true,   // 되돌리기 대기 뒤 페이지를 떠나며 보내는 경우에도 전송되게
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(_historyRef(ref, 'txt_path')),
     });
@@ -1685,6 +1768,9 @@
     apiMarkRead,
     apiBookmark,
     apiDeleteItem,
+    undoToast,
+    deleteWithUndo,
+    isPendingDelete,
     apiSummaryContent,
     decoratePeople,
     apiRefreshMeta,
