@@ -1969,12 +1969,12 @@ _TITLE_TR_PROMPT = """다음 유튜브 영상 제목들을 한국어로 번역�
 
 규칙:
 - 고유명사는 원문 철자 그대로 둔다 — 기업·제품·모델·코드명·행사·매체·기관명(NVIDIA, Google, Tesla, Apple, YouTube, ChatGPT, Hugging Face, Jalapeño, GPT-5.6 Sol, Neutron, S&P 500, NASA)과 인명(Sam Altman, Jensen Huang, Mark Zuckerberg, Bill Ackman, Paul Graham, Lutnick). 음차하지 않는다(제이미 다이먼 ×, 마크 저커버그 ×, 엔비디아 ×, 구글 ×, 나사 ×, 로켓랩 ×, 허깅페이스 ×). 한글 표기가 흔한 회사·브랜드도 원문으로 쓴다. 원문 철자 뒤에 괄호로 한글을 덧붙이지도 않는다.
-  인명 예외는 한글 표기가 완전히 굳어진 일론 머스크뿐이다. 지명은 널리 알려진 곳이면 한글(실리콘밸리, 캘리포니아, 뉴욕, 인도)로 쓰고 낯선 곳은 원문 철자로 둔다. 직함은 CEO·CFO처럼 원문 약어 그대로 둔다(최고경영자 ×). 같은 사람·회사는 어느 제목에서든 같은 표기를 쓴다(지명도 같다).
+  한글 표기가 굳은 인명도 예외 없이 원문 철자로 쓴다(일론 머스크 × → Elon Musk). 지명은 널리 알려진 곳이면 한글(실리콘밸리, 캘리포니아, 뉴욕, 인도)로 쓰고 낯선 곳은 원문 철자로 둔다. 직함은 CEO·CFO처럼 원문 약어 그대로 둔다(최고경영자 ×). 같은 사람·회사는 어느 제목에서든 같은 표기를 쓴다(지명도 같다).
 - 영문 이름 뒤 조사는 철자가 아니라 한국어로 읽은 끝소리에 맞춘다: Anthropic이·Anthropic과(Anthropic가 ×, Anthropic와 ×), Google은·Google로, OpenAI가·OpenAI와, NVIDIA는.
 - Neocloud는 뉴클라우드·네오클라우드로 음차하지 않고 항상 원문 표기 Neocloud를 유지한다.
 - 고유명사가 아닌 부분은 남김없이 한국어로 옮긴다. 제목 앞머리나 부제를 영어로 남겨 두지 않는다("Making Cities Awesome: …" → "도시를 멋지게 만들기: …", "Tariffs, DOGE & …" → "관세, DOGE, …"). 단 시리즈·프로그램명(The a16z Show, YC Paper Club, Lex Fridman Podcast, The Circuit, Sovereignty Bootcamp)은 그대로 둔다.
 - 사전 뜻을 그대로 옮긴 딱딱한 직역을 피하고 한국어 영상 제목처럼 읽히게 쓴다. 자주 쓰는 표현은 이렇게 옮긴다: fireside chat → 대담(노변담화 ×), All-Hands → 전사 미팅, Explained → 해부 또는 총정리, Inside X → X 내부/들여다보기, JUST RECORDED → [방금 공개], Special Address → 특별 연설, Keynote → 기조연설, Full Interview → 인터뷰 전체, Recap → 정리, How to: X → X하는 법(앞머리 "How to:"는 지운다).
-- 한자(發·對 등)와 옛 신문투를 쓰지 않는다. 숫자·날짜·화폐 표기는 원문 형식을 유지한다(9/2/2026, $9.25B는 "92.5억 달러"처럼 단위만 한국어로).
+- 한자(發·對 등)와 옛 신문투를 쓰지 않는다. 숫자·날짜 표기는 원문 형식을 유지한다(9/2/2026). 달러 금액은 $와 축약 단위로 쓴다($9.25B·$500M은 그대로, $9.25 Billion → $9.25B, 92.5억 달러 ×).
 - 원문의 어조(질문형·감탄형·대문자 강조)와 정보량을 유지하되, 더하거나 빼지 않는다. 의문형 제목은 "~인가/~일까"로 자연스럽게 옮기고, 설명형 제목은 명사구로 간결하게 끝낸다("Which Companies X Is Bullish On" → "X가 낙관하는 기업").
 - 이미 한국어인 제목은 그대로 둔다.
 
