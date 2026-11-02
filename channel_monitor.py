@@ -362,6 +362,11 @@ def _defer_policy(reason: str) -> tuple[bool, int, int, str]:
         return True, 1800, 48, "live_active"
     if reason.startswith("meta_error:"):
         body = reason.split(":", 1)[1]
+        # yt-dlp는 방송 전 라이브·프리미어를 live_status 대신 예외('This live event will begin in N hours')로
+        # 알린다 — 메타 오류가 아니라 라이브 예정이다. 미상(3회)으로 두면 방송 전에 failed로 굳는다
+        # (2026-11-02 Rocket Lab 'The Sea God Surveys' Launch: 30분 간격 3회 만에 failed).
+        if _LIVE_PENDING_RE.search(body):
+            return True, 3600, 48, "live_upcoming"
         # 일시 장애를 먼저 본다 — "temporarily unavailable"이 영구 패턴에 걸리지 않도록
         if _META_TRANSIENT_RE.search(body):
             return True, 1800, 6, "metadata_transient"

@@ -1330,6 +1330,11 @@ def test_permanent_metadata_errors_are_not_retried():
         assert kind == "metadata_transient"
         assert attempts == 6
 
+    # 방송 전 라이브는 yt-dlp가 예외로 알린다 — 메타 오류가 아니라 라이브 예정(48회, 1시간 간격)
+    for reason in ("meta_error:ERROR: [youtube] X: This live event will begin in 3 hours.",
+                   "meta_error:ERROR: [youtube] X: Premieres in 2 hours"):
+        assert channel_monitor._defer_policy(reason) == (True, 3600, 48, "live_upcoming"), reason
+
     # 처음 보는 오류는 재시도하되 폭주하지 않도록 예산을 적게 준다
     retryable, _, attempts, kind = channel_monitor._defer_policy("meta_error:ERROR: 새로운 유형")
     assert (retryable, attempts, kind) == (True, 3, "metadata_unknown")
