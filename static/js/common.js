@@ -218,7 +218,11 @@
       // 기본 접힘(open 미설정) — 본문부터 읽고 필요할 때 펼친다(2026-09-03 사용자 지시).
       const card = document.createElement('details');
       card.className = 'ys-tldr';
-      card.innerHTML = '<summary class="ys-tldr-label"><span class="ys-tldr-chev" aria-hidden="true">▸</span>✦ 한눈 요약</summary>';
+      // 소제목(왼쪽 막대+그라데이션 띠)과 헷갈리지 않게 테두리 카드+채운 배지+요점 수로 구분(2026-11-02 사용자 지시)
+      const n = ul.querySelectorAll(':scope > li').length;
+      card.innerHTML = '<summary class="ys-tldr-label"><span class="ys-tldr-badge">✦ 한눈 요약</span>'
+        + (n ? `<span class="ys-tldr-count">요점 ${n}개</span>` : '')
+        + '<span class="ys-tldr-chev" aria-hidden="true">▸</span></summary>';
       ul.replaceWith(card);
       card.appendChild(ul);
       tldrH.remove();
@@ -1734,18 +1738,20 @@
 .ys-chip a{color:inherit;text-decoration:none;}
 a.ys-chip-link{color:var(--highlight,#2563eb);border-color:color-mix(in oklab,var(--highlight,#2563eb) 38%,transparent);background:var(--highlight-soft,rgba(99,102,241,.08));text-decoration:none;font-weight:600;transition:filter .15s;}
 a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
-/* ── 한눈 요약 callout ── */
-.ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:1rem 1.25rem 1.05rem 1.35rem;background:linear-gradient(135deg,var(--highlight-soft,rgba(99,102,241,.08)),transparent 78%),var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;}
-.ys-tldr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--highlight,#2563eb),color-mix(in oklab,var(--highlight,#2563eb) 35%,transparent));}
-.ys-tldr-label{font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--highlight,#2563eb);margin-bottom:.55rem;list-style:none;cursor:pointer;user-select:none;display:flex;align-items:center;gap:.4rem;}
+/* ── 한눈 요약 callout ── 소제목(h3: 왼쪽 막대+그라데이션 띠)과 다른 모양 — 사방 테두리 카드, 채운 배지, 번호 요점 */
+.ys-tldr{position:relative;margin:1.2rem 0 1.7rem;padding:.7rem .9rem;background:var(--surface2,#f6f3ec);border:1px solid var(--border,#e5e5e5);border-radius:8px;}
+.ys-tldr-label{list-style:none;cursor:pointer;user-select:none;display:flex;align-items:center;gap:.55rem;}
 .ys-tldr-label::-webkit-details-marker{display:none;}
-.ys-tldr-chev{font-size:.6rem;line-height:1;transition:transform .15s;}
+.ys-tldr-badge{display:inline-flex;align-items:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;line-height:1;color:#fff;background:var(--highlight,#2563eb);border-radius:999px;padding:.32rem .7rem;}
+.ys-tldr-count{font-size:.75rem;color:var(--muted,#666);}
+.ys-tldr-chev{margin-left:auto;font-size:.7rem;line-height:1;color:var(--muted,#666);transition:transform .15s;}
 .ys-tldr[open] .ys-tldr-chev{transform:rotate(90deg);}
-.ys-tldr:not([open]){padding-bottom:.85rem;}
-.ys-tldr:not([open]) .ys-tldr-label{margin-bottom:0;}
-.ys-tldr ul{margin:0 !important;padding-left:1.15rem !important;}
-.ys-tldr li{margin-bottom:.3rem;}  /* font-size/line-height는 본문 .sum-md li 규칙을 물려받아 동일 크기(일반·몰입 모두) */
-.ys-tldr li::marker{color:var(--highlight,#2563eb);}
+.ys-tldr[open] .ys-tldr-label{margin-bottom:.7rem;padding-bottom:.6rem;border-bottom:1px dashed var(--border,#e5e5e5);}
+.ys-tldr ul{margin:0 !important;padding-left:0 !important;list-style:none;counter-reset:ys-tldr;}
+.ys-tldr li{position:relative;list-style:none;margin-bottom:.4rem !important;padding-left:1.9rem;counter-increment:ys-tldr;}  /* font-size/line-height는 본문 .sum-md li 규칙을 물려받아 동일 크기(일반·몰입 모두) */
+.ys-tldr li:last-child{margin-bottom:0;}
+.ys-tldr li::before{content:counter(ys-tldr);position:absolute;left:0;top:.2em;width:1.3rem;height:1.3rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;color:var(--highlight,#2563eb);border:1px solid color-mix(in oklab,var(--highlight,#2563eb) 45%,transparent);background:var(--surface,#fff);}
+.ys-tldr li::marker{content:none;}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;z-index:99999;cursor:zoom-out;}
 .ys-lb.open{display:block;}
 .ys-lb-viewport{position:absolute;inset:0;overflow:hidden;touch-action:pinch-zoom;}
