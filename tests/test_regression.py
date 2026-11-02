@@ -1109,7 +1109,7 @@ def test_transient_filter_is_deferred_and_rechecked(monkeypatch):
         status="deferred", reason="live:is_upcoming", retry_after_seconds=0,
         error_kind="metadata_transient",
     )
-    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, min_dur: (True, ""))
+    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, min_dur, **_k: (True, ""))
 
     assert channel_monitor.recheck_deferred([], dry=False) == 1
     row = conn.execute("SELECT status FROM watch_queue WHERE yt_id = 'live-test'").fetchone()
@@ -1329,6 +1329,8 @@ def test_permanent_metadata_errors_are_not_retried():
         assert retryable is True, reason
         assert kind == "metadata_transient"
         assert attempts == 6
+
+    assert channel_monitor._defer_policy("live_skip:was_live") == (False, 0, 0, "live_skipped")
 
     # 방송 전 라이브는 yt-dlp가 예외로 알린다 — 메타 오류가 아니라 라이브 예정(48회, 1시간 간격)
     for reason in ("meta_error:ERROR: [youtube] X: This live event will begin in 3 hours.",
@@ -2782,3 +2784,34 @@ def test_settings_channel_tab_uses_shared_list_with_logo_search_and_order():
     assert client.get("/channels/logo/not-a-channel").status_code == 404
     chans = client.get("/channels").get_json()["channels"]
     assert all("done" in c and "last_done" in c for c in chans)
+
+
+def test_auto_detected_live_is_skipped_manual_waits(monkeypatch):
+    """자동 감지 라이브는 예정·진행·다시보기 모두 건너뛴다(2026-11-03 사용자 지시). 수동 등록분과
+    프리미어는 예전처럼 기다린다."""
+    class FakeYDL:
+        def __init__(self, *_a, **_k): pass
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+        def extract_info(self, url, download=False):
+            if url == "upcoming":
+                raise Exception("ERROR: [youtube] X: This live event will begin in 3 hours.")
+            if url == "premiere":
+                raise Exception("ERROR: [youtube] X: Premieres in 2 hours")
+            return {"live_status": url, "duration": 3600}
+    monkeypatch.setattr(channel_monitor.yt_dlp, "YoutubeDL", FakeYDL)
+    fv = channel_monitor.filter_verdict
+    for status in ("was_live", "post_live", "is_live"):
+        ok, reason = fv(status)
+        assert not ok and reason == f"live_skip:{status}"
+        assert channel_monitor._defer_policy(reason)[0] is False
+    ok, reason = fv("upcoming")
+    assert not ok and reason.startswith("live_skip:upcoming")
+    assert fv("not_live") == (True, "")
+    # 프리미어는 라이브가 아니다 — 공개를 기다린다
+    ok, reason = fv("premiere")
+    assert channel_monitor._defer_policy(reason)[3] == "live_upcoming"
+    # 수동 등록분은 방송이 끝나기를 기다리고, 끝난 다시보기는 처리한다
+    assert fv("is_live", allow_live=True) == (False, "live:is_live")
+    assert fv("was_live", allow_live=True) == (True, "")
+    assert fv("upcoming", allow_live=True)[1].startswith("meta_error:")

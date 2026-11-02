@@ -296,10 +296,13 @@ def is_ad_title(title: str) -> bool:
     return bool(_AD_TITLE_RE.search(title or ""))
 
 
-def filter_verdict(url: str, min_dur: int = MIN_DUR) -> tuple[bool, str]:
+def filter_verdict(url: str, min_dur: int = MIN_DUR, *, allow_live: bool = False) -> tuple[bool, str]:
     """메타 확인 후 (처리해도 되는가, 사유). yt-dlp로 길이/라이브 판별.
 
     min_dur: 이 채널의 최소 길이(초). 0이면 길이 제한 면제.
+    라이브는 자동 감지분이면 건너뛴다(2026-11-03 사용자 지시 — 예정·진행·끝난 다시보기 모두,
+    사유 'live_skip:…'로 확정 제외). allow_live=True(수동 등록분)면 예전처럼 방송이 끝나기를 기다린다.
+    프리미어(미리 올린 영상의 첫 공개)는 라이브가 아니다 — 공개 전엔 기다리고 공개 뒤 처리한다.
     """
     if "/shorts/" in url:
         return False, "shorts"
@@ -309,10 +312,15 @@ def filter_verdict(url: str, min_dur: int = MIN_DUR) -> tuple[bool, str]:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
+        # 방송 전 라이브는 live_status 대신 예외로 온다('This live event will begin in N hours')
+        if not allow_live and _LIVE_EVENT_RE.search(str(e)):
+            return False, f"live_skip:upcoming {e}"[:80]
         return False, f"meta_error:{e}"[:80]
     live = info.get("live_status")
+    if not allow_live and live in ("is_live", "post_live", "was_live"):
+        return False, f"live_skip:{live}"      # 라이브는 진행 중이든 끝났든 건너뛴다
     if live in ("is_live", "is_upcoming"):
-        return False, f"live:{live}"           # 진행/예정 라이브 제외(끝난 다시보기는 처리)
+        return False, f"live:{live}"           # 예정(프리미어일 수 있음)·수동 라이브는 끝나기를 기다린다
     dur = float(info.get("duration") or 0)
     if min_dur and dur and dur <= min_dur:
         return False, f"short:{int(dur)}s"      # 최소 길이 이하 제외(min_dur=0이면 면제)
@@ -346,6 +354,8 @@ _META_PERMANENT_RE = re.compile(
 # 다운로드 단계에서야 드러나는 '아직 방송 전' 신호(수동 추가 건은 사전 메타 확인이 없다)
 _LIVE_PENDING_RE = re.compile(
     r"Premieres in|live event will begin|This live event|is upcoming|Scheduled for", re.I)
+# 그중 라이브 방송(프리미어가 아님)이 확실한 문구 — 자동 감지분은 건너뛴다(2026-11-03 사용자 지시)
+_LIVE_EVENT_RE = re.compile(r"live event will begin|This live event", re.I)
 # 서버(yt 앱)가 재시작돼 진행 중이던 작업이 사라진 신호. 영상 탓이 아니라 몇 번을
 # 겪어도 문구가 같으므로 '동일 실패 반복' 판정에서 뺀다 — 재시도 예산(5회)은 그대로
 # 쓴다(2026-09-23: 긴 재전사 도중 배포 재시작에 세 번 걸려 skipped로 굳었다).
@@ -356,6 +366,8 @@ _SERVER_RESTART_RE = re.compile(
 
 def _defer_policy(reason: str) -> tuple[bool, int, int, str]:
     """Return retryable, delay seconds, max checks, normalized error kind."""
+    if reason.startswith("live_skip:"):
+        return False, 0, 0, "live_skipped"     # 자동 감지 라이브는 확정 제외(2026-11-03 사용자 지시)
     if reason.startswith("live:is_upcoming"):
         return True, 3600, 48, "live_upcoming"
     if reason.startswith("live:is_live"):
@@ -411,7 +423,8 @@ def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
             if channel and channel.get("min_duration") is not None
             else MIN_DUR
         )
-        ok, reason = filter_verdict(item["url"], min_duration)
+        ok, reason = filter_verdict(item["url"], min_duration,
+                                    allow_live=item.get("channel_id") == "manual")
         if ok:
             log(f"[deferred] 재처리 가능 → pending: {item['title'][:50]}")
             if not dry:
@@ -815,6 +828,11 @@ def _drain_main_one() -> None:
         reason = str(e)[:160]
         # 라이브·프리미어 예정은 실패가 아니다 — 재시도 예산을 태우지 않고
         # 방송 시작을 기다리는 라이브 재확인 경로로 보낸다(사용자 알림도 구분).
+        # 자동 감지분이 그사이 라이브로 확인되면 기다리지 않고 건너뛴다(2026-11-03 사용자 지시)
+        if v.get("channel_id") != "manual" and _LIVE_EVENT_RE.search(reason):
+            db.queue_set_status(v["id"], "skipped", f"live_skip:{reason}"[:160])
+            log(f"[drain] 라이브 → 건너뜀: {reason[:110]}")
+            return
         if _LIVE_PENDING_RE.search(reason):
             db.queue_defer(
                 v["id"], reason, error_kind="live_upcoming",
