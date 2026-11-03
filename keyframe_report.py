@@ -297,15 +297,17 @@ def download_video(url: str, out_noext: str) -> str | None:
         "ffmpeg_location": FFMPEG_DIR, "quiet": True, "no_warnings": True,
         "socket_timeout": 60, "retries": 5,
     }
-    # 재시도: 1차 즉시 → 2차 75초 뒤 → 3차 대체 클라이언트(tv_simply·web_embedded).
+    # 1차 대체 클라이언트(tv_simply·web_embedded) → 2차 기본 클라이언트 → 3차 75초 뒤 기본.
     # IP 단위 차단(403)으로 웹 계열이 전부 막혀도 이 둘은 통과한다(2026-08-18 실측).
+    # 대체를 3차에 두던 때 캡처 332회 중 330회가 기본에서 실패하고 324회가 3차에서야
+    # 받혀(2026-10-04~11-03) 75초를 매번 버렸다. 최고 해상도는 기본과 같다.
     # 403만 재시도하던 것을 '빈 파일'·'포맷 없음'(SABR-only 세션, 라이브 종료 직후)까지
     # 넓혔다 — 2026-09-03 집코노미 라이브 캡처가 첫 시도에서 바로 raise돼 폴백을 못 탔다.
     retry_wait = {1: 0, 2: 75}
     for attempt in (1, 2, 3):
         try:
             o = dict(opts)
-            if attempt == 3:
+            if attempt == 1:
                 o["extractor_args"] = {"youtube": {"player_client": ["tv_simply", "web_embedded"]}}
             with yt_dlp.YoutubeDL(o) as ydl:
                 ydl.download([url])
@@ -314,7 +316,7 @@ def download_video(url: str, out_noext: str) -> str | None:
             wait = retry_wait.get(attempt)
             if wait is None or not _is_retryable_download_error(str(e)):
                 raise
-            nxt = "대체 클라이언트" if attempt == 2 else "새 세션"
+            nxt = "기본 클라이언트" if attempt == 1 else "새 세션"
             log(f"[1] 다운로드 실패({str(e)[:60]}) — {f'{wait}초 뒤 ' if wait else ''}{nxt}으로 재시도({attempt}/2)")
             if wait:
                 time.sleep(wait)
@@ -386,6 +388,16 @@ def _settle_scene_frames(video: str, outdir: str, scene_pairs: list[tuple[float,
     return out
 
 
+def _uniform_select(interval: int) -> str:
+    """균등 후보 select 식 — 간격의 절반 지점부터 interval초마다 한 장.
+
+    fps=1/N은 N/2 지점 프레임을 내면서 시각은 0으로 찍어 i*N으로 적으면 반 간격 빠른
+    시각이 됐다(2026-11-04 합성 영상 실측: 30초 간격에서 0·30·60초라 적은 프레임이 실제
+    14·44·74초). 뽑는 지점은 그대로 두고 showinfo로 실제 시각을 읽으려고 select를 쓴다.
+    """
+    return f"gte(t,{interval / 2:g})*(isnan(prev_selected_t)+gte(t-prev_selected_t,{interval}))"
+
+
 def extract_candidates(video: str, outdir: str,
                        target_times: list[float] | None = None) -> list[tuple[float, str]]:
     """전사 목표+균등 간격+장면전환 후보를 합쳐 근접 중복 제거 후 캡한다.
@@ -399,17 +411,21 @@ def extract_candidates(video: str, outdir: str,
     # 1) 균등 간격 — 전체 타임라인 보장 커버
     if dur > 0:
         interval = max(15, int(dur / MAX_CANDIDATES))
+        uniform_stderr = ""
         try:
             ri = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
-                            "-vf", f"fps=1/{interval},scale={FRAME_WIDTH}:-2", "-vsync", "vfr",
-                            "-q:v", "3", os.path.join(outdir, "iv_%03d.jpg")],
+                            "-vf", f"select='{_uniform_select(interval)}',showinfo,scale={FRAME_WIDTH}:-2",
+                            "-vsync", "vfr", "-q:v", "3", os.path.join(outdir, "iv_%03d.jpg")],
                            capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+            uniform_stderr = ri.stderr or ""
             if ri.returncode != 0:
-                log(f"    [warn] ffmpeg 균등추출 rc={ri.returncode}: {ri.stderr.strip().splitlines()[-1] if ri.stderr.strip() else ''}")
-        except subprocess.TimeoutExpired:
+                log(f"    [warn] ffmpeg 균등추출 rc={ri.returncode}: {uniform_stderr.strip().splitlines()[-1] if uniform_stderr.strip() else ''}")
+        except subprocess.TimeoutExpired as e:
+            uniform_stderr = (e.stderr.decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")) if e.stderr else ""
             log(f"    [warn] ffmpeg 균등추출 {FFMPEG_TIMEOUT}s 타임아웃 — 부분 결과 사용")
-        for i, f in enumerate(sorted(g for g in os.listdir(outdir) if g.startswith("iv_"))):
-            pairs.append((i * interval, os.path.join(outdir, f)))
+        uniform_pts = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", uniform_stderr)]
+        for ts, f in zip(uniform_pts, sorted(g for g in os.listdir(outdir) if g.startswith("iv_"))):
+            pairs.append((ts, os.path.join(outdir, f)))
         log(f"[2] 균등 간격 {interval}s × {len([p for p in pairs])}장 (영상 {int(dur)}s)")
 
     # 2) 전사 시각 단서 — 해당 시점 전후를 짧게 훑어 완성된 자료 화면 후보를 보강
@@ -922,6 +938,7 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
             if score_parts:
                 item["_vision_score"] = sum(score_parts) / len(score_parts)
             kept.append(item)
+        kept = _dedupe_same_second(kept)
         if not kept:
             return {"ok": True, "n_frames": 0, "reason": "no_material"}
         # ── 여기서부터 교체(완성본만 승격, 실패하면 기존 프레임 복원) ──
@@ -929,6 +946,19 @@ def generate_keyframes(summary_md_path: str, url: str, frames_out_dir: str, url_
         kept = _limit_frames_per_section(kept)
         _commit_keyframes(summary_md_path, frames_out_dir, meta["headings"], kept, url_base)
     return {"ok": True, "n_frames": len(kept)}
+
+
+def _dedupe_same_second(kept: list[dict]) -> list[dict]:
+    """파일 이름이 초 단위라 같은 초의 프레임은 한 장만 남긴다(점수 높은 쪽, 같으면 앞쪽).
+
+    둘 다 두면 뒤 프레임이 앞 파일을 덮어써 요약에 같은 그림이 두 번 들어갔다(26편).
+    """
+    best: dict[str, dict] = {}
+    for item in kept:
+        cur = best.get(item["file"])
+        if cur is None or item.get("_vision_score", 0) > cur.get("_vision_score", 0):
+            best[item["file"]] = item
+    return sorted(best.values(), key=lambda item: item["ts"])
 
 
 def _assign_sections_by_time(kept: list[dict], headings: list[dict]):
