@@ -34,6 +34,21 @@ def test_uniform_frames_carry_their_real_time(tmp_path, monkeypatch):
         assert abs(_brightness(path) - ts) <= 2               # 적힌 시각 = 화면의 시각
 
 
+@pytest.mark.skipif(not kr.shutil.which("ffmpeg"), reason="ffmpeg 없음")
+def test_many_scenes_still_settle_to_scene_end(tmp_path, monkeypatch):
+    """장면이 많아도(식 길이 한도) 후보로 뽑힌 장면은 끝 프레임으로 바뀐다."""
+    video = tmp_path / "v.mkv"
+    subprocess.run([kr.FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=black:s=64x36:r=10:d=900,format=gray,geq=lum='255*mod(floor(T/3),2)'",
+                    "-pix_fmt", "gray", "-c:v", "ffv1", str(video)], check=True)
+    monkeypatch.setattr(kr, "FRAME_WIDTH", 64)
+    pairs = kr.extract_candidates(str(video), str(tmp_path / "f"))
+    scenes = [ts for ts, p in pairs if os.path.basename(p).startswith("scene_")]
+    assert len(scenes) >= 20
+    for ts in scenes:
+        assert 2.1 <= ts % 3 <= 2.5                           # 다음 장면 0.7초 전(시작이면 0 근처)
+
+
 def test_same_second_keeps_best_scored_frame():
     kept = [{"ts": 100.2, "file": "kf_00100.jpg", "_vision_score": 2.0},
             {"ts": 100.8, "file": "kf_00100.jpg", "_vision_score": 4.0},

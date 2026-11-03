@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import html as _html
 import json
 import os
@@ -345,23 +346,30 @@ def _evenly_sample(items: list, count: int) -> list:
     return [items[int(i * step)] for i in range(count)]
 
 
-def _settle_scene_frames(video: str, outdir: str, scene_pairs: list[tuple[float, str]],
-                         dur: float) -> list[tuple[float, str]]:
+def _settle_scene_frames(video: str, outdir: str, pairs: list[tuple[float, str]],
+                         dur: float, scene_times: list[float]) -> list[tuple[float, str]]:
     """장면전환 프레임을 '그 장면이 끝나기 직전' 프레임으로 바꾼다(2026-10-02).
 
     슬라이드형 영상은 새 장면이 제목만 띄운 채 시작하고 그림·표가 하나씩 채워진다(Leo Cui:
     1300초 제목만 → 1346초 다음 장면 직전에 패널 완성). 장면 점수는 그 채워짐을 못 잡아
     장면 시작 프레임만 쓰면 대부분 '제목만 있는 화면'이 캡처됐다. 다음 장면 0.7초 전을 쓴다.
     장면이 2초 미만이면 원래 프레임을 둔다. 실패하면 원래 후보를 그대로 돌려준다.
+
+    후보 상한을 거친 뒤에 부른다 — 전 장면을 select 식 하나에 넣으면 식이 약 4KB를 넘을 때
+    ffmpeg가 아무것도 내지 않아 장면이 많은 영상은 교체가 0건이었다(2026-11-04 확인: 299회 중 89회).
     """
-    known = sorted(t for t, _ in scene_pairs if t > 0)
-    ends = []
-    for t, path in scene_pairs:
-        nxt = next((x for x in known if x > t + 0.05), dur if dur > 0 else None)
+    known = sorted(t for t in scene_times if t > 0)
+    ends: list[float | None] = []
+    for t, path in pairs:
+        if not os.path.basename(path).startswith("scene_"):
+            ends.append(None)
+            continue
+        i = bisect.bisect_right(known, t + 0.05)
+        nxt = known[i] if i < len(known) else (dur if dur > 0 else None)
         ends.append(nxt - 0.7 if nxt is not None and nxt - t >= 2.0 else None)
     windows = [e for e in ends if e is not None]
     if not windows:
-        return scene_pairs
+        return pairs
     expr = "+".join(f"between(t,{e:.3f},{e + 0.12:.3f})" for e in windows)
     try:
         r = subprocess.run([FFMPEG, "-hide_banner", "-i", video,
@@ -370,7 +378,9 @@ def _settle_scene_frames(video: str, outdir: str, scene_pairs: list[tuple[float,
                            capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
     except subprocess.TimeoutExpired:
         log(f"    [warn] 장면 끝 프레임 추출 {FFMPEG_TIMEOUT}s 타임아웃 — 장면 시작 프레임 사용")
-        return scene_pairs
+        return pairs
+    if r.returncode != 0:
+        log(f"    [warn] 장면 끝 프레임 추출 rc={r.returncode}: {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ''}")
     pts = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", r.stderr or "")]
     files = sorted(g for g in os.listdir(outdir) if g.startswith("scene_end_"))
     got: dict[float, tuple[float, str]] = {}
@@ -379,13 +389,13 @@ def _settle_scene_frames(video: str, outdir: str, scene_pairs: list[tuple[float,
         if e is not None and e not in got:             # 창마다 첫 프레임 하나
             got[e] = (ts, os.path.join(outdir, f))
     out, settled = [], 0
-    for (t, path), e in zip(scene_pairs, ends):
+    for (t, path), e in zip(pairs, ends):
         if e is not None and e in got:
             out.append(got[e]); settled += 1
         else:
             out.append((t, path))
-    log(f"    장면 끝 프레임으로 교체 {settled}/{len(scene_pairs)}장")
-    return out
+    log(f"    장면 끝 프레임으로 교체 {settled}/{len(windows)}장")
+    return sorted(out, key=lambda x: x[0])
 
 
 def _uniform_select(interval: int) -> str:
@@ -480,8 +490,6 @@ def extract_candidates(video: str, outdir: str,
     if len(times) < len(sc):   # 타임스탬프 누락 → 해당 프레임은 0.0(시작)으로 잘못 배치될 수 있음
         log(f"    [warn] 장면 pts_time {len(times)}개 < 프레임 {len(sc)}장 — 일부 시각 미상(0.0)")
     scene_pairs = [(times[i] if i < len(times) else 0.0, os.path.join(outdir, f)) for i, f in enumerate(sc)]
-    if SCENE_SETTLE:
-        scene_pairs = _settle_scene_frames(video, outdir, scene_pairs, dur)
     pairs.extend(scene_pairs)
     log(f"    장면전환 {len(sc)}장 → 후보 합계 {len(pairs)}장")
 
@@ -517,6 +525,8 @@ def extract_candidates(video: str, outdir: str,
             sel = scenes + _evenly_sample(ivs, need)
         deduped = sorted(sel, key=lambda x: x[0])
     log(f"    중복제거·캡 후 후보 {len(deduped)}장 (장면전환 보존)")
+    if SCENE_SETTLE:
+        deduped = _settle_scene_frames(video, outdir, deduped, dur, [t for t, _ in scene_pairs])
     return deduped
 
 
