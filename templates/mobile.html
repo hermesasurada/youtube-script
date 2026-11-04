@@ -376,7 +376,7 @@
     }
     /* 데스크톱 요약 팝업과 같은 글꼴 값을 쓴다 — 글꼴 값(--reader-font)은 공용 fonts.js가 싣고, 아래는 글꼴별 미세 조정뿐.
        공용 목록에 더한 글꼴도 규칙 없이 적용된다(2026-11-01). */
-    .modal[data-reader-font] .modal-body.markdown { font-family: var(--reader-font); }
+    .modal[data-reader-font] .modal-body.markdown { font-family: var(--reader-font); -webkit-text-stroke: var(--reader-stroke, 0); }
     .modal[data-reader-font="pretendard"] .modal-body.markdown { letter-spacing: -.003em; word-break: keep-all; }
     .modal[data-reader-font="chosun"] .modal-body.markdown { letter-spacing: -.01em; word-break: keep-all; }
     .modal[data-reader-font="chosun"] .modal-body.markdown p,

@@ -1934,7 +1934,7 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .sum-font-ctrl select:focus { outline: none; }
 /* data-reader-font + --reader-font on .sum-panel → body text family (headings inherit).
    글꼴 값은 공용 fonts.js가 싣는다 — 아래는 글꼴별 미세 조정뿐이라 공용 목록에 더한 글꼴도 그대로 적용된다(2026-11-01). */
-.sum-panel[data-reader-font] .sum-md { font-family: var(--reader-font); }
+.sum-panel[data-reader-font] .sum-md { font-family: var(--reader-font); -webkit-text-stroke: var(--reader-stroke, 0); }
 /* Pretendard — 한글 자간이 촘촘해 본문 가독성이 좋다 */
 .sum-panel[data-reader-font="pretendard"] .sum-md { letter-spacing: -0.003em; word-break: keep-all; }
 /* 조선일보명조 — 신문 본문 명조 */
