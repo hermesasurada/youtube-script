@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import bisect
+from collections import Counter
 import html as _html
 import json
 import os
@@ -37,6 +38,8 @@ TARGET_WINDOW   = float(os.environ.get("TARGET_WINDOW", "3"))       # 전사 시
 TARGET_INTERVAL = float(os.environ.get("TARGET_INTERVAL", "2"))     # 탐색 구간 프레임 간격(초)
 MAX_FRAMES_PER_SECTION = int(os.environ.get("MAX_FRAMES_PER_SECTION", "3"))
 SCENE_SETTLE    = os.environ.get("SCENE_SETTLE", "1") != "0"  # 장면 시작 대신 장면 끝(완성된 화면) 프레임
+HOLD_SETTLE     = os.environ.get("HOLD_SETTLE", "1") != "0"   # 채워지는 중인 장표를 완성될 때까지 기다린 프레임으로
+HOLD_MAX_WAIT   = int(os.environ.get("HOLD_MAX_WAIT", "75"))  # 완성을 기다리는 최대 시간(초) — 전사 맥락과 너무 멀어지지 않게
 VISION_MODEL    = os.environ.get("VISION_MODEL", "opus")   # 캡션 품질 우선(요약과 동일 티어)
 GPT_VISION_MODEL = os.environ.get("GPT_VISION_MODEL", os.environ.get("GPT_MODEL", "gpt-6-astra"))
 # Claude 비전 3회 실패 시 Grok 폴백(요약 폴백과 동일 기조). grok CLI는 이미지 옵션이 없지만
@@ -398,6 +401,126 @@ def _settle_scene_frames(video: str, outdir: str, pairs: list[tuple[float, str]]
     return sorted(out, key=lambda x: x[0])
 
 
+# 정지 화면 판별값(2026-11-04 #1494 실측): 1초 간격 160×90 흑백 프레임을 비교한다.
+_HOLD_W, _HOLD_H = 160, 90
+_HOLD_PIXELS = _HOLD_W * _HOLD_H
+_HOLD_PIXEL_DIFF = 14        # 이 밝기 차이부터 '바뀐 픽셀'
+_HOLD_STATIC_RATIO = 0.004   # 바뀐 픽셀이 이 비율 미만이면 같은 화면
+_HOLD_MIN_SECONDS = 3        # 이만큼 멈춰야 정지 구간
+_HOLD_SAME_SLIDE_RATIO = 0.8 # 기존 내용이 이만큼 남으면 같은 장표가 채워지는 중(같은 장표 0.88~1.0, 장표 교체 0.01~0.34)
+
+
+def _read_gray_seconds(video: str) -> list[bytes]:
+    r = subprocess.run([FFMPEG, "-v", "error", "-i", video, "-an",
+                        "-vf", f"fps=1,scale={_HOLD_W}:{_HOLD_H},format=gray",
+                        "-f", "rawvideo", "-"], capture_output=True, timeout=FFMPEG_TIMEOUT)
+    if r.returncode != 0:
+        raise RuntimeError(f"rc={r.returncode}")
+    raw = r.stdout
+    return [raw[i:i + _HOLD_PIXELS] for i in range(0, len(raw) - _HOLD_PIXELS + 1, _HOLD_PIXELS)]
+
+
+def _changed_ratio(a: bytes, b: bytes) -> float:
+    return sum(abs(x - y) > _HOLD_PIXEL_DIFF for x, y in zip(a, b)) / _HOLD_PIXELS
+
+
+def _find_holds(frames: list[bytes]) -> list[tuple[int, int]]:
+    """화면이 멈춘 구간 (시작 초, 끝 초) 목록."""
+    holds, start = [], None
+    for sec in range(1, len(frames) + 1):
+        still = sec < len(frames) and _changed_ratio(frames[sec - 1], frames[sec]) < _HOLD_STATIC_RATIO
+        if still:
+            start = sec - 1 if start is None else start
+        else:
+            if start is not None and sec - 1 - start >= _HOLD_MIN_SECONDS:
+                holds.append((start, sec - 1))
+            start = None
+    return holds
+
+
+def _content_kept(before: bytes, after: bytes) -> float:
+    """before의 내용(배경색이 아닌 픽셀) 중 after에도 그대로 남은 비율."""
+    background = Counter(before).most_common(1)[0][0]
+    content = [i for i, v in enumerate(before) if abs(v - background) > _HOLD_PIXEL_DIFF]
+    if not content:
+        return 1.0
+    return sum(abs(before[i] - after[i]) <= _HOLD_PIXEL_DIFF for i in content) / len(content)
+
+
+def _settled_second(ts: float, frames: list[bytes], holds: list[tuple[int, int]]) -> int | None:
+    """ts의 장표가 완성된 초. 옮길 필요가 없거나 찾지 못하면 None.
+
+    ts 뒤 첫 정지 화면에서 시작해, 다음 정지 화면에 기존 내용이 남아 있으면 같은 장표로 보고
+    따라간다. 기존 내용이 사라지면 장표가 바뀐 것이므로 그 직전 정지 화면에서 멈춘다.
+    """
+    sec = int(ts)
+    limit = sec + HOLD_MAX_WAIT
+    k = bisect.bisect_left([end for _, end in holds], sec)
+    if k >= len(holds) or holds[k][0] > limit or sec >= len(frames):
+        return None
+    # 움직이는 화면에서 다음 정지 화면까지 멀면 다른 화면일 수 있다. 실측(#1494·862·1644·1634)에서
+    # 같은 장표는 내용이 98% 이상 남았고, 인물·영상이 다른 슬라이드로 바뀐 경우는 2~14%였다.
+    first = holds[k][0] + 1
+    if (first - sec > _HOLD_MIN_SECONDS
+            and _content_kept(frames[sec], frames[first]) < _HOLD_SAME_SLIDE_RATIO):
+        return None
+    while k + 1 < len(holds) and holds[k + 1][0] + 1 <= limit:
+        if _content_kept(frames[holds[k][1]], frames[holds[k + 1][0] + 1]) < _HOLD_SAME_SLIDE_RATIO:
+            break
+        k += 1
+    settled = min(holds[k][1] - 1, limit)      # 끝 초는 다음 전환에 걸릴 수 있어 한 칸 앞
+    if settled <= sec or _changed_ratio(frames[sec], frames[settled]) < _HOLD_STATIC_RATIO:
+        return None
+    return settled
+
+
+def _settle_unfinished_frames(video: str, outdir: str,
+                              pairs: list[tuple[float, str]]) -> list[tuple[float, str]]:
+    """후보를 그 장표가 완성된 시점의 프레임으로 옮긴다(2026-11-04).
+
+    스크롤텔링 장표는 장면 전환이 거의 잡히지 않고 그림이 서서히 채워진다. 균등·전사 단서
+    프레임은 그 도중 아무 시점에나 떨어져 #1494(Leo Cui)는 빈 패널·빈 차트가 캡처됐고,
+    후보에 미완성본 한 장뿐이면 비전 판정도 걸러내지 못한다. 실패하면 원래 후보를 돌려준다.
+    """
+    try:
+        frames = _read_gray_seconds(video)
+    except Exception as e:
+        log(f"    [warn] 정지 화면 분석 실패, 원래 프레임 사용: {e}")
+        return pairs
+    holds = _find_holds(frames)
+    if not holds:
+        return pairs
+    moved: dict[int, str] = {}
+    out: list[tuple[float, str]] = []
+    for ts, path in pairs:
+        sec = _settled_second(ts, frames, holds)
+        if sec is None:
+            out.append((ts, path))
+            continue
+        if sec not in moved:
+            target = os.path.join(outdir, f"settled_{sec:06d}.jpg")
+            r = subprocess.run([FFMPEG, "-v", "error", "-y", "-ss", str(sec), "-i", video,
+                                "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "3", target],
+                               capture_output=True, text=True, timeout=PROBE_TIMEOUT)
+            moved[sec] = target if r.returncode == 0 and os.path.exists(target) else ""
+        out.append((float(sec), moved[sec]) if moved[sec] else (ts, path))
+    # 같은 정지 구간의 프레임은 같은 그림이라 한 장만 둔다. 다만 한 화면이 길게 이어지면
+    # 소제목 배정을 위해 HOLD_MAX_WAIT 간격으로는 남긴다.
+    ends = [end for _, end in holds]
+    last_kept: dict[int, float] = {}
+    kept: list[tuple[float, str]] = []
+    for ts, path in sorted(out, key=lambda x: x[0]):
+        k = bisect.bisect_left(ends, int(ts))
+        in_hold = k < len(holds) and holds[k][0] <= ts
+        if in_hold and k in last_kept and ts - last_kept[k] < HOLD_MAX_WAIT:
+            continue
+        if in_hold:
+            last_kept[k] = ts
+        kept.append((ts, path))
+    log(f"    장표 완성 시점으로 이동 {len(moved)}곳, 후보 {len(pairs)}장 → {len(kept)}장 (정지 구간 {len(holds)}개)")
+    return kept
+
+
 def _uniform_select(interval: int) -> str:
     """균등 후보 select 식 — 간격의 절반 지점부터 interval초마다 한 장.
 
@@ -527,6 +650,8 @@ def extract_candidates(video: str, outdir: str,
     log(f"    중복제거·캡 후 후보 {len(deduped)}장 (장면전환 보존)")
     if SCENE_SETTLE:
         deduped = _settle_scene_frames(video, outdir, deduped, dur, [t for t, _ in scene_pairs])
+    if HOLD_SETTLE:
+        deduped = _settle_unfinished_frames(video, outdir, deduped)
     return deduped
 
 
