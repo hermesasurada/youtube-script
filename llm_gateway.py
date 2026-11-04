@@ -77,6 +77,18 @@ def codex_minimal_args() -> list:
         return []
 
 
+def codex_minimal_env() -> dict | None:
+    """codex exec 자식 환경(cli_minimal.codex_env: CODEX_HOME 고정 + HOME만 빈 폴더). codex가 HOME 아래
+    ~/.agents 스킬 목록을 요청마다 넣는 것을 막는다(2026-11-04, 호출당 입력 약 15k 절감). 이미지 첨부
+    호출에도 적용한다 — 도구가 아니라 -i 첨부라 영향이 없다. None이면 부모 환경 그대로."""
+    try:
+        if _cli_minimal is not None and hasattr(_cli_minimal, "codex_env"):
+            return _cli_minimal.codex_env()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 LLM_LOG_SERVICE = "yt"
 
 
@@ -512,7 +524,7 @@ def run_codex_prompt(
         if not images:                     # 이미지 첨부 호출은 예전 구성 그대로
             command += codex_minimal_args()
         command.append("-")
-        result = run_command(command, input_text=prompt, timeout=timeout)
+        result = run_command(command, input_text=prompt, timeout=timeout, env=codex_minimal_env())
         final = ""
         try:
             with open(output.name, encoding="utf-8", errors="replace") as handle:
@@ -544,6 +556,7 @@ def run_command(
     *,
     input_text: str | None = None,
     timeout: float,
+    env: dict | None = None,
 ) -> ProcessResult:
     try:
         result = subprocess.run(
@@ -553,6 +566,7 @@ def run_command(
             text=True,
             encoding="utf-8",
             timeout=timeout,
+            env=env,
         )
         return ProcessResult(result.returncode, result.stdout or "", result.stderr or "")
     except subprocess.TimeoutExpired as exc:
