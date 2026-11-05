@@ -26,6 +26,20 @@ def test_thumbnail_goes_after_original_title_with_r2_url(monkeypatch):
     assert app._insert_blog_thumbnail(out, "abcde12345") == out          # 두 번 넣지 않는다
 
 
+def test_footer_original_title_stays_below_and_thumbnail_on_top(monkeypatch):
+    _fake(monkeypatch, [])
+    body = ('<div style="x"><h3>A</h3><div style="f" data-summary-footer="1">'
+            '<p data-ys-original-title="1" style="y">원제 : T</p></div></div>')
+    out = app._insert_blog_thumbnail(body, "abcde12345")
+    assert out.index('data-ys-thumb="1"') < out.index("<h3>") < out.index("원제 :")
+
+
+def test_original_title_is_added_inside_footer():
+    body = '<div style="x"><h3>A</h3><div style="f" data-summary-footer="1"><div>원본 영상: u</div></div></div>'
+    out = app._ensure_blog_original_title(body, "Original", "번역")
+    assert out.index("<h3>") < out.index('data-summary-footer="1"') < out.index("원제 :") < out.index("원본 영상")
+
+
 def test_without_original_title_goes_to_wrapper_start(monkeypatch):
     _fake(monkeypatch, [])
     out = app._insert_blog_thumbnail('<div style="x"><h2>A</h2></div>', "abcde12345")

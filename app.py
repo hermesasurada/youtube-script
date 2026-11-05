@@ -3923,7 +3923,7 @@ def summary_content():
 
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
-BLOG_RENDER_VERSION = "2026-10-29-video-thumbnail"
+BLOG_RENDER_VERSION = "2026-11-05-footer-source"
 
 
 def _excluded_note_mtime(summary_path: str) -> float:
@@ -4208,7 +4208,7 @@ _BLOG_ORIGINAL_STYLE = (
 
 def _ensure_blog_original_title(body_html: str, original_title: str | None,
                                 translated_title: str | None) -> str:
-    """번역 제목으로 발행할 때 본문 첫 줄에 외국어 원제를 보존한다."""
+    """번역 제목으로 발행할 때 외국어 원제를 맨 아래 푸터(없으면 본문 첫 줄)에 보존한다."""
     original = (original_title or "").strip()
     translated = (translated_title or "").strip()
     if not original or not translated or original == translated:
@@ -4220,7 +4220,8 @@ def _ensure_blog_original_title(body_html: str, original_title: str | None,
         f'<p data-ys-original-title="1" style="{_BLOG_ORIGINAL_STYLE}">'
         f'원제 : {_htmlmod.escape(original)}</p>'
     )
-    wrapper = re.match(r"\s*<div\b[^>]*>", body_html, flags=re.IGNORECASE)
+    wrapper = (re.search(r'<div\b[^>]*data-summary-footer="1"[^>]*>', body_html)
+               or re.match(r"\s*<div\b[^>]*>", body_html, flags=re.IGNORECASE))
     if wrapper:
         return body_html[:wrapper.end()] + "\n" + block + body_html[wrapper.end():]
     return block + "\n" + body_html
@@ -4299,7 +4300,10 @@ def _insert_blog_thumbnail(body_html: str, yt_id: str, video_url: str = "") -> s
     if video_url:
         img = f'<a href="{_htmlmod.escape(video_url, quote=True)}" target="_blank" rel="noopener">{img}</a>'
     block = f'<div data-ys-thumb="1" style="margin:0 0 1.4em;">{img}</div>'
-    m = re.search(r'<p data-ys-original-title="1"[^>]*>.*?</p>', body_html, re.S)
+    # 맨 아래 푸터의 원제(2026-11-05)는 자리 표시로 쓰지 않는다 — 썸네일은 본문 맨 앞이다.
+    foot = body_html.find('data-summary-footer="1"')
+    head = body_html if foot < 0 else body_html[:foot]
+    m = re.search(r'<p data-ys-original-title="1"[^>]*>.*?</p>', head, re.S)
     if not m:
         m = re.match(r"\s*<div\b[^>]*>", body_html, flags=re.IGNORECASE)
     if not m:

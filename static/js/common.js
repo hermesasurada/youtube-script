@@ -1329,14 +1329,14 @@
      반환: {html, text} — 클립보드에 text/html + text/plain 동시 적재용. */
   const _BL = {           // 블로거 본문 인라인 스타일 팔레트(테마와 무관하게 읽히도록 보수적으로)
     h2:   'margin:2em 0 .7em;padding-bottom:.35em;border-bottom:2px solid #e8e3d8;font-size:1.35em;font-weight:700;line-height:1.4;',
-    // 소제목: 본문보다 조금 크게(17px/15px) 두고 굵기 + 라임색 형광펜 밑줄로 구분한다.
+    // 소제목: 본문보다 크게(18px/15px) 두고 굵기 + 라임색 형광펜 밑줄로 구분한다.
     // border-bottom은 항상 글자 '아래'에만 그어져 겹칠 수 없어서, 아래쪽 일부만 칠하는
     // 배경 그라디언트로 글자에 살짝 물리게 했다(형광펜 효과).
     // inline-block이라 글자 길이만큼만 칠해진다. 대신 위아래 margin이 인접 문단과
     // 상쇄되지 않으므로(블록끼리면 상쇄됨) 위 여백을 그만큼 줄여 잡았다.
     h3:   'display:inline-block;margin:1.1em 0 .475em;padding:0 .12em .02em;'
         + 'background-image:linear-gradient(transparent 62%, #dcf7a4 62%);'
-        + 'font-size:17px;font-weight:700;line-height:1.45;color:#1a1a1a;',   // wm 블로그와 같은 크기(2026-11-05 지시)
+        + 'font-size:18px;font-weight:700;line-height:1.45;color:#1a1a1a;',   // wm 블로그와 같은 크기(2026-11-05 지시, 화면은 그대로)
     // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
     // 소제목의 굵기(700)가 뒤따르는 본문까지 번지는 것을 막는다.
     // 본문 글자 크기는 여기서만 준다(2026-08-30 사용자 지시: 본문 15px). 래퍼는
@@ -1351,7 +1351,7 @@
         + 'background:#f7f7f6;',
     termRow: 'margin:0;padding:0;font-size:12.5px;line-height:1.55;'
         + 'font-weight:400;color:#7a7f87;',
-    originalTitle: 'margin:0 0 1.4em;font-size:13px;font-weight:400;line-height:1.5;color:#7b8393;',
+    originalTitle: 'margin:0 0 .25em;font-size:13px;font-weight:400;line-height:1.5;color:#7b8393;',
     li:   'margin:0 0 .7em;line-height:1.57;font-weight:400;font-size:15px;',
     ul:   'margin:0 0 1.6em;padding-left:1.3em;font-weight:400;',
     foot: 'margin:2.5em 0 0;padding-top:1em;border-top:1px solid #e8e3d8;font-size:.85em;color:#8a8279;line-height:1.5;',
@@ -1472,23 +1472,27 @@
     const firstH = body.querySelector('h2,h3');   // 문서 첫 소제목은 위 여백 제거 (박스 삽입 전에 잡는다)
     if (firstH) firstH.setAttribute('style', firstH.getAttribute('style').replace(/margin:[^;]+;/, 'margin:0 0 .425em;'));
 
-    // 번역 제목은 Blogger 제목 필드에 쓰고, 원제는 본문 첫 줄에 작게 보존한다.
-    const translatedTitle = String(opts.translatedTitle || '').trim();
-    if (title && translatedTitle && title !== translatedTitle) {
-      const original = document.createElement('p');
-      original.dataset.ysOriginalTitle = '1';
-      original.setAttribute('style', _BL.originalTitle);
-      original.textContent = `원제 : ${title}`;
-      body.insertBefore(original, body.firstChild);
-    }
-
     // 한눈 요약은 블로거 복사에서 제외한다(2026-08-26) — 본문 소제목부터 시작.
 
-    if (url) {                                     // 출처는 원본 영상 링크만 남긴다
+    // 번역 제목은 Blogger 제목 필드에 쓰고, 원제는 원본 영상 링크와 함께 맨 아래 푸터에 둔다(2026-11-05).
+    const translatedTitle = String(opts.translatedTitle || '').trim();
+    const showOriginal = title && translatedTitle && title !== translatedTitle;
+    if (showOriginal || url) {
       const foot = document.createElement('div');
       foot.setAttribute('style', _BL.foot);
       foot.setAttribute('data-summary-footer', '1');
-      foot.innerHTML = `원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener" style="color:#b0413e;">${attrEscape(url)}</a>`;
+      if (showOriginal) {
+        const original = document.createElement('p');
+        original.dataset.ysOriginalTitle = '1';
+        original.setAttribute('style', _BL.originalTitle);
+        original.textContent = `원제 : ${title}`;
+        foot.appendChild(original);
+      }
+      if (url) {                                   // 출처는 원본 영상 링크만 남긴다
+        const link = document.createElement('div');
+        link.innerHTML = `원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener" style="color:#b0413e;">${attrEscape(url)}</a>`;
+        foot.appendChild(link);
+      }
       body.appendChild(foot);
     }
 
