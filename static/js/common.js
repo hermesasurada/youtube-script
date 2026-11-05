@@ -1329,18 +1329,18 @@
      반환: {html, text} — 클립보드에 text/html + text/plain 동시 적재용. */
   const _BL = {           // 블로거 본문 인라인 스타일 팔레트(테마와 무관하게 읽히도록 보수적으로)
     h2:   'margin:2em 0 .7em;padding-bottom:.35em;border-bottom:2px solid #e8e3d8;font-size:1.35em;font-weight:700;line-height:1.4;',
-    // 소제목: 본문과 같은 글자 크기로 두되 굵기 + 라임색 형광펜 밑줄로 구분한다.
+    // 소제목: 본문보다 조금 크게(17px/15px) 두고 굵기 + 라임색 형광펜 밑줄로 구분한다.
     // border-bottom은 항상 글자 '아래'에만 그어져 겹칠 수 없어서, 아래쪽 일부만 칠하는
     // 배경 그라디언트로 글자에 살짝 물리게 했다(형광펜 효과).
     // inline-block이라 글자 길이만큼만 칠해진다. 대신 위아래 margin이 인접 문단과
     // 상쇄되지 않으므로(블록끼리면 상쇄됨) 위 여백을 그만큼 줄여 잡았다.
     h3:   'display:inline-block;margin:1.1em 0 .475em;padding:0 .12em .02em;'
         + 'background-image:linear-gradient(transparent 62%, #dcf7a4 62%);'
-        + 'font-size:1em;font-weight:700;line-height:1.45;color:#1a1a1a;',
+        + 'font-size:17px;font-weight:700;line-height:1.45;color:#1a1a1a;',   // wm 블로그와 같은 크기(2026-11-05 지시)
     // 본문은 font-weight를 명시한다 — 블로거 편집기가 붙여넣기 HTML을 span으로 재구성하면서
     // 소제목의 굵기(700)가 뒤따르는 본문까지 번지는 것을 막는다.
     // 본문 글자 크기는 여기서만 준다(2026-08-30 사용자 지시: 본문 15px). 래퍼는
-    // 16px 그대로라 소제목(h3, 1em)·h2·푸터는 종전 크기를 유지한다 — 래퍼를
+    // 16px 그대로라 h2·푸터는 종전 크기를 유지한다 — 래퍼를
     // 줄이면 소제목까지 같이 작아진다.
     // 줄간격은 '글자 높이(1em) + 줄 사이 여백'이다. 문단 사이 간격(margin)은 그대로 두고
     // 줄 사이 여백만 2/3로 줄였다(0.9em → 0.6em, 2026-09-14 사용자 지시).
