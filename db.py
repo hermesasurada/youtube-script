@@ -1767,7 +1767,7 @@ _HISTORY_COLUMNS = """
     rowid AS item_id, date, upload_date, stem, title, uploader, channel,
     duration, webpage_url, channel_url, has_txt,
     CASE WHEN summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
-    is_read, bookmark
+    is_read, bookmark, distill
 """
 
 def _row_to_item(r: sqlite3.Row) -> dict:
@@ -1808,6 +1808,15 @@ def _row_to_history_item(r: sqlite3.Row) -> dict:
     }
 
 
+def _history_distill(r: sqlite3.Row, excluded: set) -> bool:
+    """증류 대상 여부 — 증류 파이프라인(source_repository._doc_from_path)과 같은 규칙:
+    영상 오버라이드(items.distill)가 있으면 그것, 없으면 증류 제외 채널명에 걸리지 않으면 포함."""
+    if r["distill"] is not None:
+        return bool(r["distill"])
+    names = {(r["channel"] or "").strip(), (r["uploader"] or "").strip()} - {""}
+    return not (names & excluded)
+
+
 def list_items(unread_only: bool = False) -> list[dict]:
     where = "WHERE is_read = 0" if unread_only else ""
     rows = _conn().execute(
@@ -1822,7 +1831,13 @@ def list_history_items(unread_only: bool = False) -> list[dict]:
     rows = _conn().execute(
         f"SELECT {_HISTORY_COLUMNS} FROM items {where} ORDER BY date DESC, stem DESC"
     ).fetchall()
-    return [_row_to_history_item(r) for r in rows]
+    excluded = set(distill_excluded_names())
+    out = []
+    for r in rows:
+        item = _row_to_history_item(r)
+        item["distill"] = _history_distill(r, excluded)
+        out.append(item)
+    return out
 
 
 def history_revision() -> str:
@@ -1833,11 +1848,15 @@ def history_revision() -> str:
                   COALESCE(SUM(rowid), 0) AS ids,
                   COALESCE(SUM(CASE WHEN is_read != 0 THEN rowid ELSE 0 END), 0) AS reads,
                   COALESCE(SUM(CASE WHEN bookmark != 0 THEN rowid ELSE 0 END), 0) AS marks,
-                  COALESCE(SUM(CASE WHEN summary_path IS NOT NULL THEN rowid ELSE 0 END), 0) AS summaries
+                  COALESCE(SUM(CASE WHEN summary_path IS NOT NULL THEN rowid ELSE 0 END), 0) AS summaries,
+                  COALESCE(SUM(CASE WHEN distill IS NOT NULL THEN rowid * (distill + 1) ELSE 0 END), 0) AS ds,
+                  (SELECT COALESCE(SUM(CASE WHEN COALESCE(distill, 1) = 0 THEN id ELSE 0 END), 0)
+                     FROM channels) AS chds
              FROM items"""
     ).fetchone()
+    # 증류 대상 필터(2026-11-07)가 쓰는 값 — 영상 오버라이드·채널 증류 설정이 바뀌어도 목록을 다시 받는다
     return (f'{r["n"]}:{float(r["indexed"]):.6f}:{r["ids"]}:{r["reads"]}'
-            f':{r["marks"]}:{r["summaries"]}')
+            f':{r["marks"]}:{r["summaries"]}:{r["ds"]}:{r["chds"]}')
 
 
 def get_history_item(item_id: int) -> dict | None:

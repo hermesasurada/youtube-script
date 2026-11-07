@@ -2821,3 +2821,14 @@ def test_auto_detected_live_is_skipped_manual_waits(monkeypatch):
     assert fv("is_live", allow_live=True) == (False, "live:is_live")
     assert fv("was_live", allow_live=True) == (True, "")
     assert fv("upcoming", allow_live=True)[1].startswith("meta_error:")
+
+
+def test_history_distill_flag_follows_override_then_channel_names():
+    """증류 대상 필터(2026-11-07): 영상 오버라이드 우선, 없으면 제외 채널명(channel·uploader)에 걸리면 제외."""
+    row = lambda d, ch, up: {"distill": d, "channel": ch, "uploader": up}
+    ex = {"집코노미"}
+    assert db._history_distill(row(None, "집코노미", ""), ex) is False
+    assert db._history_distill(row(None, "", "집코노미"), ex) is False
+    assert db._history_distill(row(1, "집코노미", ""), ex) is True
+    assert db._history_distill(row(0, "Sources", ""), ex) is False
+    assert db._history_distill(row(None, "Sources", "Sources"), ex) is True

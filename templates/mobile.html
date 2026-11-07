@@ -138,6 +138,12 @@
       cursor: pointer; -webkit-tap-highlight-color: transparent;
     }
     .icon-toggle:active { background: var(--surface2); }
+    /* 증류 필터 버튼 추가(2026-11-07)로 375px에서 검색줄이 14px 넘쳐, 좁은 화면만 버튼·간격을 줄인다 */
+    @media (max-width: 400px) {
+      .search { gap: .3rem; }
+      .search .icon-toggle { width: 34px; }
+      .search .sort-toggle { padding: 0 .45rem; }
+    }
     .icon-toggle.active {
       color: var(--highlight);
       border-color: var(--highlight);
@@ -617,6 +623,10 @@
     <button class="sort-toggle" id="m-sortkey-btn" type="button" onclick="toggleSortKey()" aria-label="정렬 기준 전환(전사처리일/영상게시일)">전사처리일</button>
     <button class="icon-toggle" id="m-sort-btn" type="button" onclick="toggleSort()"
             aria-pressed="false" aria-label="최신순 정렬 (누르면 과거순)" title="최신순"></button>
+    <button class="icon-toggle" id="distill-filter-btn" type="button" onclick="toggleDistillFilter()"
+            aria-pressed="false" aria-label="증류 대상 영상만 보기" title="증류만">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.6 18.6A1.6 1.6 0 0 0 6 21h12a1.6 1.6 0 0 0 1.4-2.4L14 9V3"/><path d="M7.5 15h9"/></svg>
+    </button>
     <button class="icon-toggle" id="bookmark-filter-btn" type="button" onclick="toggleBookmarkFilter()"
             aria-pressed="false" aria-label="북마크한 영상만 보기" title="북마크만">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -718,11 +728,12 @@ function _savedFilter() {
 function _saveUnread() {
   try {
     localStorage.setItem('histFilter', JSON.stringify({
-      ..._savedFilter(), unread: _unreadOnly, bookmark: _bookmarkOnly, uploader: _uploader }));
+      ..._savedFilter(), unread: _unreadOnly, bookmark: _bookmarkOnly, distill: _distillOnly, uploader: _uploader }));
   } catch { /* 스토리지 불가(사파리 프라이빗 등) — 무시 */ }
 }
 let _unreadOnly = !!_savedFilter().unread;
 let _bookmarkOnly = !!_savedFilter().bookmark;
+let _distillOnly = !!_savedFilter().distill;   // 증류 대상만(데스크톱과 같은 histFilter.distill)
 let _uploader = String(_savedFilter().uploader || '');   // 채널 선택(데스크톱과 같은 histFilter.uploader)
 let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
 let _sortKey = localStorage.getItem('histSortKey') || 'date';  // 'date'=전사 처리일, 'upload'=영상 게시일 (데스크톱과 공유)
@@ -778,6 +789,8 @@ async function loadHistory(force) {
   $('unread-filter-btn').setAttribute('aria-pressed', String(_unreadOnly));   // 저장된 미읽음 상태 반영
   $('bookmark-filter-btn').classList.toggle('active', _bookmarkOnly);
   $('bookmark-filter-btn').setAttribute('aria-pressed', String(_bookmarkOnly));
+  $('distill-filter-btn').classList.toggle('active', _distillOnly);
+  $('distill-filter-btn').setAttribute('aria-pressed', String(_distillOnly));
   applyFilter();
 }
 
@@ -789,6 +802,7 @@ function applyFilter() {
     if (q && !(i.title||'').toLowerCase().includes(q) && !(i.uploader||'').toLowerCase().includes(q)) return false;
     if (_unreadOnly && i.is_read) return false;
     if (_bookmarkOnly && !i.bookmark) return false;
+    if (_distillOnly && !i.distill) return false;
     return true;
   });
   // 정렬: 기준(_sortKey)에 따라 전사 처리일 또는 영상 게시일. desc=최신순, asc=과거순.
@@ -958,6 +972,14 @@ function toggleUnreadFilter() {
 
 /* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg)로 나가는
    요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
+function toggleDistillFilter() {
+  _distillOnly = !_distillOnly;
+  $('distill-filter-btn').classList.toggle('active', _distillOnly);
+  $('distill-filter-btn').setAttribute('aria-pressed', String(_distillOnly));
+  _saveUnread();
+  applyFilter();
+}
+
 function toggleBookmarkFilter() {
   _bookmarkOnly = !_bookmarkOnly;
   $('bookmark-filter-btn').classList.toggle('active', _bookmarkOnly);
@@ -1682,6 +1704,8 @@ async function setItemDistill(value) {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     _setDistillUI(d);
+    const it = ALL.find(i => i.item_id === _summaryItemId);   // 목록의 증류 필터도 바로 맞춘다
+    if (it && d.effective !== undefined) it.distill = !!d.effective;
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
   }

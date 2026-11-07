@@ -228,6 +228,7 @@ let _historyPage     = 1;
 let _historyRevision = '';
 let _histUnreadOnly  = false;
 let _histBookmarkOnly = false;
+let _histDistillOnly = false;   // 증류 대상만(2026-11-07) — item.distill = 증류 파이프라인과 같은 판정
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
 let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일, 'duration'=영상 길이
 const HIST_SORT_KEYS = ['date', 'upload', 'duration'];   // 기준 버튼이 순환하는 순서
@@ -246,6 +247,7 @@ function _saveHistFilter() {
       title:    document.getElementById('hf-title').value,
       unread:   _histUnreadOnly,
       bookmark: _histBookmarkOnly,
+      distill:  _histDistillOnly,
       page:     _historyPage,
     }));
   } catch { /* 사파리 프라이빗 등 스토리지 불가 — 무시 */ }
@@ -265,6 +267,8 @@ function _restoreHistFilter() {
     document.getElementById('hf-unread-btn').classList.toggle('active', _histUnreadOnly);
     _histBookmarkOnly = !!s.bookmark;
     document.getElementById('hf-bookmark-btn').classList.toggle('active', _histBookmarkOnly);
+    _histDistillOnly = !!s.distill;
+    document.getElementById('hf-distill-btn').classList.toggle('active', _histDistillOnly);
     _histRestorePage = Number(s.page) > 1 ? Number(s.page) : 1;   // 필터 적용 후 반영
   } finally {
     _histRestoring = false;
@@ -444,6 +448,7 @@ function applyHistoryFilter(keepPage = false) {
     if (titleQ   && !item.title.toLowerCase().includes(titleQ)) return false;
     if (_histUnreadOnly && item.is_read) return false;
     if (_histBookmarkOnly && !item.bookmark) return false;
+    if (_histDistillOnly && !item.distill) return false;
     return true;
   });
   // 정렬: 기준(_histSortKey)에 따라 전사 처리일 또는 영상 게시일. desc=최신순, asc=과거순.
@@ -521,6 +526,12 @@ function filterByUploader(uploader, ev) {
   sel.value = next;
   applyHistoryFilter();
   document.getElementById('history-grid')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function toggleDistillFilter() {
+  _histDistillOnly = !_histDistillOnly;
+  document.getElementById('hf-distill-btn').classList.toggle('active', _histDistillOnly);
+  applyHistoryFilter();
 }
 
 function toggleBookmarkFilter() {
@@ -679,6 +690,8 @@ function resetHistoryFilter() {
   document.getElementById('hf-unread-btn').classList.remove('active');
   _histBookmarkOnly = false;
   document.getElementById('hf-bookmark-btn').classList.remove('active');
+  _histDistillOnly = false;
+  document.getElementById('hf-distill-btn').classList.remove('active');
   _histSort    = 'desc';                                // 정렬도 기본(전사처리일·최신순)으로
   _histSortKey = 'date';
   localStorage.setItem('histSort', _histSort);
@@ -2220,6 +2233,9 @@ async function setItemDistill(value) {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     _setDistillUI(d);
+    // 목록의 증류 대상 표시·필터도 바로 맞춘다
+    const it = _historyItems.find(i => i.item_id === _summaryItemId);
+    if (it && d.effective !== undefined) { it.distill = !!d.effective; if (_histDistillOnly) applyHistoryFilter(true); }
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
   }
