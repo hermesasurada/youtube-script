@@ -1755,8 +1755,19 @@
     mmRender();
   }
 
+  /* 최근 N일 필터(2026-11-07 사용자 지시 — 영상 게시일 기준, 게시일이 없으면 전사 처리일).
+     오늘 포함 N일: N=7이면 오늘과 앞 6일. 날짜는 YYYYMMDD 문자열이라 문자열 비교로 충분하다. */
+  function withinRecentDays(item, days) {
+    const d = String((item && (item.upload_date || item.date)) || '');
+    if (!/^\d{8}$/.test(d)) return false;
+    const t = new Date(); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - (days - 1));
+    const from = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}`;
+    return d >= from;
+  }
+
   global.YS = {
     monitorModels: { load: mmLoad, mount: mmMount, fields: mmFields },
+    withinRecentDays,
     renderMarkdown,
     normalizeModelLabel,
     mdToBloggerHtml,

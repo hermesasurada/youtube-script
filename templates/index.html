@@ -138,6 +138,10 @@
                 </div>
               </div>
               <div class="history-filter-group history-filter-state">
+                <button class="hf-unread-btn" id="hf-recent-btn" onclick="toggleRecentFilter()" title="영상 게시일 기준 7일 이내(오늘 포함)만 보기 — 게시일이 없으면 전사 처리일">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                  7일 이내
+                </button>
                 <button class="hf-unread-btn" id="hf-distill-btn" onclick="toggleDistillFilter()" title="증류 대상 영상만 보기(영상 설정 우선, 없으면 채널 설정)">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.6 18.6A1.6 1.6 0 0 0 6 21h12a1.6 1.6 0 0 0 1.4-2.4L14 9V3"/><path d="M7.5 15h9"/></svg>
                   증류만
