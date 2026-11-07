@@ -278,6 +278,12 @@ def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkey
         assert prefs["capture"] is False and prefs["distill"] is False
         assert prefs["source"] == "history"
         assert fresh.last_queue_prefs_for_channel("모르는채널") == {}
+        # 채널명이 언어별로 달라도(이력 EngineerTV, 등록 엔지니어TV) 채널 주소로 등록 설정을 찾는다
+        conn.execute("INSERT INTO channels (channel_id, title, capture, distill) VALUES ('UCabc','한글이름',0,0)")
+        conn.execute(ins, (str(tmp_path / "e.md"), "ENG", "영상", "영문이름", "20260911", "e", None))
+        conn.execute("UPDATE items SET channel_url='https://www.youtube.com/channel/UCabc' WHERE yt_id='ENG'")
+        conn.commit()
+        assert fresh.last_queue_prefs_for_channel("영문이름") == {"capture": False, "distill": False, "source": "channel"}
         assert fresh.last_queue_prefs_for_channel("") == {}
     finally:
         monkeypatch.delenv("INDEX_DB", raising=False)

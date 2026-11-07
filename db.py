@@ -1246,7 +1246,10 @@ def last_queue_prefs_for_channel(channel: str) -> dict:
     source = "history"
     if cap is None or dis is None:                      # 모니터 채널이면 그 기본 설정으로
         row = conn.execute(
-            "SELECT capture, distill FROM channels WHERE title = ? LIMIT 1", (channel,)).fetchone()
+            """SELECT capture, distill FROM channels c
+               WHERE c.title = ? OR EXISTS (SELECT 1 FROM items i
+                     WHERE (i.uploader = ? OR i.channel = ?) AND i.channel_url LIKE '%' || c.channel_id)
+               LIMIT 1""", (channel, channel, channel)).fetchone()   # 언어별 채널명이 달라 이력의 채널 주소로도 잇는다
         if row:
             if cap is None and row["capture"] is not None:
                 cap, source = bool(row["capture"]), "channel"
