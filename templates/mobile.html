@@ -623,12 +623,8 @@
     <button class="sort-toggle" id="m-sortkey-btn" type="button" onclick="toggleSortKey()" aria-label="정렬 기준 전환(전사처리일/영상게시일)">전사처리일</button>
     <button class="icon-toggle" id="m-sort-btn" type="button" onclick="toggleSort()"
             aria-pressed="false" aria-label="최신순 정렬 (누르면 과거순)" title="최신순"></button>
-    <button class="icon-toggle" id="recent-filter-btn" type="button" onclick="toggleRecentFilter()"
-            aria-pressed="false" aria-label="영상 게시일 7일 이내만 보기" title="7일 이내(게시일)">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><text x="12" y="19.5" text-anchor="middle" font-size="8.5" font-weight="700" fill="currentColor" stroke="none">7</text></svg>
-    </button>
     <button class="icon-toggle" id="distill-filter-btn" type="button" onclick="toggleDistillFilter()"
-            aria-pressed="false" aria-label="증류 대상 영상만 보기" title="증류만">
+            aria-pressed="false" aria-label="증류 대상이면서 게시일 7일 이내인 영상만 보기" title="증류만(게시일 7일 이내)">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.6 18.6A1.6 1.6 0 0 0 6 21h12a1.6 1.6 0 0 0 1.4-2.4L14 9V3"/><path d="M7.5 15h9"/></svg>
     </button>
     <button class="icon-toggle" id="bookmark-filter-btn" type="button" onclick="toggleBookmarkFilter()"
@@ -732,13 +728,12 @@ function _savedFilter() {
 function _saveUnread() {
   try {
     localStorage.setItem('histFilter', JSON.stringify({
-      ..._savedFilter(), unread: _unreadOnly, bookmark: _bookmarkOnly, distill: _distillOnly, recent: _recentOnly, uploader: _uploader }));
+      ..._savedFilter(), unread: _unreadOnly, bookmark: _bookmarkOnly, distill: _distillOnly, uploader: _uploader }));
   } catch { /* 스토리지 불가(사파리 프라이빗 등) — 무시 */ }
 }
 let _unreadOnly = !!_savedFilter().unread;
 let _bookmarkOnly = !!_savedFilter().bookmark;
-let _distillOnly = !!_savedFilter().distill;
-let _recentOnly = !!_savedFilter().recent;     // 영상 게시일 7일 이내(데스크톱과 같은 histFilter.recent)   // 증류 대상만(데스크톱과 같은 histFilter.distill)
+let _distillOnly = !!_savedFilter().distill;   // 증류 대상 + 게시일 7일 이내(데스크톱과 같은 histFilter.distill)
 let _uploader = String(_savedFilter().uploader || '');   // 채널 선택(데스크톱과 같은 histFilter.uploader)
 let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
 let _sortKey = localStorage.getItem('histSortKey') || 'date';  // 'date'=전사 처리일, 'upload'=영상 게시일 (데스크톱과 공유)
@@ -796,8 +791,6 @@ async function loadHistory(force) {
   $('bookmark-filter-btn').setAttribute('aria-pressed', String(_bookmarkOnly));
   $('distill-filter-btn').classList.toggle('active', _distillOnly);
   $('distill-filter-btn').setAttribute('aria-pressed', String(_distillOnly));
-  $('recent-filter-btn').classList.toggle('active', _recentOnly);
-  $('recent-filter-btn').setAttribute('aria-pressed', String(_recentOnly));
   applyFilter();
 }
 
@@ -809,8 +802,7 @@ function applyFilter() {
     if (q && !(i.title||'').toLowerCase().includes(q) && !(i.uploader||'').toLowerCase().includes(q)) return false;
     if (_unreadOnly && i.is_read) return false;
     if (_bookmarkOnly && !i.bookmark) return false;
-    if (_distillOnly && !i.distill) return false;
-    if (_recentOnly && !YS.withinRecentDays(i, 7)) return false;
+    if (_distillOnly && !(i.distill && YS.withinRecentDays(i, 7))) return false;   // 증류 대상 + 게시일 7일 이내
     return true;
   });
   // 정렬: 기준(_sortKey)에 따라 전사 처리일 또는 영상 게시일. desc=최신순, asc=과거순.
@@ -925,9 +917,9 @@ const SORT_ICON = {
 };
 
 const SORT_LABELS = {
-  date:     { key: '전사처리일', short: '처리일', asc: '과거순',  desc: '최신순' },
-  upload:   { key: '영상게시일', short: '게시일', asc: '과거순',  desc: '최신순' },
-  duration: { key: '영상길이',   short: '길이', asc: '짧은순', desc: '긴순' },
+  date:     { key: '전사처리일', asc: '과거순',  desc: '최신순' },
+  upload:   { key: '영상게시일', asc: '과거순',  desc: '최신순' },
+  duration: { key: '영상길이',   asc: '짧은순', desc: '긴순' },
 };
 
 function _updateSortBtn() {
@@ -942,8 +934,7 @@ function _updateSortBtn() {
   }
   const k = $('m-sortkey-btn');
   if (k) {
-    // 좁은 화면은 짧은 라벨(필터 버튼이 늘어 검색줄 폭 확보, 2026-11-07)
-    k.textContent = window.matchMedia('(max-width: 400px)').matches ? (L.short || L.key) : L.key;
+    k.textContent = L.key;
     k.classList.toggle('active', _sortKey !== 'date');
   }
 }
@@ -981,14 +972,6 @@ function toggleUnreadFilter() {
 
 /* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg)로 나가는
    요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
-function toggleRecentFilter() {
-  _recentOnly = !_recentOnly;
-  $('recent-filter-btn').classList.toggle('active', _recentOnly);
-  $('recent-filter-btn').setAttribute('aria-pressed', String(_recentOnly));
-  _saveUnread();
-  applyFilter();
-}
-
 function toggleDistillFilter() {
   _distillOnly = !_distillOnly;
   $('distill-filter-btn').classList.toggle('active', _distillOnly);
