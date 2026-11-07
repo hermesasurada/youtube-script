@@ -84,18 +84,22 @@ def test_poll_survives_when_both_sources_fail(monkeypatch, tmp_path):
     assert channel_monitor.poll_channels() == 0
 
 
-def test_pending_titles_prefer_youtube_korean_title(monkeypatch):
-    todo = [{"rowid": 1, "yt_id": "A", "title": "Hello", "channel_url": "https://youtube.com/channel/" + CID},
-            {"rowid": 2, "yt_id": "B", "title": "World", "channel_url": ""}]
-    calls, saved = [], {}
+def test_pending_titles_use_youtube_korean_title_only(monkeypatch):
+    url = "https://youtube.com/channel/" + CID
+    other = "https://youtube.com/channel/UC" + "b" * 22
+    todo = [{"rowid": 1, "yt_id": "A", "title": "Hello", "channel_url": url},
+            {"rowid": 2, "yt_id": "B", "title": "World", "channel_url": url},
+            {"rowid": 3, "yt_id": "C", "title": "Later", "channel_url": other},
+            {"rowid": 4, "yt_id": "D", "title": "Manual", "channel_url": ""}]
+    saved = {}
     monkeypatch.setattr(app.db, "mark_korean_titles", lambda: None)
     monkeypatch.setattr(app.db, "titles_needing_translation", lambda n: todo)
     monkeypatch.setattr(app.db, "set_title_ko", lambda y, t: saved.__setitem__(y, t) or 1)
-    monkeypatch.setattr(app.yt_listing, "korean_entries", lambda c: {"A": {"title": "안녕"}})
+    monkeypatch.setattr(app.yt_listing, "korean_entries",
+                        lambda c: {"A": {"title": "안녕"}, "B": {"title": "World"}} if c == CID else {})
 
-    def tr(titles, first_id=0):
-        calls.append(titles)
-        return ["세계"]
+    def tr(*a, **k):
+        raise AssertionError("LLM 번역을 부르면 안 된다")
     monkeypatch.setattr(app, "_translate_titles", tr)
-    assert app.translate_pending_titles()["done"] == 2
-    assert saved == {"A": "안녕", "B": "세계"} and calls == [["World"]]
+    assert app.translate_pending_titles()["done"] == 1
+    assert saved == {"A": "안녕", "B": "", "D": ""}          # C는 목록 실패 → 다음에 다시
