@@ -36,6 +36,7 @@ import requests
 
 import db
 import llm_gateway
+import yt_listing
 
 try:
     import yt_dlp
@@ -473,11 +474,18 @@ def poll_channels(dry: bool = False) -> int:
         if not ch["enabled"]:
             continue
         cid, title = ch["channel_id"], ch["title"] or ch["handle"] or ch["channel_id"]
+        fallback = False
         try:
             vids = rss_recent(cid)
         except Exception as e:
-            log(f"[poll] {title}: RSS 오류 {e}")
-            continue
+            # YouTube RSS 서버는 채널과 무관하게 404/500을 자주 낸다 → 채널 페이지로 대신 읽는다
+            try:
+                vids, fallback = yt_listing.channel_videos(cid), True
+                if not vids:
+                    raise ValueError("빈 목록")
+            except Exception as e2:
+                log(f"[poll] {title}: 수집 실패 RSS {e} / 채널 페이지 {e2}")
+                continue
 
         # 최초 폴: 현재 피드를 baseline(seen)로만 기록 → 이후 신규만 처리
         if not ch["baseline_done"]:
@@ -491,6 +499,9 @@ def poll_channels(dry: bool = False) -> int:
                 db.mark_channel_checked(ch["id"])
             continue
 
+        if fallback:
+            vids = yt_listing.until_known(
+                vids, lambda yid: bool(db.find_by_yt_id(yid) or db.in_queue(yid)))
         new_for_ch = 0
         resumed = _parse_ts(ch.get("resumed_at"))
         for v in vids:

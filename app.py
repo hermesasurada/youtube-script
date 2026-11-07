@@ -67,6 +67,7 @@ import name_fix
 import keyframe_report
 import llm_gateway
 import original_video
+import yt_listing
 
 try:
     import yt_dlp
@@ -884,7 +885,7 @@ def _resolve_original_video(meta: dict, description: str) -> dict[str, str]:
     return original_video.explicit_original(description, str(current_id)) or {}
 
 
-def fetch_localized_title(yt_id: str, lang: str = "ko") -> str:
+def fetch_localized_title(yt_id: str, lang: str = "ko", channel_id: str = "") -> str:
     """유튜브가 해당 언어 시청자에게 보여주는 제목(현지화 제목). 없으면 "".
 
     제작자가 언어별 제목을 달아 두면 유튜브는 한국 시청자에게 그 제목을 보여주는데,
@@ -922,10 +923,13 @@ def fetch_localized_title(yt_id: str, lang: str = "ko") -> str:
         t = _nfc((t or "").strip())
         if t and t != original:
             return t
+    # 시청 페이지가 원제만 줄 때가 많다(2026-11-07 실측) — 채널 영상 목록의 한국어 제목으로 보강
+    if channel_id:
+        return _nfc(yt_listing.korean_title(yt_listing.korean_entries(channel_id).get(yt_id), original))
     return ""
 
 
-def save_thumbnail(yt_id: str, *, force: bool = False) -> str | None:
+def save_thumbnail(yt_id: str, *, force: bool = False, channel_id: str = "") -> str | None:
     """영상 썸네일을 res/thumbs/{yt_id}.jpg 로 내려받는다(이미 있으면 그대로 둔다).
 
     force=True면 사본이 있어도 다시 받는다(메타 갱신 버튼). 새 사본이 실패하면
@@ -942,6 +946,22 @@ def save_thumbnail(yt_id: str, *, force: bool = False) -> str | None:
     if not force and os.path.exists(dest) and os.path.getsize(dest) > 1024:
         return dest
     os.makedirs(THUMB_DIR, exist_ok=True)
+    # 한국어 썸네일이 있으면 그것부터(주소가 서명돼 있어 채널 목록에서만 얻는다, 2026-11-07)
+    ko_thumb = (yt_listing.korean_entries(channel_id).get(yt_id) or {}).get("thumb") if channel_id else ""
+    if ko_thumb:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(
+                    ko_thumb, headers={"User-Agent": _WATCH_UA}), timeout=15) as r:
+                data = r.read()
+            if len(data) >= 2048:
+                tmp = dest + ".part"
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, dest)
+                log.info("thumbnail saved: %s (ko, %d bytes)", yt_id, len(data))
+                return dest
+        except Exception as e:
+            log.warning("korean thumbnail failed: %s (%s)", yt_id, e)
     for name in _THUMB_SOURCES:
         try:
             with urllib.request.urlopen(
@@ -1124,7 +1144,9 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                     log.warning("audio cleanup failed: %s (%s)", os.path.basename(audio_path), e)
             # 썸네일 사본 확보(비공개 전환 대비). 실패해도 전사 결과엔 영향 없음.
             try:
-                save_thumbnail((jobs[job_id].get("meta") or {}).get("id") or "")
+                meta_ = jobs[job_id].get("meta") or {}
+                save_thumbnail(meta_.get("id") or "",
+                               channel_id=yt_listing.channel_id_of(meta_.get("channel_url") or ""))
             except Exception as e:
                 log.warning("thumbnail save failed: %s", e)
             log.info("transcription done: %s", os.path.basename(md_path))
@@ -2188,11 +2210,26 @@ def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
     todo = db.titles_needing_translation(limit)
     if not todo:
         return {"done": 0, "remaining": 0}
+    # YouTube가 한국 시청자에게 보여 주는 제목을 먼저 쓴다(2026-11-07 사용자 지시). 없는 것만 LLM 번역.
+    n, listings = 0, {}
+    rest = []
+    for item in todo:
+        cid = yt_listing.channel_id_of(item.get("channel_url") or "")
+        if cid and cid not in listings:
+            listings[cid] = yt_listing.korean_entries(cid)
+        ko = yt_listing.korean_title(listings.get(cid, {}).get(item["yt_id"]), item["title"])
+        if ko:
+            n += db.set_title_ko(item["yt_id"], _nfc(ko))
+        else:
+            rest.append(item)
+    if not rest:
+        log.info("title from youtube: %d건", n)
+        return {"done": n, "remaining": len(db.titles_needing_translation(limit))}
+    todo = rest
     out = _translate_titles([t["title"] for t in todo],
                             first_id=todo[0].get("rowid") or 0)
     if out is None:
-        return {"done": 0, "remaining": len(todo), "error": "translate failed"}
-    n = 0
+        return {"done": n, "remaining": len(todo), "error": "translate failed"}
     for item, ko in zip(todo, out):
         if ko and ko != item["title"]:
             n += db.set_title_ko(item["yt_id"], ko)
@@ -4107,7 +4144,8 @@ def history_refresh_meta():
     # 현지화 제목을 아예 쓰지 않고 원제 하나만 유지한다.
     korean_source = bool(db._HANGUL_RE.search(new_title or old_title))
     try:
-        localized = "" if korean_source else fetch_localized_title(yt_id)
+        localized = "" if korean_source else fetch_localized_title(
+            yt_id, channel_id=yt_listing.channel_id_of(item.get("channel_url") or ""))
     except Exception as e:
         localized = ""
         notes.append(f"현지화 제목 조회 실패: {str(e)[:120]}")
@@ -4151,7 +4189,8 @@ def history_refresh_meta():
             except OSError:
                 return ""
         old_sig = _digest(before)
-        if save_thumbnail(yt_id, force=True):
+        if save_thumbnail(yt_id, force=True,
+                          channel_id=yt_listing.channel_id_of(item.get("channel_url") or "")):
             if _digest(before) != old_sig:
                 changed.append("thumbnail")
         else:
