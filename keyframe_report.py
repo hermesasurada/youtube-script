@@ -36,7 +36,7 @@ MIN_GAP         = int(os.environ.get("MIN_GAP", "6"))   # 근접 중복 제거 �
 MAX_VISUAL_TARGETS = int(os.environ.get("MAX_VISUAL_TARGETS", "12"))
 TARGET_WINDOW   = float(os.environ.get("TARGET_WINDOW", "3"))       # 전사 시각단서 전후 탐색(초)
 TARGET_INTERVAL = float(os.environ.get("TARGET_INTERVAL", "2"))     # 탐색 구간 프레임 간격(초)
-MAX_FRAMES_PER_SECTION = int(os.environ.get("MAX_FRAMES_PER_SECTION", "3"))
+MAX_FRAMES_PER_SECTION = int(os.environ.get("MAX_FRAMES_PER_SECTION", "4"))  # 2026-11-07 3→4(소제목 ÷4→÷6로 섹션이 줄어 영상당 캡처 상한 유지)
 SCENE_SETTLE    = os.environ.get("SCENE_SETTLE", "1") != "0"  # 장면 시작 대신 장면 끝(완성된 화면) 프레임
 HOLD_SETTLE     = os.environ.get("HOLD_SETTLE", "1") != "0"   # 채워지는 중인 장표를 완성될 때까지 기다린 프레임으로
 HOLD_MAX_WAIT   = int(os.environ.get("HOLD_MAX_WAIT", "75"))  # 완성을 기다리는 최대 시간(초) — 전사 맥락과 너무 멀어지지 않게
