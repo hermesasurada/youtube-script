@@ -2832,3 +2832,14 @@ def test_history_distill_flag_follows_override_then_channel_names():
     assert db._history_distill(row(1, "집코노미", ""), ex) is True
     assert db._history_distill(row(0, "Sources", ""), ex) is False
     assert db._history_distill(row(None, "Sources", "Sources"), ex) is True
+
+
+def test_history_uploader_uses_registered_channel_title():
+    """목록·채널 필터의 채널명은 등록 채널의 현행 이름(2026-11-07). 미등록 채널은 원래 이름."""
+    titles = {"UCnvCYORRLMYMQNhrlBILdCg": "엔지니어TV"}
+    a = db._apply_channel_title({"uploader": "EngineerTV",
+                                 "channel_url": "https://www.youtube.com/channel/UCnvCYORRLMYMQNhrlBILdCg"}, titles)
+    assert a["uploader"] == "엔지니어TV"
+    b = db._apply_channel_title({"uploader": "Other", "channel_url": "https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxx"}, titles)
+    assert b["uploader"] == "Other"
+    assert db._apply_channel_title({"uploader": "X", "channel_url": ""}, titles)["uploader"] == "X"

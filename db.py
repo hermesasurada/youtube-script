@@ -1808,6 +1808,29 @@ def _row_to_history_item(r: sqlite3.Row) -> dict:
     }
 
 
+_UC_RE = re.compile(r"/channel/(UC[\w-]{10,})")
+
+
+def _channel_titles() -> dict[str, str]:
+    """등록 채널의 현행 이름 {channel_id: title} — 목록·채널 필터 표시용(2026-11-07 사용자 지시)."""
+    return {r["channel_id"]: r["title"].strip()
+            for r in _conn().execute("SELECT channel_id, title FROM channels").fetchall()
+            if r["channel_id"] and (r["title"] or "").strip()}
+
+
+def _apply_channel_title(item: dict, titles: dict[str, str]) -> dict:
+    """카드·채널 필터의 채널명을 등록 채널의 현행 이름(channels.title)으로 보인다.
+
+    items.uploader는 전사 시점 yt-dlp 이름이라 언어·개명에 따라 다르다(EngineerTV ↔ 엔지니어TV).
+    등록되지 않은 채널은 원래 이름 그대로. DB의 uploader는 바꾸지 않는다(블로그 라벨·증류 매칭이 쓴다).
+    """
+    m = _UC_RE.search(item.get("channel_url") or "")
+    title = titles.get(m.group(1)) if m else None
+    if title:
+        item["uploader"] = title
+    return item
+
+
 def _history_distill(r: sqlite3.Row, excluded: set) -> bool:
     """증류 대상 여부 — 증류 파이프라인(source_repository._doc_from_path)과 같은 규칙:
     영상 오버라이드(items.distill)가 있으면 그것, 없으면 증류 제외 채널명에 걸리지 않으면 포함."""
@@ -1832,11 +1855,12 @@ def list_history_items(unread_only: bool = False) -> list[dict]:
         f"SELECT {_HISTORY_COLUMNS} FROM items {where} ORDER BY date DESC, stem DESC"
     ).fetchall()
     excluded = set(distill_excluded_names())
+    titles = _channel_titles()
     out = []
     for r in rows:
         item = _row_to_history_item(r)
         item["distill"] = _history_distill(r, excluded)
-        out.append(item)
+        out.append(_apply_channel_title(item, titles))
     return out
 
 
@@ -1851,6 +1875,7 @@ def history_revision() -> str:
                   COALESCE(SUM(CASE WHEN summary_path IS NOT NULL THEN rowid ELSE 0 END), 0) AS summaries,
                   COALESCE(SUM(CASE WHEN distill IS NOT NULL THEN rowid * (distill + 1) ELSE 0 END), 0) AS ds,
                   (SELECT COALESCE(SUM(CASE WHEN COALESCE(distill, 1) = 0 THEN id ELSE 0 END), 0)
+                          || '.' || COALESCE(SUM(id * LENGTH(COALESCE(title, ''))), 0)
                      FROM channels) AS chds
              FROM items"""
     ).fetchone()
@@ -1906,7 +1931,8 @@ def search(q: str, limit: int = 500, unread_only: bool = False) -> list[dict]:
         """,
         (expr, limit),
     ).fetchall()
-    return [_row_to_history_item(r) for r in rows]
+    titles = _channel_titles()
+    return [_apply_channel_title(_row_to_history_item(r), titles) for r in rows]
 
 
 def mark_read(md_path: str, is_read: bool = True) -> bool:
