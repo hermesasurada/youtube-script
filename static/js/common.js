@@ -1904,7 +1904,8 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-confirm-actions .ys-confirm-ok{background:var(--highlight,#b83a3a);border-color:var(--highlight,#b83a3a);color:#fff;font-weight:600;}
 .ys-confirm-actions .ys-confirm-ok.danger{background:var(--error,#c0392b);border-color:var(--error,#c0392b);}
 .ys-confirm-actions .ys-confirm-ok:hover{filter:brightness(1.07);}
-.summary-memo{margin:.85rem 0;padding:8px 12px;border-left:3px solid #728d79;border-radius:6px;background:color-mix(in srgb,var(--surface,#fff) 90%,#728d79);font-family:inherit;}
+/* 메모 = 노란 메모지 카드(2026-11-07, 블로그 발행본 _include_blog_notes와 같은 모양). 다크 모드는 바탕색에 섞어 맞춘다. */
+.summary-memo{margin:1rem 0;padding:12px 16px;border:1px solid color-mix(in srgb,var(--surface,#fff) 62%,#d9b94a);border-radius:10px;background:color-mix(in srgb,var(--surface,#fff) 86%,#f5d36a);box-shadow:0 1px 3px rgba(120,100,40,.12);font-family:inherit;}
 .summary-memo.empty{padding:0;border:0;background:none;}
 .summary-memo-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.95em;line-height:1.65;margin-bottom:5px;}
 /* 본문 첫 글자 앞의 전구 — 텍스트에 섞이지 않아 복사·검색에 걸리지 않는다. */
