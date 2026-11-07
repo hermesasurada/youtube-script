@@ -521,8 +521,9 @@ def run_codex_prompt(
             command += ["-c", f"model_reasoning_effort={effort}"]
         for path in images:
             command += ["-i", path]
-        if not images:                     # 이미지 첨부 호출은 예전 구성 그대로
-            command += codex_minimal_args()
+        # 이미지 첨부 호출에도 최소 구성을 붙인다(2026-11-07) — -i 첨부라 도구가 필요 없고, 같은 3장
+        # 판정이 입력 22.8k→13.3k(호출당 고정 부담 약 9.5k 감소), 판정·캡션 동일.
+        command += codex_minimal_args()
         command.append("-")
         result = run_command(command, input_text=prompt, timeout=timeout, env=codex_minimal_env())
         final = ""
