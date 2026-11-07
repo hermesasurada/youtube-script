@@ -3949,7 +3949,7 @@ def summary_content():
 
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
-BLOG_RENDER_VERSION = "2026-11-05-plain-heading"
+BLOG_RENDER_VERSION = "2026-11-07-memo-card"
 
 
 def _excluded_note_mtime(summary_path: str) -> float:
@@ -4260,8 +4260,11 @@ def _include_blog_notes(body_html, notes):
         if not note:
             continue
         # 블로거는 인라인 style만 먹어서 ::before를 못 쓴다 — 전구를 본문 앞에 직접 넣는다.
-        block = ('<aside style="margin:.9em 0;padding:9px 13px;border-left:3px solid #728d79;'
-                 'background:#f1f5f1;border-radius:6px;color:#34443a;">'
+        # 메모 모양(2026-11-07 사용자 지시): 왼쪽 강조선+옅은 초록 바탕(클로드 스타일) 대신
+        # 노란 메모지 카드 — 테두리 전체·둥근 모서리·옅은 그림자.
+        block = ('<aside style="margin:1.1em 0;padding:12px 16px;border:1px solid #ecdca0;'
+                 'background:#fff9e3;border-radius:10px;box-shadow:0 1px 3px rgba(120,100,40,.12);'
+                 'color:#4a4127;">'
                  '<div style="white-space:pre-wrap;font-size:15px;line-height:1.6;">'
                  '\U0001F4A1 ' + html_lib.escape(note) + '</div></aside>')
         # 마지막 섹션도 최상위 본문 wrapper 닫힘 앞에 삽입한다.
@@ -4318,7 +4321,8 @@ def _insert_blog_thumbnail(body_html: str, yt_id: str, video_url: str = "") -> s
     img = f'<img src="{_htmlmod.escape(url, quote=True)}" alt="" style="{_BLOG_THUMB_CSS}">'
     if video_url:
         img = f'<a href="{_htmlmod.escape(video_url, quote=True)}" target="_blank" rel="noopener">{img}</a>'
-    block = f'<div data-ys-thumb="1" style="margin:0 0 1.4em;">{img}</div>'
+    # 썸네일과 첫 소제목 사이 여백(2026-11-07 1.4em→2.4em, 첫 소제목은 위 여백이 0이다)
+    block = f'<div data-ys-thumb="1" style="margin:0 0 2.4em;">{img}</div>'
     # 맨 아래 푸터의 원제(2026-11-05)는 자리 표시로 쓰지 않는다 — 썸네일은 본문 맨 앞이다.
     foot = body_html.find('data-summary-footer="1"')
     head = body_html if foot < 0 else body_html[:foot]
