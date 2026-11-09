@@ -1490,10 +1490,17 @@ def test_capture_order_starts_with_the_model_that_summarized(monkeypatch, tmp_pa
     monkeypatch.setattr(app.llm_gateway.llm_catalog, "valid", lambda m, **kw: True)
     summary = tmp_path / "s.md"
     summary.write_text("<!--SUMMARY_MODEL:GPT 6 Sol · 1회 재시도-->\n\n## 본문\n", encoding="utf-8")
+    import keyframe_report as kr
+    monkeypatch.setattr(kr, "VISION_OPUS_TO", "")          # 치환을 끄면 요약 모델 순서 그대로
     assert app._capture_order(str(summary)) == ["gpt-6-sol", "claude-opus-5-5", "grok-4.7"]
     # 마커가 없으면 슬롯 순서 그대로
     summary.write_text("## 본문\n", encoding="utf-8")
     assert app._capture_order(str(summary)) == ["claude-opus-5-5", "gpt-6-sol", "grok-4.7"]
+    # 2026-11-09: 비전 티어 Opus → Sonnet(기본) — 요약이 Opus여도 캡처는 Sonnet
+    monkeypatch.setattr(kr, "VISION_OPUS_TO", "claude-sonnet-5-5")
+    assert app._capture_order(str(summary)) == ["claude-sonnet-5-5", "gpt-6-sol", "grok-4.7"]
+    assert kr._vision_claude_env()["DISABLE_PROMPT_CACHING"] == "1"
+    assert kr._vision_claude_env()["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
     # 이미지 입력이 안 되는 모델은 뺀다
     monkeypatch.setattr(app.llm_gateway.llm_catalog, "valid",
                         lambda m, **kw: m != "grok-4.7")

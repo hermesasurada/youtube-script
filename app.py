@@ -2427,6 +2427,11 @@ def _capture_order(summary_path: str | None) -> list[str]:
         slots = []
     first = _summary_model_of(summary_path, slots)
     order = list(dict.fromkeys(([first] if first else []) + slots))
+    # 비전 티어 Opus → Sonnet(2026-11-09 사용자 승인, 포탈 LLM 이력 분석: Opus 캡처 건당 약 16만 토큰·7일 캐시 쓰기 7.3M).
+    # 요약이 Opus여도 캡처는 kr.VISION_CLAUDE_MODEL(기본 Sonnet 5.5)로 한다. 되돌리기: YT_VISION_OPUS_TO="" 로 재시작.
+    swap = kr.VISION_OPUS_TO
+    if swap:
+        order = list(dict.fromkeys(swap if ("opus" in m and m.startswith("claude")) else m for m in order))
     order = [m for m in order if llm_gateway.llm_catalog.valid(m, capability="vision")]
     return order or [kr.VISION_MODEL]
 
