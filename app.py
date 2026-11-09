@@ -251,7 +251,6 @@ _META_KEYS = [
 _MD_META_ORDER = [
     "title", "uploader", "channel", "channel_url",
     "duration", "clip_start", "upload_date", "webpage_url", "id",
-    "original_video_url", "original_video_title", "original_video_uploader",
     "categories", "tags", "source_file",
 ]
 
@@ -876,15 +875,6 @@ _WATCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 
-def _resolve_original_video(meta: dict, description: str) -> dict[str, str]:
-    """설명문에 적힌 원본 링크만 읽는다. 실패해도 전사 저장을 막지 않는다.
-
-    링크가 없을 때 LLM 검색어 + YouTube 검색으로 원본을 추정하던 경로는 2026-10-08 사용자
-    지시로 지웠다(09-18 이후 쓰이지 않음 — 최근 번역 영상은 모두 설명문에 원본 링크가 있었다)."""
-    current_id = meta.get("id") or meta.get("webpage_url") or ""
-    return original_video.explicit_original(description, str(current_id)) or {}
-
-
 def fetch_localized_title(yt_id: str, lang: str = "ko", channel_id: str = "") -> str:
     """유튜브가 해당 언어 시청자에게 보여주는 제목(현지화 제목). 없으면 "".
 
@@ -1109,25 +1099,6 @@ def _finish_transcription(job_id: str, audio_path: str, rc: int, md_path: str,
                 return
         if transcript is not None:
             meta = jobs[job_id].get("meta", {})
-            try:
-                original = _resolve_original_video(
-                    meta,
-                    jobs[job_id].get("source_description") or "",
-                )
-                if original.get("url"):
-                    meta["original_video_url"] = original["url"]
-                    if original.get("title"):
-                        meta["original_video_title"] = original["title"]
-                    if original.get("uploader"):
-                        meta["original_video_uploader"] = original["uploader"]
-                    log.info(
-                        "original video resolved (%s): %s -> %s",
-                        original.get("method") or "unknown",
-                        meta.get("id") or "?",
-                        original.get("id") or original["url"],
-                    )
-            except Exception as exc:
-                log.info("original-video lookup skipped: %s", exc)
             _save_md(md_path, meta, transcript)
             jobs[job_id].update({"status": "done", "result": transcript, "output_file": md_path})
             # md 저장이 확정된 뒤에만 whisper JSON 삭제(실패 시 재전사 없이 복구 가능).
@@ -1288,8 +1259,6 @@ def _apply_video_info(job_id: str, info: dict, start_sec: int) -> tuple[str, str
     jobs[job_id]["start_offset"]   = start_sec
     jobs[job_id]["clip_duration"]  = clip
     jobs[job_id]["meta"] = {k: _nfc(info[k]) for k in _META_KEYS if info.get(k) is not None}
-    # 설명문은 원본 링크 탐색에만 쓰며 전사 md에는 통째로 저장하지 않는다.
-    jobs[job_id]["source_description"] = _nfc(info.get("description") or "")
     # 제작자가 선언한 언어(yt-dlp `language`, 예: ko / en-US). whisper 표본 감지가 음악
     # 인트로에 걸려 빗나갈 때 이걸 우선한다 — _choose_language 참조.
     jobs[job_id]["declared_language"] = _norm_lang(info.get("language"))
@@ -1322,9 +1291,8 @@ def run_job(job_id: str, params: dict) -> None:
         q.put(None)
         return
 
-    # 번역·재게시 영상(비즈카페 등)도 그 영상을 그대로 전사한다. 원본은 전사 뒤
-    # _finish_transcription이 찾아 링크만 남긴다(2026-09-15 원본으로 갈아타는 방식을
-    # 시도했으나 검색 후보가 불안정해 사용자 지시로 원복).
+    # 번역·재게시 영상(비즈카페 등)도 그 영상을 그대로 전사한다. 원본 영상 링크는 찾지도
+    # 달지도 않는다(2026-11-10 사용자 지시로 설명문 링크 읽기까지 삭제).
     title, uploader, total, clip = _apply_video_info(job_id, info, start_sec)
 
     if start_sec and total and start_sec >= total - 5:
@@ -3897,25 +3865,6 @@ def _parse_summary_title(md_path: str) -> str:
     return os.path.basename(md_path)[:-3]
 
 
-def _original_video_for_item(item: dict | None) -> dict[str, str]:
-    """Read original-video metadata from the transcript, the durable source of truth."""
-    path = (item or {}).get("md_path") or ""
-    if not path or not os.path.isfile(path):
-        return {}
-    try:
-        meta, _ = _parse_md(path)
-    except Exception:
-        return {}
-    url = str(meta.get("original_video_url") or "").strip()
-    if not original_video.youtube_id(url):
-        return {}
-    return {
-        "url": original_video.canonical_url(url),
-        "title": str(meta.get("original_video_title") or "").strip(),
-        "uploader": str(meta.get("original_video_uploader") or "").strip(),
-    }
-
-
 @app.route("/summary/content", methods=["POST"])
 def summary_content():
     data = request.get_json(force=True) or {}
@@ -3936,7 +3885,6 @@ def summary_content():
             content = f.read()
         term_senses.schedule(abs_path)        # 제외 용어와 표기가 같은 각주의 뜻 판정(뒤에서, 없으면 무동작)
         # 증류 설정을 함께 실어 뷰어가 별도 요청 없이 현재 상태를 표시한다.
-        original = _original_video_for_item(item)
         return _json({"content": content, "notes": db.get_summary_notes(item["md_path"]) if item else {},
                       "people": name_fix.people_for(abs_path),     # 인명 클릭 소개(토스트)
                       "blog": _blog_state(item),
@@ -3944,10 +3892,7 @@ def summary_content():
                       "title_ko": db.get_title_ko(abs_path),
                       "is_read": bool((item or {}).get("is_read")),
                       "blog_url": (item or {}).get("blog_url") or "",
-                      "webpage_url": (item or {}).get("webpage_url") or "",
-                      "original_video_url": original.get("url") or "",
-                      "original_video_title": original.get("title") or "",
-                      "original_video_uploader": original.get("uploader") or ""})
+                      "webpage_url": (item or {}).get("webpage_url") or ""})
     except Exception as e:
         return _json({"error": str(e)}, 500)
 

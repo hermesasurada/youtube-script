@@ -776,9 +776,8 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     assert "요약 본문" in summary_payload["content"]
     assert summary_payload["is_read"] is False
     assert summary_payload["webpage_url"] == "https://youtu.be/LIGHTAPI01"
-    assert summary_payload["original_video_url"] == "https://www.youtube.com/watch?v=ORIGINAL01"
-    assert summary_payload["original_video_title"] == "Original Interview"
-    assert summary_payload["original_video_uploader"] == "Source Channel"
+    # 원본 영상 링크는 2026-11-10 삭제 — 옛 전사 머리말에 값이 남아 있어도 내보내지 않는다.
+    assert not any(k.startswith("original_video") for k in summary_payload)
 
     marked = client.patch(
         "/history/mark_read", json={"item_id": item["item_id"], "is_read": True}

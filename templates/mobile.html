@@ -324,10 +324,7 @@
     }
     .modal-youtube-link[hidden] { display: none; }
     .modal-youtube-link:active { background: #c00; color: #fff; }
-    .modal-original-link { color: var(--highlight); }
-    .modal-original-link:active { background: var(--highlight); color: #fff; }
     :root[data-theme="dark"] .modal-youtube-link { color: #ff5a5a; }
-    :root[data-theme="dark"] .modal-original-link { color: var(--highlight); }
     /* 읽기 진행바(헤더 아래, 스크롤에 따라 채워짐) */
     .read-progress {
       flex-shrink: 0; height: 3px; width: 0%;
@@ -656,11 +653,6 @@
          rel="noopener noreferrer" aria-label="YouTube에서 보기" hidden>
         <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>
         <span class="mobile-youtube-label">YouTube</span>
-      </a>
-      <a class="modal-youtube-link modal-original-link" id="modal-original-link" href="#" target="_blank"
-         rel="noopener noreferrer" aria-label="원본 영상 보기" hidden>
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>
-        <span>원본</span>
       </a>
       <label class="font-ctrl" id="font-ctrl" title="본문 글꼴" hidden>
         <select id="font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴"></select>
@@ -1157,8 +1149,6 @@ function openModal(title, kind = 'content') {
   $('summary-actions').hidden = true;
   $('modal-youtube-link').hidden = true;
   $('modal-youtube-link').href = '#';
-  $('modal-original-link').hidden = true;
-  $('modal-original-link').href = '#';
   $('modal-title').textContent = title || '';
   $('modal').classList.toggle('utility', kind === 'utility');
   $('read-progress').style.width = '0%';   // 열 때 진행바 초기화
@@ -1588,16 +1578,8 @@ async function openSummary(itemId, title) {
       YS.decoratePeople($('modal-body'));                 // 인명 클릭 소개(토스트)
       YS.attachSummaryNotes($('modal-body'), itemId);
       _attachSectionEditorsM($('modal-body'));
-      const originalUrl = d.original_video_url || '';
       $('modal-youtube-link').href = d.webpage_url || '#';
       $('modal-youtube-link').hidden = !d.webpage_url;
-      $('modal-youtube-link').title = originalUrl ? '번역·재게시 영상 보기' : 'YouTube에서 보기';
-      const ytLabel = $('modal-youtube-link').querySelector('.mobile-youtube-label');
-      if (ytLabel) ytLabel.textContent = originalUrl ? '번역본' : 'YouTube';
-      $('modal-original-link').href = originalUrl || '#';
-      $('modal-original-link').hidden = !originalUrl;
-      $('modal-original-link').title = d.original_video_title
-        ? `원본 영상: ${d.original_video_title}` : '원본 영상 보기';
       _setSummaryReadUIM(d.is_read);
       _setPubBtnM(d.blog_url, d.blog);
       _setDistillUI(d.distill);

@@ -1,17 +1,11 @@
 import original_video
 
 
-def test_explicit_original_prefers_label_and_excludes_current_video():
-    description = """채널: https://www.youtube.com/watch?v=CURRENT001
-원본 영상: https://youtu.be/ORIGINAL01?t=20
-참고 영상: https://www.youtube.com/watch?v=REFERENCE1
-"""
-    found = original_video.explicit_original(description, "CURRENT001")
-    assert found == {
-        "id": "ORIGINAL01",
-        "url": "https://www.youtube.com/watch?v=ORIGINAL01",
-        "title": "",
-        "uploader": "",
-        "method": "explicit",
-        "confident": True,          # 설명문에 적힌 출처는 그대로 믿고 갈아탄다
-    }
+def test_original_link_reading_is_removed():
+    """설명문에서 원본 링크를 읽는 기능은 2026-11-10 사용자 지시로 삭제했다 — 되살리지 말 것."""
+    assert not hasattr(original_video, "explicit_original")
+
+
+def test_youtube_id_helpers_remain():
+    assert original_video.youtube_id("https://youtu.be/ABCDEFGHIJK?t=20") == "ABCDEFGHIJK"
+    assert original_video.canonical_url("ABCDEFGHIJK") == "https://www.youtube.com/watch?v=ABCDEFGHIJK"
