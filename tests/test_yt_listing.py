@@ -84,22 +84,37 @@ def test_poll_survives_when_both_sources_fail(monkeypatch, tmp_path):
     assert channel_monitor.poll_channels() == 0
 
 
-def test_pending_titles_use_youtube_korean_title_only(monkeypatch):
+def _pending_titles_setup(monkeypatch, saved):
     url = "https://youtube.com/channel/" + CID
     other = "https://youtube.com/channel/UC" + "b" * 22
     todo = [{"rowid": 1, "yt_id": "A", "title": "Hello", "channel_url": url},
             {"rowid": 2, "yt_id": "B", "title": "World", "channel_url": url},
             {"rowid": 3, "yt_id": "C", "title": "Later", "channel_url": other},
-            {"rowid": 4, "yt_id": "D", "title": "Manual", "channel_url": ""}]
-    saved = {}
+            {"rowid": 4, "yt_id": "D", "title": "NVIDIA", "channel_url": ""}]
     monkeypatch.setattr(app.db, "mark_korean_titles", lambda: None)
     monkeypatch.setattr(app.db, "titles_needing_translation", lambda n: todo)
     monkeypatch.setattr(app.db, "set_title_ko", lambda y, t: saved.__setitem__(y, t) or 1)
     monkeypatch.setattr(app.yt_listing, "korean_entries",
                         lambda c: {"A": {"title": "안녕"}, "B": {"title": "World"}} if c == CID else {})
 
-    def tr(*a, **k):
-        raise AssertionError("LLM 번역을 부르면 안 된다")
+
+def test_pending_titles_prefer_youtube_korean_then_llm(monkeypatch):
+    """YouTube 한국어 제목이 1순위, 없으면 LLM 번역(2026-11-10). 한글 없는 번역은 원제만 쓴다."""
+    saved, asked = {}, []
+    _pending_titles_setup(monkeypatch, saved)
+
+    def tr(titles, first_id=0):
+        asked.append((titles, first_id))
+        return ["세계", "NVIDIA"]
     monkeypatch.setattr(app, "_translate_titles", tr)
-    assert app.translate_pending_titles()["done"] == 1
-    assert saved == {"A": "안녕", "B": "", "D": ""}          # C는 목록 실패 → 다음에 다시
+    assert app.translate_pending_titles()["done"] == 2
+    assert asked == [(["World", "NVIDIA"], 2)]                # A는 YouTube 한국어 제목, C는 목록 실패
+    assert saved == {"A": "안녕", "B": "세계", "D": ""}         # C는 다음에 다시
+
+
+def test_pending_titles_llm_failure_retries_later(monkeypatch):
+    saved = {}
+    _pending_titles_setup(monkeypatch, saved)
+    monkeypatch.setattr(app, "_translate_titles", lambda titles, first_id=0: None)
+    app.translate_pending_titles()
+    assert saved == {"A": "안녕"}                              # 실패한 B·D는 비워 둬 다시 시도

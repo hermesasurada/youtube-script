@@ -511,6 +511,13 @@ def set_title_ko(yt_id: str, value: str) -> bool:
         return cur.rowcount > 0
 
 
+def clear_title_ko(yt_id: str) -> bool:
+    """번역 제목을 '아직 없음'(NULL)으로 되돌려 다음 번역 때 다시 채우게 한다."""
+    with _lock:
+        cur = _conn().execute("UPDATE items SET title_ko = NULL WHERE yt_id = ?", (yt_id,))
+        return cur.rowcount > 0
+
+
 def titles_needing_translation(limit: int = 500) -> list[dict]:
     """번역이 아직 없는 항목(제목에 한글이 없는 것만) → [{yt_id, title}]."""
     rows = _conn().execute(

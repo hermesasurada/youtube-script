@@ -1929,7 +1929,7 @@ def _reindex_summary(save_path: str) -> None:
             db.upsert_summary_only(md)
         except Exception:
             pass
-    _translate_titles_async()      # 새 항목의 외국어 제목에 YouTube 한국어 제목을 채운다
+    _translate_titles_async()      # 새 항목의 외국어 제목: YouTube 한국어 제목, 없으면 LLM 번역
 
 
 # ── 제목 번역 ──────────────────────────────────────────────────────────
@@ -2145,7 +2145,7 @@ def _rebuild_brief(body: str, family: str, model: str | None, title: str | None)
 
 
 def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | None:
-    # 2026-11-07부터 호출하지 않는다(사용자 지시: 제목은 YouTube 한국어 표기만, LLM 번역 안 함).
+    # YouTube 한국어 제목이 없는 외국어 제목에만 쓴다(2026-11-10 사용자 지시로 다시 사용).
     """제목 묶음을 번역. 실패하면 None(다음 기회에 다시 시도).
 
     설정의 제목 번역 모델(기본 GPT-6 Luna)이 그 추론 수준으로 먼저 옮기고, 실패하면
@@ -2174,13 +2174,16 @@ def _translate_titles(titles: list[str], *, first_id: int = 0) -> list[str] | No
 
 
 def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
-    """번역이 비어 있는 항목을 한 묶음 처리한다. 배치 스크립트와 훅이 함께 쓴다."""
+    """번역이 비어 있는 항목을 한 묶음 처리한다. 배치 스크립트와 훅이 함께 쓴다.
+
+    1순위는 YouTube가 한국 시청자에게 보여 주는 한국어 제목(2026-11-07 사용자 지시). 그것이
+    없는 외국어 제목만 LLM으로 번역한다(2026-11-10 사용자 지시 — 블룸버그처럼 한국어 제목을
+    달지 않는 채널이 원제로 남았다). LLM 번역이 실패하면 비워 두고 다음 기회에 다시 한다."""
     db.mark_korean_titles()                       # 한국어 제목은 대상에서 확정 제외
     todo = db.titles_needing_translation(limit)
     if not todo:
         return {"done": 0, "remaining": 0}
-    # 제목 번역은 YouTube가 한국 시청자에게 보여 주는 제목만 쓴다. LLM으로 번역하지 않는다(2026-11-07 사용자 지시).
-    n, listings = 0, {}
+    n, listings, need_llm = 0, {}, []
     for item in todo:
         cid = yt_listing.channel_id_of(item.get("channel_url") or "")
         if cid and cid not in listings:
@@ -2189,11 +2192,24 @@ def translate_pending_titles(limit: int = TITLE_TR_BATCH) -> dict:
         if cid and not entries:
             continue                                # 목록을 못 읽었으면 다음 기회에 다시
         ko = yt_listing.korean_title(entries.get(item["yt_id"]), item["title"])
-        n += db.set_title_ko(item["yt_id"], _nfc(ko)) if ko else 0
-        if not ko:
-            db.set_title_ko(item["yt_id"], "")      # 한국어 제목이 없으면 원제만 쓴다
-    log.info("title from youtube: %d건", n)
-    return {"done": n, "remaining": len(db.titles_needing_translation(limit))}
+        if ko:
+            n += db.set_title_ko(item["yt_id"], _nfc(ko))
+        else:
+            need_llm.append(item)
+    llm = 0
+    if need_llm:
+        translated = _translate_titles([i["title"] for i in need_llm],
+                                       first_id=int(need_llm[0].get("rowid") or 0))
+        if translated is not None:
+            for item, ko in zip(need_llm, translated):
+                ko = _nfc((ko or "").strip())
+                # 한글이 없거나 원제와 같으면 번역이 필요 없는 제목 — 원제만 쓴다.
+                if not db._HANGUL_RE.search(ko) or ko == item["title"].strip():
+                    ko = ""
+                db.set_title_ko(item["yt_id"], ko)
+                llm += 1 if ko else 0
+    log.info("title from youtube: %d건, llm: %d건", n, llm)
+    return {"done": n + llm, "remaining": len(db.titles_needing_translation(limit))}
 
 
 _title_tr_running = threading.Lock()
@@ -4155,10 +4171,14 @@ def history_refresh_meta():
             db.set_title_ko(yt_id, localized)
             title_ko = localized
             changed.append("title_ko")
-    elif "title" in changed and cur_ko:
-        db.set_title_ko(yt_id, "")                   # 원제가 바뀌면 옛 한국어 제목은 맞지 않는다
-        title_ko = ""
-        changed.append("title_ko")
+    elif "title" in changed or not cur_ko:
+        # YouTube 한국어 제목이 없다 — 원제가 바뀌었거나 번역이 비어 있으면 LLM으로 다시
+        # 번역한다(2026-11-10). 비워 두고(NULL) 뒤에서 번역하므로 화면은 다음 조회에 바뀐다.
+        db.clear_title_ko(yt_id)
+        _translate_titles_async()
+        if cur_ko:
+            title_ko = ""
+            changed.append("title_ko")
 
     return _json({
         "changed": changed,
