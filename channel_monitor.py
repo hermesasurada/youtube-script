@@ -35,7 +35,9 @@ import xml.etree.ElementTree as ET
 import requests
 
 import db
+import document_io
 import llm_gateway
+import summary_policy
 import yt_listing
 
 try:
@@ -606,6 +608,19 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     else:
         log(f"[resume] 기존 전사 재사용: {os.path.basename(txt_path)}")
 
+    # 6분 이하 영상은 요약·캡처를 하지 않는다(2026-11-12 사용자 지시) — 전사만 남긴다.
+    # 서버 /summarize도 같은 규칙으로 거절하지만, 여기서 먼저 걸러 실패·재시도로 남지 않게 한다.
+    try:
+        with open(txt_path, encoding="utf-8", errors="replace") as f:
+            meta, _ = document_io.parse_markdown_text(f.read())
+        skip = summary_policy.summary_skip_reason(meta)
+    except Exception:  # noqa: BLE001 — 판정 실패 시 서버 규칙에 맡긴다
+        skip = None
+    if skip:
+        log(f"[summary] {skip}")
+        return {"txt_path": txt_path, "kf_note": "", "kf_systemic": False,
+                "kf_permanent": False, "kf_skipped": True, "summary_skipped": skip}
+
     # 요약(SSE 스트림 소비 → 서버가 성공 시에만 디스크에 저장, 실패 시 event:error 방출)
     summary_err = None
     await_err = False
@@ -808,6 +823,10 @@ def _drain_main_one() -> None:
             summary_slots=active_slots,
         )
         kf_note = res.get("kf_note")
+        if res.get("summary_skipped"):
+            db.queue_set_status(v["id"], "done", reason=str(res["summary_skipped"])[:160])
+            log(f"[drain] 요약 생략(6분 이하) — 전사만 저장: {title}")
+            return
         # 큐에서 증류를 지정했으면(NULL 아님) 완성된 이력에 영상 단위 오버라이드로 이관.
         # 캡처 재시도로 빠져도 전사·요약은 끝난 상태라 여기서 한 번에 처리한다.
         if v.get("distill") is not None and res.get("txt_path"):

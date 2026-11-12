@@ -65,6 +65,7 @@ import brief_rebuild
 import term_senses
 import name_fix
 import keyframe_report
+import summary_policy
 import llm_gateway
 import original_video
 import yt_listing
@@ -3008,6 +3009,11 @@ def summarize():
     if not transcript_blob.strip():
         return _json({"error": "전사 결과가 없습니다."}, 400)
     transcript_meta, transcript_body = document_io.parse_markdown_text(transcript_blob)
+    # 6분 이하 영상은 요약하지 않는다(2026-11-12 사용자 지시, summary_policy).
+    skip_reason = summary_policy.summary_skip_reason(transcript_meta)
+    if skip_reason:
+        log.info("summarize skipped: %s (%s)", os.path.basename(abs_path), skip_reason)
+        return _json({"error": skip_reason, "skipped": "short_video"}, 422)
     transcript_body, opening_cutoff = keyframe_report.trim_sequoia_opening(
         transcript_meta, transcript_body
     )
