@@ -3485,6 +3485,72 @@ def channels_list():
         return _json({"error": str(e)}, 500)
 
 
+# ── 채널 추가(2026-11-14 사용자 지시 "yt와 xw에 사용자 핸들로 채널을 추가할 수 있는 기능") ──
+# @핸들·youtube.com/@핸들·youtube.com/channel/UC…·UC… 채널 ID를 받는다. 핸들은 채널 페이지에서 채널 ID를 찾고
+# (channel_monitor.resolve_channel_id — 추천 채널 ID를 잘못 잡지 않게 canonical 링크 우선), 이름은 채널 RSS 제목.
+# 새 채널은 자동 수집 켜짐으로 등록되고, 첫 확인 때 지금 피드의 영상은 '본 것'으로만 기록한다(백필 방지 — 모니터 기존 규칙).
+_CHANNEL_ID_RE = re.compile(r"\b(UC[0-9A-Za-z_-]{22})\b")
+_HANDLE_URL_RE = re.compile(r"youtube\.com/@([^/?#\s]+)", re.I)
+
+
+def _parse_channel_input(raw: str) -> tuple[str, str]:
+    """입력 → (채널 ID, 핸들). 둘 중 하나는 빈 문자열일 수 있다. 알아볼 수 없으면 ('', '')."""
+    text = "".join(c for c in (raw or "").strip() if unicodedata.category(c) != "Cf")
+    m = _CHANNEL_ID_RE.search(text)
+    if m:
+        return m.group(1), ""
+    m = _HANDLE_URL_RE.search(text)
+    handle = urllib.parse.unquote(m.group(1)) if m else text.lstrip("@")
+    if not handle or "/" in handle or " " in handle or len(handle) > 100:
+        return "", ""
+    return "", handle
+
+
+def _channel_feed_title(channel_id: str) -> str:
+    """채널 RSS 맨 위 <title>(채널 이름). 못 읽으면 빈 문자열."""
+    try:
+        req = urllib.request.Request(
+            f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}",
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            xml = r.read().decode("utf-8", "replace")
+        m = re.search(r"<title>([^<]+)</title>", xml)
+        return _htmlmod.unescape(m.group(1)).strip() if m else ""
+    except Exception:  # noqa: BLE001 — 이름은 없어도 등록은 된다
+        return ""
+
+
+@app.route("/channels", methods=["POST"])
+def channels_add():
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("handle") or data.get("channel") or "").strip()
+    channel_id, handle = _parse_channel_input(raw)
+    if not channel_id and not handle:
+        return _json({"error": "@핸들, 채널 주소 또는 UC로 시작하는 채널 ID를 넣어 주세요."}, 400)
+    if not channel_id:
+        try:
+            import channel_monitor
+            channel_id = channel_monitor.resolve_channel_id(handle) or ""
+        except Exception as e:  # noqa: BLE001
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code == 404:
+                return _json({"error": f"@{handle} 채널을 찾을 수 없습니다."}, 404)
+            return _json({"error": f"채널 확인 실패: {e}"}, 502)
+        if not channel_id:
+            return _json({"error": f"@{handle} 채널을 찾을 수 없습니다."}, 404)
+    existing = next((c for c in db.list_channels() if c["channel_id"] == channel_id), None)
+    if existing:
+        return _json({"error": f"이미 등록된 채널입니다: {existing.get('title') or existing.get('handle') or channel_id}",
+                      "channel": existing}, 409)
+    title = _channel_feed_title(channel_id)
+    if not title and not handle:
+        return _json({"error": f"채널 {channel_id}의 피드를 읽을 수 없습니다(없는 채널일 수 있습니다)."}, 404)
+    cid = db.add_channel(channel_id, handle=handle, title=title,
+                         url=f"https://www.youtube.com/channel/{channel_id}", enabled=True)
+    log.info("channel added: %s (%s, @%s)", title or channel_id, channel_id, handle)
+    return _json({"ok": True, "channel": {**db.get_channel(cid), "done": 0, "last_done": None}})
+
+
 # ── 채널 로고(설정-채널 탭) ── 채널 페이지 og:image(yt3) 를 작게 받아 res/channel_logos 에 둔다.
 # 처음 요청 때 받고 30일마다 새로 받는다. 못 받으면 1시간 동안 다시 시도하지 않고 404 →
 # 화면은 채널 이름 첫 글자로 대신한다.

@@ -3,6 +3,8 @@
    한 줄에 로고 + 이름·뱃지, 아래 줄에 @핸들 · 처리 편수 · 마지막 처리일.
    자동수집이 꺼진 채널은 줄 전체를 흐리게 하고 '수집 꺼짐'을 붙인다.
 
+   맨 위 '채널 추가' 칸(2026-11-14 사용자 지시): @핸들·채널 주소·UC… 채널 ID → POST /channels. 성공하면 목록에 바로 넣는다.
+
    YS.channelList.mount(host, data, {mobile, countEl})
      host    목록을 그릴 요소. 다시 부르면 검색어·포커스는 그대로 두고 줄만 바꾼다.
      data    /channels 응답(채널 객체를 그 자리에서 고쳐 캐시와 맞춘다)
@@ -71,6 +73,18 @@
 .chl-sw:disabled{opacity:.5;cursor:default;}
 .chl-sw:focus-visible{outline:2px solid var(--highlight);outline-offset:2px;}
 .chl-empty{padding:.9rem .7rem;color:var(--muted);font-size:13px;text-align:center;}
+.chl-add{display:flex;gap:.4rem;margin-bottom:.45rem;}
+.chl-add input{flex:1;min-width:0;height:32px;padding:0 .7rem;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface2);color:var(--text);font:inherit;font-size:13px;outline:none;}
+.chl--m .chl-add input{height:38px;font-size:16px;}
+.chl-add input:focus{border-color:var(--highlight);background:var(--surface);}
+.chl-add button{flex-shrink:0;height:32px;padding:0 .9rem;border:0;border-radius:8px;background:var(--highlight);color:#fff;
+  font:inherit;font-size:13px;font-weight:650;cursor:pointer;}
+.chl--m .chl-add button{height:38px;}
+.chl-add button:disabled{opacity:.55;cursor:default;}
+.chl-add-msg{margin:-.15rem 0 .4rem;font-size:12px;color:var(--muted);}
+.chl-add-msg.err{color:#b0413e;}
+.chl-row.is-new{background:color-mix(in oklab,var(--highlight) 12%,transparent);}
 `;
     const el = document.createElement('style');
     el.id = 'ys-chl-style';
@@ -155,6 +169,42 @@
     }
   }
 
+  function _msg(st, text, err) {
+    st.addMsg.textContent = text;
+    st.addMsg.classList.toggle('err', !!err);
+    st.addMsg.hidden = !text;
+  }
+
+  async function _add(host) {
+    const st = host._chl;
+    const input = st.addForm.querySelector('input'), btn = st.addForm.querySelector('button');
+    const raw = input.value.trim();
+    if (!raw) { input.focus(); return; }
+    btn.disabled = true;
+    _msg(st, '채널을 확인하는 중…');
+    try {
+      const res = await fetch('/channels', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle: raw }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.channel) throw new Error(d.error || `HTTP ${res.status}`);
+      if (!d.ok) throw new Error(d.error || '추가 실패');
+      const chans = st.data.channels || (st.data.channels = []);
+      chans.push(d.channel);
+      chans.sort((a, b) => String(a.title || a.handle || '').localeCompare(String(b.title || b.handle || ''), 'ko'));
+      input.value = '';
+      mount(host, st.data, { countEl: st.countEl });
+      const row = st.rows.querySelector(`.chl-row[data-id="${d.channel.id}"]`);
+      if (row) { row.classList.add('is-new'); row.scrollIntoView({ block: 'nearest' }); }
+      _msg(st, `${d.channel.title || '@' + d.channel.handle} 추가됨 — 다음 확인(20분 주기)부터 새로 올라오는 영상을 처리합니다.`);
+    } catch (e) {
+      _msg(st, `추가 실패: ${e.message}`, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   function mount(host, data, opts = {}) {
     if (!host) return;
     _style();
@@ -163,6 +213,10 @@
       host.classList.add('chl');
       host.classList.toggle('chl--m', !!opts.mobile);
       host.innerHTML = `<div class="chl-top">
+          <form class="chl-add" autocomplete="off">
+            <input type="text" placeholder="채널 추가 — @핸들 또는 채널 주소" aria-label="추가할 채널 @핸들 또는 주소" spellcheck="false" autocapitalize="off">
+            <button type="submit">추가</button></form>
+          <div class="chl-add-msg" hidden></div>
           <label class="chl-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
             <input type="search" placeholder="채널 검색 — 이름·@핸들" aria-label="채널 검색" autocomplete="off" spellcheck="false">
             <button type="button" class="chl-clear" aria-label="검색어 지우기" hidden>×</button></label>
@@ -174,6 +228,9 @@
         rows: host.querySelector('.chl-rows'),
         headQ: host.querySelector('.chl-head-q'),
       };
+      st.addForm = host.querySelector('.chl-add');
+      st.addMsg = host.querySelector('.chl-add-msg');
+      st.addForm.addEventListener('submit', e => { e.preventDefault(); _add(host); });
       st.input.addEventListener('input', () => _apply(host));
       st.input.addEventListener('keydown', e => {
         if (e.key === 'Escape' && st.input.value) { e.stopPropagation(); st.input.value = ''; _apply(host); }
