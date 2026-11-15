@@ -46,6 +46,7 @@
 
 ## Shared LLM catalog
 
+- **Gemini(API 키) 실행기**(2026-11-16 사용자 지시): 계열 키 `gemini`, `hermes-llm-log/gemini_api.py`로 부른다(키 `~/.hermes/gemini.env`, 추론은 thinkingLevel, 이력 backend=http). 요약 슬롯·제목 번역·한눈 요약 재구성에 쓰고 실패·무료 한도(429)는 다음 순번이 받는다. 옛 3계열 순번(`MODEL_KEYS`·`SLOT_COUNT`)에는 넣지 않았고 게이트(`summarizer_gate`)는 슬롯에서 온 gemini를 앞에 두어 키 유무만 확인한다. **캡처(비전)·인명 검색에는 쓰지 않는다**(이미지·웹 검색 러너 없음 — `_capture_order`·비전 선택지에서 뺀다). 표시는 'Gemini 4 Hydrogen'.
 - 요약 선택기는 지원 실행기(Claude·Codex·Grok)의 중앙 카탈로그 text 모델을 조회하고, 캡처 순서는 그중 vision 가능 모델만 남긴다. Grok 구체 모델 ID도 허용하고 요약·제목 번역·캡처 호출에 전달한다. 비활성/미등록 기존 설정은 보존하되 신규 선택은 막는다. 요약 슬롯에 vision 모델이 하나도 없으면 `keyframe_report.VISION_MODEL`로 캡처한다.
 
 - Model lists, display names and supported reasoning levels come from `~/projects/hermes-llm-log/llm_catalog.py` and `~/.hermes/data/llm_catalog.json`; manage them through the portal model-management page. Do not add independent UI option lists.

@@ -190,6 +190,8 @@ GROK_BIN      = llm_gateway.resolve_grok_bin()
 GROK_MODEL    = os.environ.get("GROK_MODEL", "")
 GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"   # 폴백 활성(기본 ON)
 GROK_TIMEOUT  = int(os.environ.get("GROK_TIMEOUT", "900"))
+# Gemini(API 키) 요약 호출 제한(2026-11-16). 무료 티어 Flash 계열은 한 번에 1~2분 걸리기도 한다.
+GEMINI_TIMEOUT = int(os.environ.get("GEMINI_TIMEOUT", "900"))
 
 # 불완전 전사 방어 — 라이브 다시보기(was_live)는 프래그먼트가 많아 일부만 받히는 일이 있다.
 # 실제 사례: 3h44m 토론회에서 대기 구간만 받혀 전사가 "We'll be right back." 한 줄로 끝났는데도
@@ -2106,10 +2108,40 @@ def _title_tr_with_gpt(prompt: str, label: str, model: str | None = None,
     return (r.stdout or ""), ""
 
 
+def _gemini_text(prompt: str, model: str, effort: str, *, purpose: str, title: str | None,
+                 timeout: int) -> tuple[str, str]:
+    """Gemini API 텍스트 호출 1건(이력 1행) → (텍스트, 오류사유). 어떤 오류도 예외로 내보내지 않는다."""
+    effort = str(effort or "default").lower()
+    if effort != "default" and effort not in llm_gateway.llm_catalog.levels(model):
+        effort = "default"
+    with llm_gateway.llm_track("gemini", model, purpose=purpose, title=title, backend="http",
+                               reasoning=None if effort == "default" else effort) as call:
+        if llm_gateway.gemini_api is None:
+            llm_gateway.llm_fill(call, fail="gemini_api 모듈 없음")
+            return "", "gemini_api 모듈 없음"
+        try:
+            text, usage = llm_gateway.gemini_api.generate(prompt, model, effort, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 — 429(무료 한도)·타임아웃 포함, 다음 순번이 받는다
+            llm_gateway.llm_fill(call, usage=getattr(e, "usage", None) or None)
+            timed_out = isinstance(e, TimeoutError) or "timed out" in str(e)
+            llm_gateway.llm_fill(call, fail=f"{type(e).__name__}: {e}",
+                                 status="timeout" if timed_out else "error")
+            return "", f"gemini {e}"
+        llm_gateway.llm_fill(call, usage=usage)
+        return text, ""
+
+
+def _title_tr_with_gemini(prompt: str, label: str, model: str | None = None,
+                          effort: str = "default", purpose: str = "title") -> tuple[str, str]:
+    return _gemini_text(prompt, model or "gemini-4-hydrogen", effort, purpose=purpose, title=label,
+                        timeout=TITLE_TR_TIMEOUT)
+
+
 _TITLE_TR_PROVIDERS = {
     "opus": _title_tr_with_claude,
     "grok": _title_tr_with_grok,
     "gpt": _title_tr_with_gpt,
+    llm_gateway.GEMINI_FAMILY: _title_tr_with_gemini,
 }
 
 
@@ -2364,6 +2396,11 @@ def _model_label(model_id: str) -> str:
         v = re.search(r"(\d+)\.(\d+)", mid)
         ver = f" {v.group(0)}" if v else ""
         return ("Grok Composer" if "composer" in low else "Grok") + ver
+    if low.startswith("gemini"):          # gemini-4-hydrogen → Gemini 4 Hydrogen(2026-11-16)
+        m = re.match(r"gemini-(\d+(?:\.\d+)?)((?:-[a-z0-9]+)*)$", low)
+        if m:
+            return "Gemini " + m.group(1) + "".join(" " + w.capitalize() for w in m.group(2).split("-") if w)
+        return "Gemini"
     if low.startswith("gpt"):
         v = re.search(r"(\d+(?:\.\d+)?)", mid)
         tail = re.sub(r"^gpt-?\d+(?:\.\d+)?-?", "", low)   # 'astra' / 'sol' / ''
@@ -2375,7 +2412,10 @@ def _monitor_version_options(capability="text") -> list[dict[str, str]]:
     """모델 선택기에 보일 구체 모델 목록(슬롯·값·표시명)."""
     selected = [slot["model"] for slot in db.get_monitor_summary_slots()["slots"]]
     opts = []
-    for provider, family in (("claude", "opus"), ("codex", "gpt"), ("grok", "grok")):
+    for provider, family in (("claude", "opus"), ("codex", "gpt"), ("grok", "grok"),
+                             ("gemini", llm_gateway.GEMINI_FAMILY)):
+        if capability == "vision" and family == llm_gateway.GEMINI_FAMILY:
+            continue                     # Gemini는 텍스트 전용 실행기(캡처 러너 없음)
         for item in llm_gateway.llm_catalog.options(provider, capability=capability,
                                                    selected=[m for m in selected if llm_gateway.model_family(m) == family]):
             opts.append(dict(item, slot=family))
@@ -2417,7 +2457,9 @@ def _capture_order(summary_path: str | None) -> list[str]:
     swap = kr.VISION_OPUS_TO
     if swap:
         order = list(dict.fromkeys(swap if ("opus" in m and m.startswith("claude")) else m for m in order))
-    order = [m for m in order if llm_gateway.llm_catalog.valid(m, capability="vision")]
+    # Gemini는 이미지 러너가 없어 캡처 순서에서 뺀다(카탈로그상 비전 가능이어도, 2026-11-16).
+    order = [m for m in order if llm_gateway.llm_catalog.valid(m, capability="vision")
+             and llm_gateway.model_family(m) != llm_gateway.GEMINI_FAMILY]
     return order or [kr.VISION_MODEL]
 
 
@@ -2552,6 +2594,18 @@ def _summarize_with_gpt(prompt: str, *, reasoning_effort: str = "default",
             llm_gateway.llm_fill(call, fail="빈 응답")
             return "", "gpt 빈 응답"
         return out, ""
+
+
+def _summarize_with_gemini(prompt: str, *, reasoning_effort: str = "default",
+                           title: str | None = None, model: str | None = None) -> tuple[str, str]:
+    """Gemini API(키)로 단일턴 요약(2026-11-16 사용자 지시). (요약 텍스트, 오류사유).
+    GPT와 같은 프롬프트(_SUMMARY_SYS + 본 프롬프트). 실패·무료 한도(429)는 다음 슬롯이 받는다."""
+    text, err = _gemini_text(_SUMMARY_SYS + "\n\n" + prompt, model or "gemini-4-hydrogen",
+                             reasoning_effort, purpose="summary", title=title, timeout=GEMINI_TIMEOUT)
+    if err:
+        return "", err
+    out = _prepare_summary_body(text or "")
+    return (out, "") if out.strip() else ("", "gemini 빈 응답")
 
 
 # Grok 전용 문체 보정. 2026-09-16 Opus·Grok 각 5건 비교에서 Grok만 반복한 결함을 겨냥한다 —
@@ -2798,9 +2852,12 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
             if key == "gpt":
                 return _summarize_with_gpt(p, reasoning_effort=effort, title=title,
                                            model=slot_model)
+            if key == llm_gateway.GEMINI_FAMILY:
+                return _summarize_with_gemini(p, reasoning_effort=effort, title=title,
+                                              model=slot_model)
             return _summarize_with_grok(p, reasoning_effort=effort, title=title, model=slot_model)
         body, err = _call(prompt)
-        if key == "gpt":
+        if key in ("gpt", llm_gateway.GEMINI_FAMILY):
             label = _model_label(slot_model)
         else:
             # -m 없이 CLI 기본 모델로 돌았으면 실제 모델 id를 조회해 버전까지 남긴다.
@@ -3628,8 +3685,8 @@ def channel_model_orders():
         t_effort = str(data.get("title_effort") or "default").strip().lower()
         unchanged = (t_model, t_effort) == (cur_model, cur_effort)
         entry = llm_gateway.llm_catalog.resolve(t_model) or {}
-        # 제목 번역 러너는 Claude·GPT·Grok뿐 — 로컬 모델은 목록에 있어도 받지 않는다.
-        if not unchanged and not (entry.get("provider") in ("claude", "codex", "grok")
+        # 제목 번역 러너는 Claude·GPT·Grok·Gemini(API 키) — 로컬 모델은 목록에 있어도 받지 않는다.
+        if not unchanged and not (entry.get("provider") in ("claude", "codex", "grok", "gemini")
                                   and llm_gateway.llm_catalog.valid(t_model, t_effort, selectable=True)):
             return _json({"error": "제목 번역 모델·추론 조합이 목록에 없습니다."}, 400)
     name_values = {}

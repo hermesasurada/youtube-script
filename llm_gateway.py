@@ -335,7 +335,26 @@ MODEL_VERSION_CHOICES = {
 # ── 요약 슬롯(2026-09-23) ──────────────────────────────────────────────
 # 요약 순번은 계열 목록이 아니라 슬롯 목록이다. 슬롯 하나 = {"model": 구체 모델,
 # "effort": 추론 수준}. 같은 계열이 여러 슬롯에 들어갈 수 있다(GPT Sol·Luna 등).
-SUMMARY_MODEL_CHOICES = llm_catalog.ExecutorChoices(("claude", "codex", "grok"))
+SUMMARY_MODEL_CHOICES = llm_catalog.ExecutorChoices(("claude", "codex", "grok", "gemini"))
+
+# Gemini(API 키, 2026-11-16 사용자 지시): 구독 CLI가 아니라 hermes-llm-log/gemini_api.py로 부르는
+# 텍스트 전용 실행기. 계열 키는 "gemini". 옛 3계열 순번(MODEL_KEYS·SLOT_COUNT)에는 넣지 않는다 —
+# 그 값들은 옛 저장 형식 호환용이고 슬롯 순서·게이트만 이 계열을 안다. 캡처(비전)에는 쓰지 않는다.
+GEMINI_FAMILY = "gemini"
+try:
+    import gemini_api  # noqa: E402 — hermes-llm-log(_CATALOG_DIR)에 있다. 없으면 Gemini 슬롯만 실패
+except Exception:  # noqa: BLE001
+    gemini_api = None
+
+
+def gemini_ready() -> tuple[bool, str]:
+    """Gemini 슬롯을 부를 수 있는지(모듈·API 키). 추론 호출은 하지 않는다."""
+    if gemini_api is None:
+        return False, "gemini_api 모듈 없음"
+    try:
+        return (True, "api key") if gemini_api.api_key() else (False, "GEMINI_API_KEY 없음")
+    except Exception as e:  # noqa: BLE001
+        return False, f"gemini 키 확인 실패: {e}"
 
 
 def grok_call_model(model=None, fallback=""):
@@ -349,11 +368,13 @@ MAX_SUMMARY_SLOTS = 5
 
 
 def model_family(model: str) -> str:
-    """구체 모델 → 계열 키(opus/gpt/grok). 옛 저장값의 계열 키도 그대로 받는다."""
+    """구체 모델 → 계열 키(opus/gpt/grok/gemini). 옛 저장값의 계열 키도 그대로 받는다."""
     registered = llm_catalog.resolve(model)
-    if registered and registered['provider'] in ('claude', 'codex', 'grok'):
-        return {'claude': 'opus', 'codex': 'gpt', 'grok': 'grok'}[registered['provider']]
+    if registered and registered['provider'] in ('claude', 'codex', 'grok', 'gemini'):
+        return {'claude': 'opus', 'codex': 'gpt', 'grok': 'grok', 'gemini': GEMINI_FAMILY}[registered['provider']]
     m = str(model or "").strip().lower()
+    if m.startswith("gemini"):
+        return GEMINI_FAMILY
     if m.startswith("gpt"):
         return "gpt"
     if m.startswith("grok"):

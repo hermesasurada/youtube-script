@@ -167,13 +167,20 @@ def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
 
     Returns:
         (proceed, mode, detail)
-        mode: "opus" | "gpt" | "grok" | "none"
+        mode: "opus" | "gpt" | "grok" | "gemini" | "none"
     저장된 순서에서 실행 가능한 첫 모델을 고른다. 실제 요청에서는 그 모델부터
     남은 순서를 서버에 전달해 인증·한도 오류까지 순차 폴백한다.
     """
     explicit = model_order is not None
     default = llm_gateway.MODEL_KEYS if explicit else ("opus", "grok")
     order = llm_gateway.normalize_model_order(model_order or default, default=default)
+    if explicit and isinstance(model_order, (list, tuple)):
+        # Gemini(API 키) 계열은 옛 3계열 순번에 없어 normalize가 버린다 — 슬롯에서 온 순서를 앞에 두고
+        # 옛 규칙의 나머지(기본 계열 보충)를 뒤에 잇는다. 옛 계열만 오면 결과는 예전과 같다.
+        keep = llm_gateway.MODEL_KEYS + (llm_gateway.GEMINI_FAMILY,)
+        asked = [k for k in dict.fromkeys(str(x).strip().lower() for x in model_order) if k in keep]
+        if llm_gateway.GEMINI_FAMILY in asked:
+            order = asked + [k for k in order if k not in asked]
     failures = []
     for key in order:
         if key == llm_gateway.NONE_KEY:
@@ -187,6 +194,8 @@ def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
             path = _grok_bin()
             ok = os.path.exists(path) and (explicit or GROK_FALLBACK)
             detail = path if ok else ("GROK_FALLBACK=0" if not explicit else f"grok 없음 ({path})")
+        elif key == llm_gateway.GEMINI_FAMILY:
+            ok, detail = llm_gateway.gemini_ready()
         else:
             continue
         if ok:
