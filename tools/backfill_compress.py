@@ -5,12 +5,17 @@ LLM 재호출 없음. 전사 md 글자수 대비 요약 본문 글자수 비율�
 `<!--SUMMARY_COMPRESS:N-->` 를 주입하고 index.db summary 컬럼을 갱신.
 
 사용:
-  python3 backfill_compress.py           # 전량
-  python3 backfill_compress.py --dry-run # 쓰기 없이 통계만
-  python3 backfill_compress.py --force   # 이미 있는 마커도 재계산
+  python3 tools/backfill_compress.py           # 전량
+  python3 tools/backfill_compress.py --dry-run # 쓰기 없이 통계만
+  python3 tools/backfill_compress.py --force   # 이미 있는 마커도 재계산
 """
 from __future__ import annotations
 
+import sys as _sys
+from pathlib import Path as _Path
+_REPO = _Path(__file__).resolve().parent.parent   # tools/ 위 = 저장소 루트(2026-11-17 이동)
+if str(_REPO) not in _sys.path:
+    _sys.path.insert(0, str(_REPO))
 import argparse
 import os
 import re

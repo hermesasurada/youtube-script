@@ -8,14 +8,19 @@
   - 전사 md + 요약 md 존재
 
 사용:
-  python3 batch_resummarize.py --dry-run          # 대상 목록만
-  python3 batch_resummarize.py                   # 요약 재생성
-  python3 batch_resummarize.py --with-keyframes  # 요약 후 키프레임까지
-  python3 batch_resummarize.py --min-compress 50 --min-duration 600
-  python3 batch_resummarize.py --limit 3
+  python3 tools/batch_resummarize.py --dry-run          # 대상 목록만
+  python3 tools/batch_resummarize.py                   # 요약 재생성
+  python3 tools/batch_resummarize.py --with-keyframes  # 요약 후 키프레임까지
+  python3 tools/batch_resummarize.py --min-compress 50 --min-duration 600
+  python3 tools/batch_resummarize.py --limit 3
 """
 from __future__ import annotations
 
+import sys as _sys
+from pathlib import Path as _Path
+_REPO = _Path(__file__).resolve().parent.parent   # tools/ 위 = 저장소 루트(2026-11-17 이동)
+if str(_REPO) not in _sys.path:
+    _sys.path.insert(0, str(_REPO))
 import argparse
 import json
 import os
@@ -106,7 +111,7 @@ def get_prompt() -> str:
         return r.json().get("prompt") or ""
     except Exception as e:
         log(f"[warn] /prompt 실패: {e}")
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt.txt")
+        p = os.path.join(str(_REPO), "prompt.txt")
         if os.path.isfile(p):
             with open(p, encoding="utf-8") as f:
                 return f.read()
