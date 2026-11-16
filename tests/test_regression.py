@@ -46,13 +46,38 @@ import yt_transcribe
 
 
 
+_DESKTOP_JS = ["index.js", "index-history.js", "index-queue.js", "index-run.js",
+               "index-urlqueue.js", "index-summary.js", "index-boot.js"]
+
+
 def _read_src(root: str, name: str) -> str:
-    """파일 읽기 — 모바일 화면은 2026-11-16부터 html·static/js/mobile.js·static/css/mobile.css 셋을 합쳐 본다."""
+    """파일 읽기 — 모바일 화면은 html·static/js/mobile.js·static/css/mobile.css 셋을, PC 스크립트는 index*.js 전부를 합쳐 본다."""
     text = open(os.path.join(root, name), encoding="utf-8").read()
     if name.replace(os.sep, "/").endswith("templates/mobile.html"):
         for extra in ("static/js/mobile.js", "static/css/mobile.css"):
             text += "\n" + open(os.path.join(root, extra), encoding="utf-8").read()
+    if name.replace(os.sep, "/").endswith("static/js/index.js"):
+        # PC 화면 스크립트는 2026-11-17부터 index.js + index-*.js(템플릿이 읽는 순서)로 나뉘었다.
+        for extra in _DESKTOP_JS[1:]:
+            text += "\n" + open(os.path.join(root, "static/js", extra), encoding="utf-8").read()
     return text
+
+def test_desktop_scripts_load_in_order_with_boot_last():
+    """PC 화면 스크립트는 전역 범위를 함께 쓰는 일반 스크립트라 읽는 순서가 실행 순서다.
+    페이지가 열릴 때 바로 도는 호출(loadHistory 등)은 마지막 파일 index-boot.js에만 둔다."""
+    root = os.path.dirname(os.path.abspath(app.__file__))
+    html = open(os.path.join(root, "templates/index.html"), encoding="utf-8").read()
+    loaded = re.findall(r'<script src="/static/js/(index[a-z-]*\.js)\?v=\{\{ static_v\(\'js/(index[a-z-]*\.js)\'\) \}\}"', html)
+    assert [a for a, b in loaded] == _DESKTOP_JS and all(a == b for a, b in loaded)
+    import glob
+    assert sorted(os.path.basename(p) for p in glob.glob(os.path.join(root, "static/js/index*.js"))) == sorted(_DESKTOP_JS)
+    kicks = ("loadHistory();", "renderQueue();", "_applyReaderFont();", "if (!IS_REMOTE) loadSavedPrompt();")
+    for name in _DESKTOP_JS[:-1]:
+        lines = open(os.path.join(root, "static/js", name), encoding="utf-8").read().split("\n")
+        assert not [l for l in lines if l.startswith(kicks)], name
+    boot = open(os.path.join(root, "static/js/index-boot.js"), encoding="utf-8").read()
+    assert all(k in boot for k in kicks)
+
 
 def _server_src() -> str:
     """서버 코드 전체(app.py + 2026-11-16에 나눈 yt_*·routes_* 모듈) — 문자열 배선 검사용."""
@@ -98,7 +123,7 @@ def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
 def test_summary_popup_sticky_sections_are_wired_for_desktop_and_mobile():
     project = os.path.dirname(os.path.dirname(__file__))
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
-    desktop_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
+    desktop_js = _read_src(project, "static/js/index.js")
     mobile_html = _read_src(project, "templates/mobile.html")
     assert "function setupStickySummarySections(rootEl)" in common_js
     assert ".sum-topic-section>h3{position:sticky" in common_js
@@ -404,7 +429,7 @@ def test_summary_section_edit_replaces_only_that_block(tmp_path, monkeypatch):
 def test_section_editor_is_wired_and_never_reaches_the_blog():
     root = os.path.dirname(app.__file__)
     common = open(os.path.join(root, "static/js/common.js"), encoding="utf-8").read()
-    js = open(os.path.join(root, "static/js/index.js"), encoding="utf-8").read()
+    js = _read_src(root, "static/js/index.js")
     mobile = _read_src(root, "templates/mobile.html")
     assert "splitSummarySections" in common and "attachSectionEditors" in common
     assert "'/summary/section'" in common
@@ -433,7 +458,7 @@ def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
 
 
 def test_publish_button_offers_open_and_update_on_both_surfaces():
-    js = open(os.path.join(os.path.dirname(app.__file__), "static/js/index.js"), encoding="utf-8").read()
+    js = _read_src(os.path.dirname(app.__file__), "static/js/index.js")
     mobile = _read_src(os.path.dirname(app.__file__), "templates/mobile.html")
     common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"), encoding="utf-8").read()
     for src in (js, mobile):
@@ -576,7 +601,7 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     strip = re.search(r"querySelectorAll\('([^']*term-note-x[^']*)'\)[\s\n]*\.?\s*forEach\(b => b\.remove\(\)\)", common_js)
     assert strip, "블로그 내보내기에서 term-note-x 제거 코드를 찾지 못함"
     assert "ensureTermExclusions," in common_js
-    index_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
+    index_js = _read_src(project, "static/js/index.js")
     mobile = _read_src(project, "templates/mobile.html")
     assert index_js.count("YS.ensureTermExclusions(") >= 2      # 요약 뷰어 + 각주 제외 탭
     assert "YS.ensureTermExclusions()" in mobile
@@ -1340,7 +1365,7 @@ def test_blog_original_title_is_idempotent_and_translation_only():
 
     root = os.path.dirname(os.path.dirname(__file__))
     common = open(os.path.join(root, "static", "js", "common.js"), encoding="utf-8").read()
-    desktop = open(os.path.join(root, "static", "js", "index.js"), encoding="utf-8").read()
+    desktop = _read_src(root, "static/js/index.js")
     mobile = _read_src(root, "templates/mobile.html")
     assert "dataset.ysOriginalTitle = '1'" in common
     assert "translatedTitle: _titleKo" in desktop

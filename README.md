@@ -19,7 +19,7 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 | `keyframe_report.py` | 영상 다운로드(yt-dlp) → ffmpeg 프레임 추출 → LLM 비전 분류 → 요약 md에 캡처 스트립 주입 |
 | `templates/` | `index.html`(데스크톱) · `mobile.html`(모바일 이력) |
 | `static/js/common.js` | 공유 모듈(`window.YS`): 마크다운 렌더·이스케이프·이력 API·키프레임 라이트박스 |
-| `static/js/index.js` | 데스크톱 UI 로직(큐·SSE·모달·이력) |
+| `static/js/index.js`, `static/js/index-*.js` | 데스크톱 UI 로직(큐·SSE·모달·이력) — 읽는 순서는 `AGENTS.md` 코드 구조 |
 | `static/css/index.css` | 데스크톱 스타일 |
 | `prompt.txt` | 요약 프롬프트(반드시 `{transcript}` 플레이스홀더 포함) |
 | `humanize_korean.py` | 요약 저장 직전 im-not-ai 결정적 윤문(연결어미 쉼표·`것이다` 등). `HUMANIZE_SUMMARY=0`이면 생략 |
