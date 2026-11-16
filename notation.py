@@ -22,6 +22,7 @@ BRANDS_KO_TO_EN = {
     "브로드컴": "Broadcom", "팔란티어": "Palantir", "코어위브": "CoreWeave",
     "딥마인드": "DeepMind", "챗GPT": "ChatGPT", "챗지피티": "ChatGPT",
     "허깅페이스": "Hugging Face", "로켓랩": "Rocket Lab",
+    "L3해리스": "L3Harris", "L3 해리스": "L3Harris", "엘쓰리해리스": "L3Harris",
 }
 
 # 한글 이름 뒤에 붙어도 되는 말(조사·서술격 등). 이 밖의 한글이 붙으면 다른 낱말의
@@ -52,7 +53,7 @@ _BRAND_RE = _brand_re(BRANDS_KO_TO_EN, _TAIL)
 
 # 영문 이름 → 한국어 발음의 끝소리. 'none'=받침 없음, 'rieul'=ㄹ 받침, 'other'=그 밖의 받침.
 FINAL_SOUND = {
-    "Anthropic": "other", "Amazon": "other", "Palantir": "none", "OpenAI": "none",
+    "L3Harris": "none", "Anthropic": "other", "Amazon": "other", "Palantir": "none", "OpenAI": "none",
     "NVIDIA": "none", "Nvidia": "none", "Tesla": "none", "Meta": "none",
     "Microsoft": "none", "YouTube": "none", "SpaceX": "none", "Netflix": "none",
     "xAI": "none", "Google": "rieul", "Apple": "rieul", "Intel": "rieul",
