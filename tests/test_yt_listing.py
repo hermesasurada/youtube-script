@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 import app
-import channel_monitor
+import cm_detect
 import db
 import yt_listing
 import yt_titles
@@ -59,11 +59,11 @@ def _setup_poll(monkeypatch, tmp_path, listing):
 
     def boom(_):
         raise RuntimeError("404")
-    monkeypatch.setattr(channel_monitor, "db", db)
-    monkeypatch.setattr(channel_monitor, "rss_recent", boom)
-    monkeypatch.setattr(channel_monitor.yt_listing, "channel_videos", listing)
-    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, m: (True, ""))
-    monkeypatch.setattr(channel_monitor, "recheck_deferred", lambda chs, dry=False: 0)
+    monkeypatch.setattr(cm_detect, "db", db)
+    monkeypatch.setattr(cm_detect, "rss_recent", boom)
+    monkeypatch.setattr(yt_listing, "channel_videos", listing)
+    monkeypatch.setattr(cm_detect, "filter_verdict", lambda url, m: (True, ""))
+    monkeypatch.setattr(cm_detect, "recheck_deferred", lambda chs, dry=False: 0)
     monkeypatch.setattr(db, "list_channels", lambda: [db.get_channel(cid)])
 
 
@@ -73,7 +73,7 @@ def _v(y):
 
 def test_poll_falls_back_to_channel_page_without_backfill(monkeypatch, tmp_path):
     _setup_poll(monkeypatch, tmp_path, lambda c: [_v("NEW"), _v("KNOWN"), _v("OLDER")])
-    assert channel_monitor.poll_channels() == 1
+    assert cm_detect.poll_channels() == 1
     ids = {r["yt_id"]: r["status"] for r in db._conn().execute("SELECT yt_id, status FROM watch_queue")}
     assert ids.get("NEW") == "pending" and "OLDER" not in ids
 
@@ -82,7 +82,7 @@ def test_poll_survives_when_both_sources_fail(monkeypatch, tmp_path):
     def boom(_):
         raise RuntimeError("500")
     _setup_poll(monkeypatch, tmp_path, boom)
-    assert channel_monitor.poll_channels() == 0
+    assert cm_detect.poll_channels() == 0
 
 
 def _pending_titles_setup(monkeypatch, saved):

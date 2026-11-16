@@ -36,7 +36,7 @@ def channels_list():
 
 # ── 채널 추가(2026-11-14 사용자 지시 "yt와 xw에 사용자 핸들로 채널을 추가할 수 있는 기능") ──
 # @핸들·youtube.com/@핸들·youtube.com/channel/UC…·UC… 채널 ID를 받는다. 핸들은 채널 페이지에서 채널 ID를 찾고
-# (channel_monitor.resolve_channel_id — 추천 채널 ID를 잘못 잡지 않게 canonical 링크 우선), 이름은 채널 RSS 제목.
+# (cm_detect.resolve_channel_id — 추천 채널 ID를 잘못 잡지 않게 canonical 링크 우선), 이름은 채널 RSS 제목.
 # 새 채널은 자동 수집 켜짐으로 등록되고, 첫 확인 때 지금 피드의 영상은 '본 것'으로만 기록한다(백필 방지 — 모니터 기존 규칙).
 _CHANNEL_ID_RE = re.compile(r"\b(UC[0-9A-Za-z_-]{22})\b")
 _HANDLE_URL_RE = re.compile(r"youtube\.com/@([^/?#\s]+)", re.I)
@@ -78,8 +78,8 @@ def channels_add():
         return yt_core._json({"error": "@핸들, 채널 주소 또는 UC로 시작하는 채널 ID를 넣어 주세요."}, 400)
     if not channel_id:
         try:
-            import channel_monitor
-            channel_id = channel_monitor.resolve_channel_id(handle) or ""
+            import cm_detect
+            channel_id = cm_detect.resolve_channel_id(handle) or ""
         except Exception as e:  # noqa: BLE001
             code = getattr(getattr(e, "response", None), "status_code", None)
             if code == 404:

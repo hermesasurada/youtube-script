@@ -21,543 +21,33 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 import argparse
 import json
 import os
-import re
 import sys
 import time
 import fcntl
-import unicodedata
-import xml.etree.ElementTree as ET
 
 import requests
 
 import db
 import llm_gateway
-import yt_listing
 
-try:
-    import yt_dlp
-except Exception:
-    yt_dlp = None
-
-# ── 설정 ───────────────────────────────────────────────────────────────
-BASE       = os.environ.get("YTS_BASE", "http://127.0.0.1:5001")
-MIN_DUR    = int(os.environ.get("MONITOR_MIN_DURATION", "180"))   # 3분 이하 제외(채널별 오버라이드 가능)
-POLL_SEC   = int(os.environ.get("MONITOR_POLL_SEC", "6"))         # /result 폴링 간격
-MAX_JOB_SEC = int(os.environ.get("MONITOR_MAX_JOB_SEC", "18000"))  # 건당 전사 상한(5h) — 4시간대 장편(Acquired 등) 수용
-SUMM_TIMEOUT = int(os.environ.get("MONITOR_SUMM_TIMEOUT", "1800"))  # 요약 재요청까지 고려해 30분 대기
-KF_TIMEOUT   = int(os.environ.get("MONITOR_KF_TIMEOUT", "1800"))
-# 403 차단은 저녁 시간대(15~23시)에 몰리는 경우가 있어 3회보다 넉넉한
-# 5회 예산을 둔다. 짧은 일시 장애는 20분 간격으로 빠르게 따라잡는다.
-MAX_PIPELINE_ATTEMPTS = int(os.environ.get("MONITOR_MAX_PIPELINE_ATTEMPTS", "5"))
-# 파이프라인 실패 재시도 간격 — 처리 주기와 같은 20분 고정.
-# 예산 5회 × 20분이라 짧은 일시 장애는 빠르게 따라잡고, 저녁 차단
-# 구간(15~23시)을 통째로 건너뛰지는 못한다. 대신 회복이 빠른 일시 장애를
-# 빨리 따라잡고, 구간을 넘겨야 하는 건은 실패 후 수동 재처리한다.
-RETRY_BASE_SEC = int(os.environ.get("MONITOR_RETRY_BASE_SEC", "1200"))
-
-
-def _retry_delay(attempt: int) -> int:
-    """다음 재시도까지 대기 초 — 시도 횟수와 무관하게 일정하다."""
-    return RETRY_BASE_SEC
-LOCK_PATH  = os.environ.get("MONITOR_LOCK", os.path.expanduser("~/.hermes/youtube-monitor.lock"))
-OUTBOX     = os.environ.get("MONITOR_OUTBOX", os.path.expanduser("~/.hermes/youtube-monitor.outbox"))
-ENV_PATH   = os.path.expanduser("~/.hermes/youtube-monitor.env")
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
-
-
-def _load_env(path: str) -> None:
-    """~/.hermes/youtube-monitor.env(KEY=VALUE)를 os.environ에 로드(기존값 우선)."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
-    except FileNotFoundError:
-        pass
-
-
-_load_env(ENV_PATH)
-TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TG_CHAT  = os.environ.get("TELEGRAM_CHAT_ID", "")
+import cm_base
+import cm_detect
+import cm_health
+import cm_notify
 
 
 def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-# ── 요약 경로 가용성 가드 ───────────────────────────────────────────────
-# 서버(app.py) 요약: Claude primary → Grok 폴백(GROK_FALLBACK).
-# 예전에는 Claude 헬스만 보고 큐 전체를 막아 Grok 폴백이 의미 없었음.
-# 게이트는 "요약 가능한 경로가 하나라도 있으면 진행"으로 본다.
-class ClaudeUnavailable(Exception):
-    """사용량 한도/인증/장애 등 LLM 요약 경로 전부 실패 — 큐 정지 후 다음 주기 재시도 대상."""
-
-
-# 사용량 한도·인증·서버장애 등 '재시도하면 나아질' systemic 신호 패턴
-_SYSTEMIC = re.compile(
-    # 주의: 403/500/503은 yt-dlp/ffmpeg의 HTTP 오류(봇차단 등)와 겹쳐 오판하므로 제외.
-    r"usage limit|session limit|rate.?limit|too many requests|\b429\b|\b401\b|\b529\b"
-    r"|authenticat|unauthor|credit balance|quota|exceeded|overloaded|api error"
-    r"|사용 한도|세션 한도|한도 초과|인증",
-    re.I,
-)
-
-# app.py 와 동일 기본값 (env로 맞춤)
-GROK_FALLBACK = os.environ.get("GROK_FALLBACK", "1") != "0"
-
-
-def _is_systemic(msg: str) -> bool:
-    return bool(_SYSTEMIC.search(msg or ""))
-
-
-def _claude_bin() -> str:
-    return llm_gateway.resolve_claude_bin()
-
-
-def _grok_bin() -> str:
-    return llm_gateway.resolve_grok_bin()
-
-
-def _gpt_bin() -> str:
-    return llm_gateway.resolve_codex_bin()
-
-
-def claude_healthy() -> tuple[bool, str]:
-    """저가 프로브로 Claude CLI 가용성 확인. (정상?, 사유)."""
-    try:
-        r = llm_gateway.run_command(
-            [_claude_bin(), "-p", "--model", "haiku", "reply with: ok"],
-            timeout=90,
-        )
-    except Exception as e:
-        return False, f"claude 실행 오류: {e}"
-    if r.timed_out:
-        return False, "헬스체크 타임아웃(90s)"
-    out = r.stdout.strip()
-    err = r.stderr.strip()
-    # stdin 경고 등은 노이즈
-    err = re.sub(r"Warning: no stdin data received.*?(?:\n|$)", "", err, flags=re.I).strip()
-    blob = (out + " " + err).strip()
-    if r.returncode != 0 or not out or _is_systemic(blob):
-        return False, (blob or f"rc={r.returncode}")[:200]
-    return True, ""
-
-
-def grok_fallback_ready() -> tuple[bool, str]:
-    """app.py 요약 Grok 폴백을 시도할 수 있는지(바이너리 존재 + 플래그). 실제 호출은 안 함."""
-    if not GROK_FALLBACK:
-        return False, "GROK_FALLBACK=0"
-    b = _grok_bin()
-    if not os.path.exists(b):
-        return False, f"grok 없음 ({b})"
-    return True, b
-
-
-def summarizer_gate(model_order=None) -> tuple[bool, str, str]:
-    """큐 drain 진입 게이트.
-
-    Returns:
-        (proceed, mode, detail)
-        mode: "opus" | "gpt" | "grok" | "gemini" | "none"
-    저장된 순서에서 실행 가능한 첫 모델을 고른다. 실제 요청에서는 그 모델부터
-    남은 순서를 서버에 전달해 인증·한도 오류까지 순차 폴백한다.
-    """
-    explicit = model_order is not None
-    default = llm_gateway.MODEL_KEYS if explicit else ("opus", "grok")
-    order = llm_gateway.normalize_model_order(model_order or default, default=default)
-    if explicit and isinstance(model_order, (list, tuple)):
-        # Gemini(API 키) 계열은 옛 3계열 순번에 없어 normalize가 버린다 — 슬롯에서 온 순서를 앞에 두고
-        # 옛 규칙의 나머지(기본 계열 보충)를 뒤에 잇는다. 옛 계열만 오면 결과는 예전과 같다.
-        keep = llm_gateway.MODEL_KEYS + (llm_gateway.GEMINI_FAMILY,)
-        asked = [k for k in dict.fromkeys(str(x).strip().lower() for x in model_order) if k in keep]
-        if llm_gateway.GEMINI_FAMILY in asked:
-            order = asked + [k for k in order if k not in asked]
-    failures = []
-    for key in order:
-        if key == llm_gateway.NONE_KEY:
-            break
-        if key == "opus":
-            ok, detail = claude_healthy()
-        elif key == "gpt":
-            path = _gpt_bin()
-            ok, detail = os.path.exists(path), path
-        elif key == "grok":
-            path = _grok_bin()
-            ok = os.path.exists(path) and (explicit or GROK_FALLBACK)
-            detail = path if ok else ("GROK_FALLBACK=0" if not explicit else f"grok 없음 ({path})")
-        elif key == llm_gateway.GEMINI_FAMILY:
-            ok, detail = llm_gateway.gemini_ready()
-        else:
-            continue
-        if ok:
-            return True, key, ("; ".join(failures) if failures else "")
-        failures.append(f"{key}: {detail}")
-    return False, "none", "; ".join(failures)
-
-
-def _notify_head(v: dict, title: str) -> str:
-    """알림 상단 블록: 채널명이 있으면 '📺 채널명\\n제목', 없으면 제목만."""
-    chan = db.channel_name_by_cid(v.get("channel_id"))
-    return f"📺 {chan}\n{title}" if chan else title
-
-
-def notify(text: str) -> None:
-    """알림 적재 — launchd 로그(stdout) + 아웃박스(hermes 크론 shim이 --announce로 stdout 배달).
-
-    무거운 폴/드레인은 launchd가, 알림 배달은 hermes 크론이 담당(중앙 텔레그램, 토큰 불필요).
-    자격증명이 직접 설정돼 있으면(youtube-monitor.env) 텔레그램 직발송도 병행(옵션).
-    """
-    log(text)
-    try:
-        os.makedirs(os.path.dirname(OUTBOX), exist_ok=True)
-        with open(OUTBOX, "a", encoding="utf-8") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            f.write(text.rstrip() + "\n\n")
-            fcntl.flock(f, fcntl.LOCK_UN)
-    except Exception as e:
-        log(f"[notify] 아웃박스 기록 실패: {e}")
-    if TG_TOKEN and TG_CHAT:   # 선택: 직접 발송(기본 경로는 hermes 크론)
-        try:
-            requests.post(
-                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                json={"chat_id": TG_CHAT, "text": text, "disable_web_page_preview": True},
-                timeout=15,
-            )
-        except Exception as e:
-            log(f"[notify] telegram 실패: {e}")
-
-
-def announce() -> int:
-    """아웃박스에 쌓인 알림을 stdout으로 출력(→ hermes 크론이 텔레그램 배달) 후 비운다.
-
-    hermes 크론 shim에서 `--announce`로 호출. 새 알림이 없으면 무음(아무것도 출력 안 함).
-    launchd 드레이너의 append와 flock으로 경쟁 안전.
-    """
-    try:
-        f = open(OUTBOX, "a+", encoding="utf-8")
-    except OSError:
-        return 0
-    with f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0)
-        content = f.read().strip()
-        f.seek(0)
-        f.truncate()
-        fcntl.flock(f, fcntl.LOCK_UN)
-    if content:
-        print(content, flush=True)   # 이 stdout만 텔레그램으로 배달됨
-    return 1 if content else 0
-
-
-# ── YouTube 감지 ───────────────────────────────────────────────────────
-def resolve_channel_id(handle: str) -> str | None:
-    """@handle → 채널ID(UC...). 페이지 '자신의' 채널을 canonical/og:url/externalId 순으로 추출.
-
-    주의: 채널 페이지 HTML엔 추천·featured 채널의 channelId가 먼저 등장할 수 있어,
-    단순 첫 channelId 매칭은 엉뚱한 채널을 잡는다. canonical 링크가 그 페이지의 채널이라 우선.
-    """
-    handle = "".join(c for c in handle.strip().lstrip("@")
-                     if unicodedata.category(c) != "Cf")  # 방향성/포맷 제어문자 제거
-    url = f"https://www.youtube.com/@{handle}"
-    r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "en"}, timeout=20)
-    r.raise_for_status()
-    for pat in (r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[0-9A-Za-z_-]{22})"',
-                r'<meta property="og:url" content="https://www\.youtube\.com/channel/(UC[0-9A-Za-z_-]{22})"',
-                r'"externalId":"(UC[0-9A-Za-z_-]{22})"'):
-        m = re.search(pat, r.text)
-        if m:
-            return m.group(1)
-    return None
-
-
-def rss_recent(channel_id: str) -> list[dict]:
-    """채널 RSS → 최근 업로드[{yt_id,title,url,published}] (최신순, ~15건)."""
-    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
-    r.raise_for_status()
-    ns = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
-    out = []
-    for e in ET.fromstring(r.text).findall("a:entry", ns):
-        vid = e.findtext("yt:videoId", default="", namespaces=ns)
-        if not vid:
-            continue
-        out.append({
-            "yt_id": vid,
-            "title": e.findtext("a:title", default="", namespaces=ns),
-            "url": f"https://www.youtube.com/watch?v={vid}",
-            "published": e.findtext("a:published", default="", namespaces=ns),
-        })
-    return out
-
-
-# 광고 영상(2026-10-24 사용자 지시, #1638 집코노미 '… | 흥청망청 [AD]'): 제목의 광고 표기 태그만 보고 건너뛴다.
-# 대괄호·소괄호로 감싼 AD·광고·유료광고·Sponsored와 해시태그 #광고만 — 'ADR'·'AD램' 같은 낱말은 태그가 아니라 남는다.
-_AD_TITLE_RE = re.compile(r"[\[(（【]\s*(?:AD|Ad|ad|광고|유료\s*광고|sponsored)\s*[\])）】]|#광고(?![가-힣])", re.I)
-
-
-def is_ad_title(title: str) -> bool:
-    return bool(_AD_TITLE_RE.search(title or ""))
-
-
-def filter_verdict(url: str, min_dur: int = MIN_DUR, *, allow_live: bool = False) -> tuple[bool, str]:
-    """메타 확인 후 (처리해도 되는가, 사유). yt-dlp로 길이/라이브 판별.
-
-    min_dur: 이 채널의 최소 길이(초). 0이면 길이 제한 면제.
-    라이브는 자동 감지분이면 건너뛴다(2026-11-03 사용자 지시 — 예정·진행·끝난 다시보기 모두,
-    사유 'live_skip:…'로 확정 제외). allow_live=True(수동 등록분)면 예전처럼 방송이 끝나기를 기다린다.
-    프리미어(미리 올린 영상의 첫 공개)는 라이브가 아니다 — 공개 전엔 기다리고 공개 뒤 처리한다.
-    """
-    if "/shorts/" in url:
-        return False, "shorts"
-    if yt_dlp is None:
-        return True, ""   # 메타 불가 시 통과(다운로드 단계서 재검)
-    try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        # 방송 전 라이브는 live_status 대신 예외로 온다('This live event will begin in N hours')
-        if not allow_live and _LIVE_EVENT_RE.search(str(e)):
-            return False, f"live_skip:upcoming {e}"[:80]
-        return False, f"meta_error:{e}"[:80]
-    live = info.get("live_status")
-    if not allow_live and live in ("is_live", "post_live", "was_live"):
-        return False, f"live_skip:{live}"      # 라이브는 진행 중이든 끝났든 건너뛴다
-    if live in ("is_live", "is_upcoming"):
-        return False, f"live:{live}"           # 예정(프리미어일 수 있음)·수동 라이브는 끝나기를 기다린다
-    dur = float(info.get("duration") or 0)
-    if min_dur and dur and dur <= min_dur:
-        return False, f"short:{int(dur)}s"      # 최소 길이 이하 제외(min_dur=0이면 면제)
-    return True, ""
-
-
-# 메타 조회 실패 분류 — 다시 물어봐도 답이 같은 '영구 사유'와 '일시 장애'를 가른다.
-# (영구 사유에 재시도 예산을 쓰면 yt-dlp 호출만 낭비하고 큐가 failed로 오염된다.
-#  실제로 멤버십 전용·삭제 영상 21건이 각 8회씩 재시도된 뒤 failed로 쌓인 적이 있다.)
-_META_TRANSIENT_RE = re.compile(
-    r"timed?\s?out|timeout|connection|network|temporar|"
-    r"too many requests|http error (?:429|5\d\d)|"
-    r"unable to (?:download|connect|open)|read error|remote end closed|"
-    r"getaddrinfo|ssl|handshake",
-    re.I,
-)
-_META_PERMANENT_RE = re.compile(
-    r"available to this channel|members[- ]only|join this channel|"      # 멤버십 전용
-    r"has been removed|removed by the uploader|video unavailable|"        # 삭제
-    r"private video|is private|"                                         # 비공개
-    r"account associated with this video has been terminated|"           # 계정 정지
-    r"copyright|"
-    r"sign in to confirm your age|age[- ]restricted|inappropriate|"      # 로그인 필요
-    r"not available in your country|blocked it in your country|"         # 지역 차단
-    r"does not exist|no longer available|"
-    r"음성 없는 영상",                                                    # 두 언어 모두 백지(app._finish_transcription)
-    re.I,
-)
-
-
-# 다운로드 단계에서야 드러나는 '아직 방송 전' 신호(수동 추가 건은 사전 메타 확인이 없다)
-_LIVE_PENDING_RE = re.compile(
-    r"Premieres in|live event will begin|This live event|is upcoming|Scheduled for", re.I)
-# 그중 라이브 방송(프리미어가 아님)이 확실한 문구 — 자동 감지분은 건너뛴다(2026-11-03 사용자 지시)
-_LIVE_EVENT_RE = re.compile(r"live event will begin|This live event", re.I)
-# 서버(yt 앱)가 재시작돼 진행 중이던 작업이 사라진 신호. 영상 탓이 아니라 몇 번을
-# 겪어도 문구가 같으므로 '동일 실패 반복' 판정에서 뺀다 — 재시도 예산(5회)은 그대로
-# 쓴다(2026-09-23: 긴 재전사 도중 배포 재시작에 세 번 걸려 skipped로 굳었다).
-_SERVER_RESTART_RE = re.compile(
-    r"잡 소실\(서버 재시작\)|Connection aborted|RemoteDisconnected|Connection refused"
-    r"|Max retries exceeded")
-
-
-def _defer_policy(reason: str) -> tuple[bool, int, int, str]:
-    """Return retryable, delay seconds, max checks, normalized error kind."""
-    if reason.startswith("live_skip:"):
-        return False, 0, 0, "live_skipped"     # 자동 감지 라이브는 확정 제외(2026-11-03 사용자 지시)
-    if reason.startswith("live:is_upcoming"):
-        return True, 3600, 48, "live_upcoming"
-    if reason.startswith("live:is_live"):
-        return True, 1800, 48, "live_active"
-    if reason.startswith("meta_error:"):
-        body = reason.split(":", 1)[1]
-        # yt-dlp는 방송 전 라이브·프리미어를 live_status 대신 예외('This live event will begin in N hours')로
-        # 알린다 — 메타 오류가 아니라 라이브 예정이다. 미상(3회)으로 두면 방송 전에 failed로 굳는다
-        # (2026-11-02 Rocket Lab 'The Sea God Surveys' Launch: 30분 간격 3회 만에 failed).
-        if _LIVE_PENDING_RE.search(body):
-            return True, 3600, 48, "live_upcoming"
-        # 일시 장애를 먼저 본다 — "temporarily unavailable"이 영구 패턴에 걸리지 않도록
-        if _META_TRANSIENT_RE.search(body):
-            return True, 1800, 6, "metadata_transient"
-        if _META_PERMANENT_RE.search(body):
-            return False, 0, 0, "metadata_permanent"
-        return True, 1800, 3, "metadata_unknown"   # 미상은 짧게만 재확인(폭주 방지)
-    return False, 0, 0, "filter_permanent"
-
-
-def recheck_deferred(channels: list[dict], *, dry: bool = False) -> int:
-    """Re-evaluate due live/metadata/pipeline retries and activate ready videos."""
-    by_channel = {row["channel_id"]: row for row in channels}
-    activated = 0
-    for item in db.queue_due_deferred():
-        channel = by_channel.get(item.get("channel_id"))
-        if channel is not None and not channel.get("enabled"):
-            # 채널을 끄면 신규 감지만 멈추는 게 아니라 대기분도 정리한다 — 조용히
-            # 건너뛰면 항목이 영원히 deferred로 남는다(실례: NVIDIA Developer OFF 후
-            # 라이브 예정 건이 6일간 잔류). 다시 처리하려면 큐 팝업에서 재등록하면 된다.
-            log(f"[deferred] 채널 비활성 → 정리: {item['title'][:50]}")
-            if not dry:
-                db.queue_set_status(item["id"], "skipped", "채널 비활성(대기 중 정리)")
-            continue
-        # 수동 등록분은 이력이 있어도 취소하지 않는다 — 재처리(손실 복구·모델 교체)를
-        # 노리고 넣은 것이라 '이미 있음'이 곧 스킵 사유가 될 수 없다. 자동 감지분만
-        # 중복으로 정리한다(2026-08-27: 재처리 802초 손실 건이 이 경로로 취소됨).
-        #
-        # 단, 이력이 '전사만 있고 요약이 빈' 반쪽이면 중복이 아니라 미완성이다 —
-        # 요약 SSE가 타임아웃(SUMM_TIMEOUT)으로 끊기면 전사 파일만 남는데, 이때
-        # 중복으로 정리해 버리면 요약이 영영 생기지 않는다(2026-09-13 Qualcomm
-        # 47분 영상: read timeout 900s → 다음 틱에서 '이미 처리된 이력 확인'으로 done).
-        if item.get("channel_id") != "manual" and db.find_by_yt_id(item["yt_id"]):
-            if db.has_summary_for_yt_id(item["yt_id"]):
-                if not dry:
-                    db.queue_set_status(item["id"], "done", "이미 처리된 이력 확인")
-                continue
-            log(f"[deferred] 이력에 요약이 없음(전사만) → 재처리: {item['title'][:50]}")
-
-        # 파이프라인 일시 실패는 메타가 정상인지 다시 확인한 뒤 pending으로 복귀한다.
-        min_duration = (
-            channel.get("min_duration")
-            if channel and channel.get("min_duration") is not None
-            else MIN_DUR
-        )
-        ok, reason = filter_verdict(item["url"], min_duration,
-                                    allow_live=item.get("channel_id") == "manual")
-        if ok:
-            log(f"[deferred] 재처리 가능 → pending: {item['title'][:50]}")
-            if not dry:
-                reset_attempts = str(item.get("error_kind") or "").startswith(("metadata", "live"))
-                db.queue_activate(item["id"], reset_attempts=reset_attempts)
-            activated += 1
-            continue
-
-        retryable, delay, max_attempts, error_kind = _defer_policy(reason)
-        if retryable:
-            # 메타 오류(403·네트워크 등)는 재시도할수록 간격을 벌린다. 라이브 재확인은
-            # '방송이 끝났나' 주기 확인이라 백오프 없이 고정 간격을 유지한다.
-            if error_kind.startswith("metadata"):
-                delay = max(delay, _retry_delay(item.get("attempt_count")))
-            log(f"[deferred] 재확인 대기 [{reason}]: {item['title'][:50]}")
-            if not dry:
-                db.queue_defer(
-                    item["id"], reason, error_kind=error_kind,
-                    retry_after_seconds=delay, increment_attempt=True,
-                    max_attempts=max_attempts,
-                )
-        else:
-            log(f"[deferred] 확정 제외 [{reason}]: {item['title'][:50]}")
-            if not dry:
-                db.queue_set_status(item["id"], "skipped", reason)
-    return activated
-
-
-# ── 폴링(감지 → 큐 적재) ───────────────────────────────────────────────
-def _parse_ts(stamp) -> datetime | None:
-    """RSS published·channels.resumed_at(ISO, 시간대 포함) → aware datetime. 실패면 None."""
-    if not stamp:
-        return None
-    try:
-        dt = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def poll_channels(dry: bool = False) -> int:
-    """활성 채널 폴 → 신규 pending 적재. 새로 pending에 넣은 건수 반환."""
-    channels = db.list_channels()
-    queued = recheck_deferred(channels, dry=dry)
-    for ch in channels:
-        if not ch["enabled"]:
-            continue
-        cid, title = ch["channel_id"], ch["title"] or ch["handle"] or ch["channel_id"]
-        fallback = False
-        try:
-            vids = rss_recent(cid)
-        except Exception as e:
-            # YouTube RSS 서버는 채널과 무관하게 404/500을 자주 낸다 → 채널 페이지로 대신 읽는다
-            try:
-                vids, fallback = yt_listing.channel_videos(cid), True
-                if not vids:
-                    raise ValueError("빈 목록")
-            except Exception as e2:
-                log(f"[poll] {title}: 수집 실패 RSS {e} / 채널 페이지 {e2}")
-                continue
-
-        # 최초 폴: 현재 피드를 baseline(seen)로만 기록 → 이후 신규만 처리
-        if not ch["baseline_done"]:
-            log(f"[poll] {title}: baseline {len(vids)}건 seen 처리(백필 방지)")
-            if not dry:
-                for v in vids:
-                    if not db.find_by_yt_id(v["yt_id"]):
-                        db.enqueue_video(v["yt_id"], v["url"], v["title"], cid,
-                                         status="skipped", reason="baseline")
-                db.set_channel_baseline(ch["id"])
-                db.mark_channel_checked(ch["id"])
-            continue
-
-        if fallback:
-            vids = yt_listing.until_known(
-                vids, lambda yid: bool(db.find_by_yt_id(yid) or db.in_queue(yid)))
-        new_for_ch = 0
-        resumed = _parse_ts(ch.get("resumed_at"))
-        for v in vids:
-            if db.find_by_yt_id(v["yt_id"]) or db.in_queue(v["yt_id"]):
-                continue                          # 이미 전사됨 / 이미 큐에 있음
-            # 자동수집을 껐다 다시 켰으면 켜기 전에 올라온 영상(꺼진 동안 쌓인 것)은
-            # 처리하지 않는다(2026-11-01 사용자 지시). 필요하면 큐 팝업에서 직접 넣는다.
-            pub = _parse_ts(v.get("published"))
-            if resumed and pub and pub < resumed:
-                log(f"[poll] {title}: 제외 [재개 전] {v['title'][:40]}")
-                if not dry:
-                    db.enqueue_video(v["yt_id"], v["url"], v["title"], cid,
-                                     status="skipped", reason="수집 재개 전 영상")
-                continue
-            if is_ad_title(v["title"]):
-                log(f"[poll] {title}: 제외 [ad] {v['title'][:40]}")
-                if not dry:
-                    db.enqueue_video(v["yt_id"], v["url"], v["title"], cid, status="skipped", reason="ad")
-                continue
-            cmin = ch["min_duration"] if ch["min_duration"] is not None else MIN_DUR
-            ok, reason = filter_verdict(v["url"], cmin)
-            if not ok:
-                log(f"[poll] {title}: 제외 [{reason}] {v['title'][:40]}")
-                if not dry:
-                    retryable, delay, _, error_kind = _defer_policy(reason)
-                    db.enqueue_video(
-                        v["yt_id"], v["url"], v["title"], cid,
-                        status="deferred" if retryable else "skipped",
-                        reason=reason,
-                        retry_after_seconds=delay if retryable else None,
-                        error_kind=error_kind,
-                    )
-                continue
-            log(f"[poll] {title}: 신규 → 큐 {v['title'][:40]}")
-            if not dry:
-                db.enqueue_video(v["yt_id"], v["url"], v["title"], cid, status="pending")
-            queued += 1
-            new_for_ch += 1
-        if not dry:
-            db.mark_channel_checked(ch["id"])
-    return queued
-
-
 # ── 처리(파이프라인 = 서버 HTTP 재사용) ────────────────────────────────
 def _get_prompt() -> str:
     try:
-        return requests.get(f"{BASE}/prompt", timeout=15).json().get("prompt", "")
+        return requests.get(f"{cm_base.BASE}/prompt", timeout=15).json().get("prompt", "")
     except Exception:
         return ""
 
@@ -588,16 +78,16 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
         payload = {"source": "url", "url": url}
         if v.get("start_sec"):
             payload["start_sec"] = int(v["start_sec"])   # 구간 전사(시작 시각 지정)
-        r = requests.post(f"{BASE}/start", json=payload, timeout=30).json()
+        r = requests.post(f"{cm_base.BASE}/start", json=payload, timeout=30).json()
         job_id = r.get("job_id")
         if not job_id:
             raise RuntimeError(r.get("error", "start 실패"))
 
         txt_path = None
-        deadline = time.time() + MAX_JOB_SEC
+        deadline = time.time() + cm_base.MAX_JOB_SEC
         while time.time() < deadline:
-            time.sleep(POLL_SEC)
-            res = requests.get(f"{BASE}/result/{job_id}", timeout=30).json()
+            time.sleep(cm_base.POLL_SEC)
+            res = requests.get(f"{cm_base.BASE}/result/{job_id}", timeout=30).json()
             # 서버가 재시작되면 잡 상태가 소실돼 404("Not found")가 온다 — status가
             # 영영 안 나오므로 여기서 끊지 않으면 MAX_JOB_SEC(5h)까지 헛폴링한다.
             if res.get("error") == "Not found":
@@ -630,8 +120,8 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
     elif skip_claude:
         sum_body["skip_claude"] = True
         sum_body["mode"] = "grok"
-    with requests.post(f"{BASE}/summarize", json=sum_body,
-                       stream=True, timeout=(30, SUMM_TIMEOUT)) as sr:
+    with requests.post(f"{cm_base.BASE}/summarize", json=sum_body,
+                       stream=True, timeout=(30, cm_base.SUMM_TIMEOUT)) as sr:
         sr.raise_for_status()
         for raw in sr.iter_lines(decode_unicode=True):
             if not raw:
@@ -648,8 +138,8 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
                 await_err = False
     if summary_err:
         # 모든 지정 모델이 소진됐거나 systemic 장애면 큐를 멈추고 다음 주기에 재시도한다.
-        if "모든 요약 모델 실패" in str(summary_err) or _is_systemic(str(summary_err)):
-            raise ClaudeUnavailable(f"요약: {summary_err}")
+        if "모든 요약 모델 실패" in str(summary_err) or cm_health._is_systemic(str(summary_err)):
+            raise cm_health.ClaudeUnavailable(f"요약: {summary_err}")
         raise RuntimeError(f"요약 실패: {summary_err}")
 
     # 캡처(동기) — 요약은 이미 저장됨. 실패해도 항목은 완료(요약이 본체), systemic 여부만 표시
@@ -666,15 +156,15 @@ def process_video(v: dict, prompt: str, *, skip_claude: bool = False,
         elif skip_claude:
             kf_body["skip_claude"] = True
             kf_body["mode"] = "grok"
-        kf = requests.post(f"{BASE}/keyframes", json=kf_body, timeout=KF_TIMEOUT).json()
+        kf = requests.post(f"{cm_base.BASE}/keyframes", json=kf_body, timeout=cm_base.KF_TIMEOUT).json()
         if not kf.get("ok"):
             kf_note = str(kf.get("reason") or "실패")
             emsg = str(kf.get("error") or "")
             # 비전 호출 실패 + 한도 신호일 때만 systemic (다운로드 403 등과 구분)
-            kf_systemic = kf_note == "vision_failed" and _is_systemic(emsg)
+            kf_systemic = kf_note == "vision_failed" and cm_health._is_systemic(emsg)
             # 멤버십 전용 전환·삭제·비공개는 다시 받아도 결과가 같다 → 재시도 대상에서 제외.
             # (수집 당시엔 공개였다가 나중에 멤버십으로 돌리는 채널이 있어 캡처만 실패한다)
-            kf_permanent = bool(_META_PERMANENT_RE.search(emsg))
+            kf_permanent = bool(cm_detect._META_PERMANENT_RE.search(emsg))
             if kf_permanent:
                 log(f"[kf] 캡처 불가(영구 사유, 재시도 안 함): {emsg[:110]}")
             else:
@@ -694,7 +184,7 @@ def process_capture_only(txt_path: str, url: str, *, capture_models=None) -> dic
     body = {"txt_path": txt_path, "url": url}
     if capture_models is not None:
         body["models"] = list(capture_models)
-    return requests.post(f"{BASE}/keyframes", json=body, timeout=KF_TIMEOUT).json()
+    return requests.post(f"{cm_base.BASE}/keyframes", json=body, timeout=cm_base.KF_TIMEOUT).json()
 
 
 def drain() -> None:
@@ -741,7 +231,7 @@ def _drain_kf_retry_one() -> None:
     if not v:
         return
     title = v["title"] or v["yt_id"]
-    head = _notify_head(v, title)
+    head = cm_notify._notify_head(v, title)
     txt_path = v.get("txt_path")
     if not txt_path:
         db.queue_set_status(v["id"], "done", reason="캡처 재시도 불가(전사경로 없음)")
@@ -759,24 +249,24 @@ def _drain_kf_retry_one() -> None:
         kf = process_capture_only(txt_path, v["url"])
         if kf.get("ok"):
             db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
-            notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
+            cm_notify.notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
             log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
         else:
             rz = str(kf.get("reason") or "실패")
             emsg = str(kf.get("error") or "")
             # 재시도 사이에 멤버십 전용으로 바뀌었을 수 있다 — 사유를 구분해 알린다
-            if _META_PERMANENT_RE.search(emsg):
+            if cm_detect._META_PERMANENT_RE.search(emsg):
                 db.queue_set_status(v["id"], "done", reason="캡처 불가(멤버십/비공개 전환)")
                 log(f"[kf-retry] 캡처 불가(영구 사유): {emsg[:110]}")
-                notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
+                cm_notify.notify(f"ℹ️ 캡처 불가 — 멤버십/비공개 전환된 영상\n{head}\n{v['url']}")
             else:
                 db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 실패(포기): {rz}")
                 log(f"[kf-retry] 재시도 실패 → 캡처 포기: {rz} {emsg[:120]}")
-                notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
+                cm_notify.notify(f"⚠️ 캡처 재시도 실패(포기)\n{head}\n{rz}\n{v['url']}")
     except Exception as e:
         db.queue_set_status(v["id"], "done", reason=f"캡처 재시도 오류(포기): {str(e)[:80]}")
         log(f"[kf-retry] 재시도 오류 → 캡처 포기: {e}")
-        notify(f"⚠️ 캡처 재시도 오류(포기)\n{head}\n{e}\n{v['url']}")
+        cm_notify.notify(f"⚠️ 캡처 재시도 오류(포기)\n{head}\n{e}\n{v['url']}")
     return
 
 
@@ -786,7 +276,7 @@ def _drain_main_one() -> None:
     if not v:
         return
     title = v["title"] or v["yt_id"]
-    head = _notify_head(v, title)
+    head = cm_notify._notify_head(v, title)
     summary_round = db.reserve_monitor_summary_slots()
     slots = summary_round["slots"]
     primary = slots[0]["model"]
@@ -797,17 +287,17 @@ def _drain_main_one() -> None:
         fam = llm_gateway.model_family(slot["model"])
         if fam not in families:
             families.append(fam)
-    proceed, mode, detail = summarizer_gate(families)
+    proceed, mode, detail = cm_health.summarizer_gate(families)
     if not proceed:
         # 요약 경로가 없으면 시도 자체를 안 한 것 — 예산을 태우지 않고 되돌린다.
         db.queue_unclaim(v["id"])
-        notify("⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
+        cm_notify.notify("⛔ 요약 경로 없음 — 자동 처리 보류(다음 주기 재시도)\n"
                f"사유: {detail}")
         return
     start = next(i for i, x in enumerate(slots) if llm_gateway.model_family(x["model"]) == mode)
     active_slots = slots[start:]
     if detail:
-        notify(f"⚠️ 이번 요약 순번 {primary} 사용 불가 — "
+        cm_notify.notify(f"⚠️ 이번 요약 순번 {primary} 사용 불가 — "
                f"{active_slots[0]['model']}부터 순환 폴백\n{detail}")
 
     log(f"[drain] 처리 시작: {title} (round={primary}, start={active_slots[0]['model']})")
@@ -830,36 +320,36 @@ def _drain_main_one() -> None:
                      and not res.get("kf_permanent"))
         if retryable and res.get("txt_path"):
             db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
-            notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
+            cm_notify.notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
             log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
         else:
             db.queue_set_status(v["id"], "done")
             suffix = "(캡처 실패)" if kf_note else ("(캡처 제외)" if res.get("kf_skipped") else "")
-            notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
-    except ClaudeUnavailable as e:
+            cm_notify.notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
+    except cm_health.ClaudeUnavailable as e:
         # 지정된 요약 모델이 모두 실패한 경우(폴백까지 소진)
         db.queue_defer(
             v["id"], "요약 경로 재시도 대기", error_kind="llm_unavailable",
-            retry_after_seconds=_retry_delay(v.get("attempt_count")),
-            max_attempts=MAX_PIPELINE_ATTEMPTS,
+            retry_after_seconds=cm_base._retry_delay(v.get("attempt_count")),
+            max_attempts=cm_base.MAX_PIPELINE_ATTEMPTS,
         )
-        notify(f"⛔ 요약 실패(모든 폴백 소진) — 다음 주기 재시도\n{head}\n{e}")
+        cm_notify.notify(f"⛔ 요약 실패(모든 폴백 소진) — 다음 주기 재시도\n{head}\n{e}")
     except Exception as e:
         reason = str(e)[:160]
         # 라이브·프리미어 예정은 실패가 아니다 — 재시도 예산을 태우지 않고
         # 방송 시작을 기다리는 라이브 재확인 경로로 보낸다(사용자 알림도 구분).
         # 자동 감지분이 그사이 라이브로 확인되면 기다리지 않고 건너뛴다(2026-11-03 사용자 지시)
-        if v.get("channel_id") != "manual" and _LIVE_EVENT_RE.search(reason):
+        if v.get("channel_id") != "manual" and cm_detect._LIVE_EVENT_RE.search(reason):
             db.queue_set_status(v["id"], "skipped", f"live_skip:{reason}"[:160])
             log(f"[drain] 라이브 → 건너뜀: {reason[:110]}")
             return
-        if _LIVE_PENDING_RE.search(reason):
+        if cm_detect._LIVE_PENDING_RE.search(reason):
             db.queue_defer(
                 v["id"], reason, error_kind="live_upcoming",
                 retry_after_seconds=3600, max_attempts=None,
             )
             db.queue_bump_attempt(v["id"], -1)   # claim이 올린 시도 횟수 되돌림
-            notify(
+            cm_notify.notify(
                 f"📡 라이브/프리미어 예정 영상 — 방송 후 자동 처리 예정\n"
                 f"{head}\n{reason}\n{v['url']}"
             )
@@ -867,10 +357,10 @@ def _drain_main_one() -> None:
         # 비공개 전환·삭제·멤버십 전용은 기다린다고 풀리지 않는다. 재시도 예산을
         # 태우고 같은 알림을 5번 보내는 대신 즉시 종료한다(캡처 경로에는 이미 있던
         # 판정을 본편에도 적용 — 2026-08-27: All-In 에피소드가 비공개로 바뀌며 노출).
-        if _META_PERMANENT_RE.search(reason):
+        if cm_detect._META_PERMANENT_RE.search(reason):
             db.queue_set_status(v["id"], "skipped", reason)
             log(f"[drain] 처리 불가(영구 사유) → 재시도 안 함: {reason[:110]}")
-            notify(
+            cm_notify.notify(
                 f"ℹ️ 처리 불가 — 비공개·삭제·멤버십 전환 (재시도 안 함)\n"
                 f"{head}\n{reason}\n{v['url']}"
             )
@@ -883,20 +373,20 @@ def _drain_main_one() -> None:
         # 달라 완전 일치가 드물다.
         prev = (v.get("last_fail_reason") or "").strip()
         if (prev and prev == reason.strip() and (v.get("attempt_count") or 0) >= 1
-                and not _SERVER_RESTART_RE.search(reason)):
+                and not cm_detect._SERVER_RESTART_RE.search(reason)):
             db.queue_set_status(v["id"], "skipped", f"동일 실패 반복 — 재시도 중단: {reason}")
             log(f"[drain] 동일 실패 반복 → 재시도 중단: {reason[:110]}")
-            notify(
+            cm_notify.notify(
                 f"ℹ️ 동일 실패 반복 — 재시도 중단\n"
                 f"{head}\n{reason}\n{v['url']}"
             )
             return
         state = db.queue_defer(
             v["id"], reason, error_kind="pipeline_transient",
-            retry_after_seconds=_retry_delay(v.get("attempt_count")),
-            max_attempts=MAX_PIPELINE_ATTEMPTS,
+            retry_after_seconds=cm_base._retry_delay(v.get("attempt_count")),
+            max_attempts=cm_base.MAX_PIPELINE_ATTEMPTS,
         )
-        notify(
+        cm_notify.notify(
             f"⚠️ 자동 처리 실패 — {'재시도 예약' if state == 'deferred' else '재시도 소진'}\n"
             f"{head}\n{reason}\n{v['url']}"
         )
@@ -904,8 +394,8 @@ def _drain_main_one() -> None:
 
 # ── 단일 인스턴스 락 + 진입점 ──────────────────────────────────────────
 def _acquire_lock():
-    os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
-    fp = open(LOCK_PATH, "w")
+    os.makedirs(os.path.dirname(cm_base.LOCK_PATH), exist_ok=True)
+    fp = open(cm_base.LOCK_PATH, "w")
     try:
         fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -925,13 +415,13 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.announce:                 # hermes 크론 경로: 순수 알림 배출(DB/락 불필요)
-        announce()
+        cm_notify.announce()
         return 0
 
     db.init()
 
     if args.dry_run:
-        n = poll_channels(dry=True)
+        n = cm_detect.poll_channels(dry=True)
         log(f"[dry-run] 처리 대상(신규) {n}건 — 실제 적재/처리는 안 함")
         log(f"[dry-run] 현재 큐: {db.queue_counts()}")
         return 0
@@ -949,7 +439,7 @@ def main() -> int:
         if recovered:
             log(f"[recover] 중단된 processing {recovered}건 → pending (즉시 재개)")
         if not args.drain_only:
-            q = poll_channels()
+            q = cm_detect.poll_channels()
             log(f"[poll] 신규 적재 {q}건, 큐: {db.queue_counts()}")
         if not args.poll_only:
             drain()

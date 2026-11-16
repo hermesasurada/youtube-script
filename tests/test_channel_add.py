@@ -10,7 +10,7 @@ UC = "UC" + "A" * 22
 
 def _client(monkeypatch, resolved=UC, title="테스트 채널"):
     fake = types.SimpleNamespace(resolve_channel_id=lambda h: resolved)
-    monkeypatch.setitem(__import__("sys").modules, "channel_monitor", fake)
+    monkeypatch.setitem(__import__("sys").modules, "cm_detect", fake)
     monkeypatch.setattr(routes_channels, "_channel_feed_title", lambda cid: title)
     return app.app.test_client()
 

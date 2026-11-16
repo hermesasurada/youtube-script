@@ -19,6 +19,10 @@ import pytest
 
 import app
 import channel_monitor
+import cm_base
+import cm_detect
+import cm_health
+import cm_notify
 import db
 import keyframe_report
 import kf_vision
@@ -356,7 +360,7 @@ def test_transcript_only_history_is_reprocessed_not_marked_done(tmp_path, monkey
         monkeypatch.delenv("INDEX_DB", raising=False)
         importlib.reload(db)
 
-    monitor = open(os.path.join(os.path.dirname(app.__file__), "channel_monitor.py"), encoding="utf-8").read()
+    monitor = open(os.path.join(os.path.dirname(app.__file__), "cm_detect.py"), encoding="utf-8").read()   # 신규 영상 감지
     # 중복 정리는 '요약까지 있는' 이력에만 적용한다
     code = "\n".join(l for l in monitor.splitlines() if not l.lstrip().startswith("#"))
     idx = code.index("이미 처리된 이력 확인")
@@ -1147,9 +1151,9 @@ def test_transient_filter_is_deferred_and_rechecked(monkeypatch):
         status="deferred", reason="live:is_upcoming", retry_after_seconds=0,
         error_kind="metadata_transient",
     )
-    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, min_dur, **_k: (True, ""))
+    monkeypatch.setattr(cm_detect, "filter_verdict", lambda url, min_dur, **_k: (True, ""))
 
-    assert channel_monitor.recheck_deferred([], dry=False) == 1
+    assert cm_detect.recheck_deferred([], dry=False) == 1
     row = conn.execute("SELECT status FROM watch_queue WHERE yt_id = 'live-test'").fetchone()
     assert row["status"] == "pending"
 
@@ -1219,10 +1223,10 @@ def test_no_speech_verdict_is_permanent():
     5분에 가사 8줄뿐. 언어 오판 방어를 통과하고도 백지면 영구 사유다.)
     """
     reason = "전사 error: 전사 내용이 비어 있습니다: 33자 / 00:05:12 (분당 6자) — 두 언어(ko·ru) 모두 백지, 음성 없는 영상"
-    assert channel_monitor._META_PERMANENT_RE.search(reason)
+    assert cm_detect._META_PERMANENT_RE.search(reason)
     # 표식이 없는 보통의 희박 실패는 여전히 일시 실패로 재시도 대상
     plain = "전사 error: 전사 내용이 비어 있습니다: 33자 / 00:05:12 (분당 6자)"
-    assert not channel_monitor._META_PERMANENT_RE.search(plain)
+    assert not cm_detect._META_PERMANENT_RE.search(plain)
 
 
 def test_server_restart_job_loss_is_not_same_failure_stop(monkeypatch):
@@ -1238,7 +1242,7 @@ def test_server_restart_job_loss_is_not_same_failure_stop(monkeypatch):
     monkeypatch.setattr(channel_monitor.db, "queue_claim_one", lambda: v)
     monkeypatch.setattr(channel_monitor.db, "reserve_monitor_summary_slots",
                         lambda: {"slots": [{"model": "grok-4.7", "effort": "default"}]})
-    monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda fams: (True, "grok", ""))
+    monkeypatch.setattr(cm_health, "summarizer_gate", lambda fams: (True, "grok", ""))
     monkeypatch.setattr(channel_monitor, "_get_prompt", lambda: "p")
     monkeypatch.setattr(channel_monitor, "process_video",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError(lost)))
@@ -1247,7 +1251,7 @@ def test_server_restart_job_loss_is_not_same_failure_stop(monkeypatch):
     monkeypatch.setattr(channel_monitor.db, "queue_defer",
                         lambda *a, **k: calls.append(("defer", a)) or "deferred")
     monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
-    monkeypatch.setattr(channel_monitor, "notify", lambda *a: None)
+    monkeypatch.setattr(cm_notify, "notify", lambda *a: None)
     channel_monitor._drain_main_one()
     assert [c[0] for c in calls] == ["defer"]
     # 영상 쪽 실패가 같은 문구로 반복되면 종전대로 멈춘다
@@ -1355,7 +1359,7 @@ def test_permanent_metadata_errors_are_not_retried():
         "meta_error:ERROR: [youtube] X: Sign in to confirm your age",
     ]
     for reason in permanent:
-        retryable, _, _, kind = channel_monitor._defer_policy(reason)
+        retryable, _, _, kind = cm_detect._defer_policy(reason)
         assert retryable is False, reason
         assert kind == "metadata_permanent"
 
@@ -1367,20 +1371,20 @@ def test_permanent_metadata_errors_are_not_retried():
         "meta_error:ERROR: This video is temporarily unavailable",
     ]
     for reason in transient:
-        retryable, _, attempts, kind = channel_monitor._defer_policy(reason)
+        retryable, _, attempts, kind = cm_detect._defer_policy(reason)
         assert retryable is True, reason
         assert kind == "metadata_transient"
         assert attempts == 6
 
-    assert channel_monitor._defer_policy("live_skip:was_live") == (False, 0, 0, "live_skipped")
+    assert cm_detect._defer_policy("live_skip:was_live") == (False, 0, 0, "live_skipped")
 
     # 방송 전 라이브는 yt-dlp가 예외로 알린다 — 메타 오류가 아니라 라이브 예정(48회, 1시간 간격)
     for reason in ("meta_error:ERROR: [youtube] X: This live event will begin in 3 hours.",
                    "meta_error:ERROR: [youtube] X: Premieres in 2 hours"):
-        assert channel_monitor._defer_policy(reason) == (True, 3600, 48, "live_upcoming"), reason
+        assert cm_detect._defer_policy(reason) == (True, 3600, 48, "live_upcoming"), reason
 
     # 처음 보는 오류는 재시도하되 폭주하지 않도록 예산을 적게 준다
-    retryable, _, attempts, kind = channel_monitor._defer_policy("meta_error:ERROR: 새로운 유형")
+    retryable, _, attempts, kind = cm_detect._defer_policy("meta_error:ERROR: 새로운 유형")
     assert (retryable, attempts, kind) == (True, 3, "metadata_unknown")
 
 
@@ -1562,11 +1566,11 @@ def test_membership_capture_failure_is_not_retried(monkeypatch):
     """
     members = ("ERROR: [youtube] M86nb7kb_L4: This video is available to this "
                "channel's members on level: 착수 (or any higher level).")
-    assert channel_monitor._META_PERMANENT_RE.search(members)
+    assert cm_detect._META_PERMANENT_RE.search(members)
     # 일시 오류는 계속 재시도 대상이어야 한다
     for transient in ("ERROR: unable to download video data: HTTP Error 403: Forbidden",
                       "ERROR: [download] Got error: 23966 bytes read, 10032041 more expected"):
-        assert not channel_monitor._META_PERMANENT_RE.search(transient)
+        assert not cm_detect._META_PERMANENT_RE.search(transient)
 
     # process_video가 영구 사유를 kf_permanent로 표시하는지
     class _Resp:
@@ -1577,7 +1581,7 @@ def test_membership_capture_failure_is_not_retried(monkeypatch):
     res = {"txt_path": "/tmp/x.md", "kf_note": "", "kf_systemic": False, "kf_permanent": False}
     # 캡처 단계만 흉내 — 실제 함수는 전사·요약까지 타므로 판정 로직만 직접 확인
     emsg = members
-    assert bool(channel_monitor._META_PERMANENT_RE.search(emsg)) is True
+    assert bool(cm_detect._META_PERMANENT_RE.search(emsg)) is True
 
 
 def test_retry_delay_is_constant_20min():
@@ -1585,7 +1589,7 @@ def test_retry_delay_is_constant_20min():
 
     예산 5회로 짧은 일시 장애를 빠르게 따라잡되 무한 재시도는 막는다.
     """
-    d = channel_monitor._retry_delay
+    d = cm_base._retry_delay
     assert [d(i) for i in (1, 2, 3, 4, 5)] == [1200] * 5
     assert d(0) == d(None) == 1200   # attempt 미기록(0/None)도 동일
 
@@ -1600,10 +1604,10 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
     monkeypatch.setattr(channel_monitor.db, "queue_claim_kf_retry", lambda: retry)
     monkeypatch.setattr(channel_monitor.db, "queue_set_status", lambda *args, **kwargs: None)
     monkeypatch.setattr(channel_monitor.db, "channel_name_by_cid", lambda cid: "")
-    monkeypatch.setattr(channel_monitor, "summarizer_gate", lambda: (True, "claude", ""))
+    monkeypatch.setattr(cm_health, "summarizer_gate", lambda: (True, "claude", ""))
     monkeypatch.setattr(channel_monitor, "process_capture_only", lambda path, url, **kwargs: {"ok": True, "n_frames": 2})
     notices = []
-    monkeypatch.setattr(channel_monitor, "notify", notices.append)
+    monkeypatch.setattr(cm_notify, "notify", notices.append)
 
     channel_monitor.drain()
     assert any("캡처 재시도 성공" in notice for notice in notices)
@@ -2035,20 +2039,22 @@ def test_detect_language_low_confidence_keeps_auto(monkeypatch, tmp_path):
 def test_permanent_reasons_are_detected_for_main_pipeline():
     """비공개·삭제·멤버십은 본편 실패 사유에서도 영구로 판정돼야 한다(재시도 무의미)."""
     import channel_monitor as cm
+    import cm_detect
+    import cm_base
     permanent = [
         "영상 정보 조회 실패: ERROR: [youtube] a0lDsM_J_rc: Private video. Sign in if you've been",
         "ERROR: [youtube] x: This video is available to this channel's members on level: 착수",
         "ERROR: [youtube] y: Video unavailable. This video has been removed by the uploader",
     ]
     for r in permanent:
-        assert cm._META_PERMANENT_RE.search(r), r
+        assert cm_detect._META_PERMANENT_RE.search(r), r
     transient = [
         "HTTP Error 403(스트림 잘림): 300/2739s",
         "전사 내용이 비어 있습니다: 237자 / 00:45:39 (분당 5자)",
         "전사 잡 소실(서버 재시작) — 재시도 필요",
     ]
     for r in transient:
-        assert not cm._META_PERMANENT_RE.search(r), r
+        assert not cm_detect._META_PERMANENT_RE.search(r), r
 
 
 # ── whisper 반복 붕괴 감지 ─────────────────────────────────────────────
@@ -2674,11 +2680,13 @@ def test_title_translation_model_is_configurable(monkeypatch, tmp_path):
 def test_ad_title_skipped_by_monitor():
     """광고 표기 영상은 채널 감시에서 건너뛴다(2026-10-24 사용자 지시, #1638)."""
     import channel_monitor as cm
+    import cm_detect
+    import cm_base
     for t in ("개방감 끝판왕 시티오씨엘9단지 오션파크뷰 | 흥청망청 [AD]", "[광고] 신제품 리뷰",
               "(유료광고) 체험기", "#광고 포함", "[Sponsored] x"):
-        assert cm.is_ad_title(t), t
+        assert cm_detect.is_ad_title(t), t
     for t in ("ADR 상장 의미", "SK하이닉스 AD램?", "[ADR] 해설", "#광고판 산업", "광고 시장 전망"):
-        assert not cm.is_ad_title(t), t
+        assert not cm_detect.is_ad_title(t), t
 
 
 def test_remote_phone_can_load_reader_fonts():
@@ -2811,11 +2819,11 @@ def test_reenabled_channel_skips_videos_posted_while_off(monkeypatch):
         {"yt_id": "RSM_OLD", "title": "꺼진 동안", "url": "https://www.youtube.com/watch?v=RSM_OLD", "published": before},
         {"yt_id": "RSM_NEW", "title": "켠 뒤", "url": "https://www.youtube.com/watch?v=RSM_NEW", "published": after},
     ]
-    monkeypatch.setattr(channel_monitor, "rss_recent", lambda c: vids if c == "UCresumeTEST" else [])
-    monkeypatch.setattr(channel_monitor, "filter_verdict", lambda url, m: (True, ""))
-    monkeypatch.setattr(channel_monitor, "recheck_deferred", lambda chs, dry=False: 0)
+    monkeypatch.setattr(cm_detect, "rss_recent", lambda c: vids if c == "UCresumeTEST" else [])
+    monkeypatch.setattr(cm_detect, "filter_verdict", lambda url, m: (True, ""))
+    monkeypatch.setattr(cm_detect, "recheck_deferred", lambda chs, dry=False: 0)
     monkeypatch.setattr(db, "list_channels", lambda: [db.get_channel(cid)])
-    assert channel_monitor.poll_channels() == 1
+    assert cm_detect.poll_channels() == 1
     rows = {r["yt_id"]: r for r in db._conn().execute(
         "SELECT yt_id, status, reason FROM watch_queue WHERE yt_id LIKE 'RSM_%'").fetchall()}
     assert rows["RSM_OLD"]["status"] == "skipped" and rows["RSM_OLD"]["reason"] == "수집 재개 전 영상"
@@ -2854,18 +2862,18 @@ def test_auto_detected_live_is_skipped_manual_waits(monkeypatch):
             if url == "premiere":
                 raise Exception("ERROR: [youtube] X: Premieres in 2 hours")
             return {"live_status": url, "duration": 3600}
-    monkeypatch.setattr(channel_monitor.yt_dlp, "YoutubeDL", FakeYDL)
-    fv = channel_monitor.filter_verdict
+    monkeypatch.setattr(cm_base.yt_dlp, "YoutubeDL", FakeYDL)
+    fv = cm_detect.filter_verdict
     for status in ("was_live", "post_live", "is_live"):
         ok, reason = fv(status)
         assert not ok and reason == f"live_skip:{status}"
-        assert channel_monitor._defer_policy(reason)[0] is False
+        assert cm_detect._defer_policy(reason)[0] is False
     ok, reason = fv("upcoming")
     assert not ok and reason.startswith("live_skip:upcoming")
     assert fv("not_live") == (True, "")
     # 프리미어는 라이브가 아니다 — 공개를 기다린다
     ok, reason = fv("premiere")
-    assert channel_monitor._defer_policy(reason)[3] == "live_upcoming"
+    assert cm_detect._defer_policy(reason)[3] == "live_upcoming"
     # 수동 등록분은 방송이 끝나기를 기다리고, 끝난 다시보기는 처리한다
     assert fv("is_live", allow_live=True) == (False, "live:is_live")
     assert fv("was_live", allow_live=True) == (True, "")
