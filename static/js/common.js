@@ -1592,7 +1592,8 @@
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const opt = (v, label, cur, dis) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(label)}</option>`;
     const choices = _mm.options.filter(o => o.provider !== 'local');
-    let models = choices.map(o => opt(o.value, o.label, _mm.titleModel, o.enabled === false)).join('');
+    const MS = global.ModelSelector;
+    let models = MS.modelOptions(choices, _mm.titleModel, { disabled: o => o.enabled === false });
     if (!choices.some(o => o.value === _mm.titleModel)) models = opt(_mm.titleModel, _mm.titleModel + ' (기존 설정·선택 불가)', _mm.titleModel, true) + models;
     const hit = choices.find(o => o.value === _mm.titleModel);
     let levels = hit && hit.reasoning ? _mm.efforts.filter(e => hit.reasoning.includes(e.value)) : _mm.efforts;
@@ -1615,7 +1616,7 @@
     const row = (kind, label) => {
       const cur = _mm.name[kind];
       let models = opt('', `기본값 (${_mm.nameDefault.label || 'Haiku 5.5'})`, cur.model)
-        + choices.map(o => opt(o.value, o.label, cur.model, o.enabled === false)).join('');
+        + global.ModelSelector.modelOptions(choices, cur.model, { disabled: o => o.enabled === false });
       if (cur.model && !choices.some(o => o.value === cur.model)) models += opt(cur.model, cur.model + ' (기존 설정·선택 불가)', cur.model, true);
       let levels;
       if (!cur.model) {

@@ -1,7 +1,11 @@
-/* ── 모델 선택기 — wm·yt 공통 렌더러 ──────────────────────────────────────
-   두 저장소에 같은 파일이 있다(yt static/js/model-selector.js,
-   wm static/model-selector.js). 한쪽을 고치면 다른 쪽도 맞춘다.
-   전역 ModelSelector로 노출하고, yt에서는 YS.modelSelector로도 붙는다.
+/* ── 모델 선택기 — wm·yt·sa·td·xw 공통 렌더러 ─────────────────────────────
+   다섯 저장소에 같은 파일이 있다(yt static/js/model-selector.js, wm·sa·td·xw static/model-selector.js).
+   한 곳을 고치면 나머지도 똑같이 맞춘다. 전역 ModelSelector로 노출하고, yt에서는 YS.modelSelector로도 붙는다.
+
+   모델 드롭다운은 전 서비스 공용 모양(2026-11-16 사용자 지시): 제공사 묶음(<optgroup>) 아래 모델.
+   서버가 llm_catalog.selector_options()로 정렬하고 provider_label을 붙여 보내면, modelOptions()가
+   받은 순서 그대로 provider_label이 바뀔 때마다 묶음을 연다. 공통 렌더러 밖의 모델 드롭다운도
+   ModelSelector.modelOptions()로 그린다('사용 안 함'·'기본값' 같은 특수 항목은 묶음 밖에 따로 붙인다).
 
    state = {
      order:    [slot|null, ...]      요약 라운드로빈 순번(null = 사용 안 함)
@@ -12,6 +16,7 @@
      efforts:  [{value, label}]
      allowNone: bool                 요약 행에 '사용 안 함'을 둘지
      tag:      string                요약 머리 옆 꼬리표(기본 '라운드로빈')
+     title:    string                머리말(기본 '요약' — xw는 번역·필터 등으로 바꾼다)
      hint, status, notes: [{rule, detail}], extra: html
    }
    슬롯 모드(yt): order 대신 slots: [{model, effort}], nextIndex, limits: {min, max}.
@@ -23,14 +28,34 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  function option(value, label, selected) {
-    return `<option value="${esc(value)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
+  function option(value, label, selected, disabled) {
+    return `<option value="${esc(value)}"${selected ? ' selected' : ''}${disabled ? ' disabled' : ''}>${esc(label)}</option>`;
+  }
+
+  /** 모델 목록 → 제공사 묶음 <option> HTML. 받은 순서 그대로, provider_label이 바뀔 때마다 묶음을 연다.
+      provider_label이 없는 항목(기존 선택 보존 등)은 묶음 밖에 그 자리에 둔다.
+      selected: 값 또는 (항목 → bool) 함수. opts.disabled: (항목 → bool). */
+  function modelOptions(versions, selected, opts) {
+    const isSel = typeof selected === 'function' ? selected : v => v.value === selected;
+    const isOff = (opts && opts.disabled) || (() => false);
+    let html = '', group = null;
+    (versions || []).forEach(v => {
+      const g = v.provider_label || '';
+      if (g !== group) {
+        if (group) html += '</optgroup>';
+        if (g) html += `<optgroup label="${esc(g)}">`;
+        group = g;
+      }
+      html += option(v.value, v.label, isSel(v), isOff(v));
+    });
+    return group ? html + '</optgroup>' : html;
   }
 
   function render(root, state, handlers) {
     if (!root) return;
     const versions = state.versions || [];
     const efforts = state.efforts || [];
+    const title = state.title || '요약';
     const levelsFor = (model, selected) => {
       const hit = versions.find(v => v.value === model);
       const allowed = hit && hit.reasoning;
@@ -46,9 +71,9 @@
         const canRemove = list.length > lim.min;
         return `<div class="msel-row has-remove${isNext ? ' is-next' : ''}">`
           + `<span class="msel-step">${i + 1}</span>`
-          + `<select data-msel="slot-model" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 모델">`
-          + versions.map(v => option(v.value, v.label, v.value === s.model)).join('') + `</select>`
-          + `<select data-msel="slot-effort" data-index="${i}" aria-label="요약 ${i + 1}번 슬롯 추론 수준">`
+          + `<select data-msel="slot-model" data-index="${i}" aria-label="${esc(title)} ${i + 1}번 슬롯 모델">`
+          + modelOptions(versions, s.model) + `</select>`
+          + `<select data-msel="slot-effort" data-index="${i}" aria-label="${esc(title)} ${i + 1}번 슬롯 추론 수준">`
           + levelsFor(s.model, s.effort).map(e => option(e.value, e.label, e.value === s.effort)).join('') + `</select>`
           + `<button type="button" class="msel-remove" data-msel="slot-remove" data-index="${i}"`
           + `${canRemove ? '' : ' disabled'} aria-label="${i + 1}번 슬롯 빼기" title="슬롯 빼기">×</button></div>`;
@@ -59,16 +84,15 @@
       return rows + add;
     };
     const rows = state.slots ? slotRows() : (state.order || []).map((slot, i) => {
-      const models = versions.map(v =>
-        option(v.value, v.label, slot === v.slot && (state.version || {})[slot] === v.value)).join('')
+      const models = modelOptions(versions, v => slot === v.slot && (state.version || {})[slot] === v.value)
         + (state.allowNone ? option(NONE, '사용 안 함', !slot) : '');
       const levels = levelsFor((state.version || {})[slot] || slot, (state.effort || {})[slot]).map(e =>
         option(e.value, e.label, slot && (state.effort || {})[slot] === e.value)).join('');
       const isNext = slot && slot === state.next;
       return `<div class="msel-row${isNext ? ' is-next' : ''}${slot ? '' : ' is-off'}">`
         + `<span class="msel-step">${i + 1}</span>`
-        + `<select data-msel="model" data-index="${i}" aria-label="요약 ${i + 1}순번 모델">${models}</select>`
-        + `<select data-msel="effort" data-slot="${esc(slot || '')}"${slot ? '' : ' disabled'} aria-label="요약 ${i + 1}순번 추론 수준">${levels}</select></div>`;
+        + `<select data-msel="model" data-index="${i}" aria-label="${esc(title)} ${i + 1}순번 모델">${models}</select>`
+        + `<select data-msel="effort" data-slot="${esc(slot || '')}"${slot ? '' : ' disabled'} aria-label="${esc(title)} ${i + 1}순번 추론 수준">${levels}</select></div>`;
     }).join('');
 
     const notes = (state.notes || []).length
@@ -77,7 +101,7 @@
         + `</ul></div>` : '';
 
     root.innerHTML = `<div class="msel">`
-      + `<section class="msel-block"><div class="msel-head"><strong>요약</strong>`
+      + `<section class="msel-block"><div class="msel-head"><strong>${esc(title)}</strong>`
       + `<span class="msel-tag">${esc(state.tag || '라운드로빈')}</span><span class="msel-status" data-msel-status>${esc(state.status || '')}</span></div>`
       + rows + (state.hint ? `<p class="msel-hint">${esc(state.hint)}</p>` : '') + `</section>`
       + (state.extra || '') + notes + `</div>`;
@@ -130,7 +154,7 @@
     if (el) el.textContent = text || '';
   }
 
-  const api = { render, pick, setStatus, NONE };
+  const api = { render, pick, setStatus, modelOptions, option, esc, NONE };
   if (global.YS) global.YS.modelSelector = api;
   global.ModelSelector = api;
 })(typeof window !== 'undefined' ? window : globalThis);

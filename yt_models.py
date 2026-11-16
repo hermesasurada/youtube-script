@@ -91,6 +91,20 @@ def _model_label(model_id: str) -> str:
     return mid or "?"
 
 
+def _selector_options(options: list[dict]) -> list[dict]:
+    """화면으로 보내는 모델 목록 — 공용 순서(제공사 묶음 > 등급·버전)와 provider_label(2026-11-16 사용자 지시).
+
+    화면용으로만 쓴다(캡처 순서 등 실행 순서는 options() 그대로). 카탈로그 함수가 없거나 실패하면
+    받은 순서 그대로 제공사 이름만 붙인다.
+    """
+    catalog = llm_gateway.llm_catalog
+    try:
+        return catalog.selector_options(options)
+    except Exception:  # noqa: BLE001 — 표시용 부가 기능, 설정 창은 계속 열려야 한다
+        labels = getattr(catalog, "PROVIDERS", {}) or {}
+        return [dict(o, provider_label=labels.get(o.get("provider"), o.get("provider") or "기타")) for o in options]
+
+
 def _monitor_version_options(capability="text") -> list[dict[str, str]]:
     """모델 선택기에 보일 구체 모델 목록(슬롯·값·표시명)."""
     selected = [slot["model"] for slot in db.get_monitor_summary_slots()["slots"]]
@@ -152,7 +166,7 @@ def _monitor_model_payload() -> dict:
     return {
         "summary_slots": summary["slots"],
         "summary_next_index": summary["next_index"],
-        "model_options": _monitor_version_options(),
+        "model_options": _selector_options(_monitor_version_options()),
         "catalog_revision": llm_gateway.llm_catalog.read()["revision"],
         "reasoning_options": _monitor_reasoning_options(),
         "slot_limits": {"min": llm_gateway.MIN_SUMMARY_SLOTS, "max": llm_gateway.MAX_SUMMARY_SLOTS},
@@ -205,7 +219,7 @@ def _name_model_payload() -> dict:
         mine = [m for m in selected if _catalog_provider(m) == provider]
         options.extend(dict(o) for o in llm_gateway.llm_catalog.options(provider, capability="text",
                                                                         selected=mine))
-    out = {"name_model_options": options, "name_model_default": _name_default_choice()}
+    out = {"name_model_options": _selector_options(options), "name_model_default": _name_default_choice()}
     for kind, v in saved.items():
         out[f"name_{kind}_model"] = v["model"]
         out[f"name_{kind}_effort"] = v["effort"]

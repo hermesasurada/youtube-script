@@ -20,7 +20,8 @@ LEVEL_LABELS = {'default': '모델 기본값', 'none': '없음', 'minimal': '최
                 'low': '낮음', 'medium': '보통', 'high': '높음', 'xhigh': '매우 높음',
                 'max': '최대', 'ultra': 'Ultra', 'on': '켜짐', 'off': '꺼짐',
                 'no-think': '추론 끔', 'thinking': '추론 켬'}
-PROVIDERS = {'claude': 'Anthropic', 'codex': 'OpenAI', 'grok': 'xAI', 'local': '로컬 LLM'}
+PROVIDERS = {'claude': 'Anthropic', 'codex': 'OpenAI', 'grok': 'xAI', 'gemini': 'Google', 'local': '로컬 LLM'}
+PROVIDER_ORDER = ('claude', 'codex', 'grok', 'gemini', 'local')
 WARNING = '중앙 LLM 카탈로그를 불러오지 못해 대체 모드로 동작 중(저장된 설정 유지)'
 
 
@@ -60,6 +61,23 @@ def options(provider=None, capability='text', keys=None, selected=()):
             out.append(dict(value=key, label=f'{key} (카탈로그 없음·기존 선택)', provider=provider,
                             reasoning=list(LEVEL_LABELS), enabled=True))
     return out
+
+
+def sort_key(model, provider=None, alias=False, label=None, key=None):
+    """제공사 순서만 지키고 나머지는 이름순(등급 규칙은 카탈로그 모듈에만 있다)."""
+    provider = 'codex' if provider == 'openai' else (provider or '')
+    order = PROVIDER_ORDER.index(provider) if provider in PROVIDER_ORDER else len(PROVIDER_ORDER)
+    return (order, str(label if label is not None else (model or key) or '').casefold())
+
+
+def selector_options(options, model_of=None):
+    """화면용 목록 — 제공사 순서로만 늘어놓고 provider_label을 붙인다(묶음 안은 받은 순서)."""
+    rows = []
+    for position, option in enumerate(options):
+        provider = option.get('provider') or ''
+        order = PROVIDER_ORDER.index(provider) if provider in PROVIDER_ORDER else len(PROVIDER_ORDER)
+        rows.append((order, position, dict(option, provider_label=PROVIDERS.get(provider, provider or '기타'))))
+    return [row for _, _, row in sorted(rows, key=lambda r: (r[0], r[1]))]
 
 
 def reasoning_options(values=None):
