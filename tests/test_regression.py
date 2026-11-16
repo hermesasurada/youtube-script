@@ -36,6 +36,15 @@ import yt_transcribe
 
 
 
+
+def _read_src(root: str, name: str) -> str:
+    """파일 읽기 — 모바일 화면은 2026-11-16부터 html·static/js/mobile.js·static/css/mobile.css 셋을 합쳐 본다."""
+    text = open(os.path.join(root, name), encoding="utf-8").read()
+    if name.replace(os.sep, "/").endswith("templates/mobile.html"):
+        for extra in ("static/js/mobile.js", "static/css/mobile.css"):
+            text += "\n" + open(os.path.join(root, extra), encoding="utf-8").read()
+    return text
+
 def _server_src() -> str:
     """서버 코드 전체(app.py + 2026-11-16에 나눈 yt_*·routes_* 모듈) — 문자열 배선 검사용."""
     import glob
@@ -81,7 +90,7 @@ def test_summary_popup_sticky_sections_are_wired_for_desktop_and_mobile():
     project = os.path.dirname(os.path.dirname(__file__))
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     desktop_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
-    mobile_html = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()
+    mobile_html = _read_src(project, "templates/mobile.html")
     assert "function setupStickySummarySections(rootEl)" in common_js
     assert ".sum-topic-section>h3{position:sticky" in common_js
     # 일반·몰입형·구간 편집 후 재렌더 — 본문을 다시 그리는 모든 경로에서 부른다
@@ -315,7 +324,7 @@ def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkey
     idx = app_src.index("def queue_add()")
     assert "last_queue_prefs_for_channel" in app_src[idx:idx + 2000]
     for name in ("static/js/index.js", "templates/mobile.html"):
-        src = open(os.path.join(root, name), encoding="utf-8").read()
+        src = _read_src(root, name)
         assert "ApplyChannelPrefs" in src and "d.prefs" in src
 
 
@@ -387,7 +396,7 @@ def test_section_editor_is_wired_and_never_reaches_the_blog():
     root = os.path.dirname(app.__file__)
     common = open(os.path.join(root, "static/js/common.js"), encoding="utf-8").read()
     js = open(os.path.join(root, "static/js/index.js"), encoding="utf-8").read()
-    mobile = open(os.path.join(root, "templates/mobile.html"), encoding="utf-8").read()
+    mobile = _read_src(root, "templates/mobile.html")
     assert "splitSummarySections" in common and "attachSectionEditors" in common
     assert "'/summary/section'" in common
     # 블로그 내보내기에서 편집 버튼·편집창을 지운다
@@ -416,7 +425,7 @@ def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
 
 def test_publish_button_offers_open_and_update_on_both_surfaces():
     js = open(os.path.join(os.path.dirname(app.__file__), "static/js/index.js"), encoding="utf-8").read()
-    mobile = open(os.path.join(os.path.dirname(app.__file__), "templates/mobile.html"), encoding="utf-8").read()
+    mobile = _read_src(os.path.dirname(app.__file__), "templates/mobile.html")
     common = open(os.path.join(os.path.dirname(app.__file__), "static/js/common.js"), encoding="utf-8").read()
     for src in (js, mobile):
         assert "'발행됨'" in src
@@ -559,7 +568,7 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     assert strip, "블로그 내보내기에서 term-note-x 제거 코드를 찾지 못함"
     assert "ensureTermExclusions," in common_js
     index_js = open(os.path.join(project, "static/js/index.js"), encoding="utf-8").read()
-    mobile = open(os.path.join(project, "templates/mobile.html"), encoding="utf-8").read()
+    mobile = _read_src(project, "templates/mobile.html")
     assert index_js.count("YS.ensureTermExclusions(") >= 2      # 요약 뷰어 + 각주 제외 탭
     assert "YS.ensureTermExclusions()" in mobile
     assert "if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?" in common_js   # ✕는 확인 후 추가
@@ -1319,7 +1328,7 @@ def test_blog_original_title_is_idempotent_and_translation_only():
     root = os.path.dirname(os.path.dirname(__file__))
     common = open(os.path.join(root, "static", "js", "common.js"), encoding="utf-8").read()
     desktop = open(os.path.join(root, "static", "js", "index.js"), encoding="utf-8").read()
-    mobile = open(os.path.join(root, "templates", "mobile.html"), encoding="utf-8").read()
+    mobile = _read_src(root, "templates/mobile.html")
     assert "dataset.ysOriginalTitle = '1'" in common
     assert "translatedTitle: _titleKo" in desktop
     assert "translatedTitle: _titleKoM" in mobile
@@ -2809,7 +2818,7 @@ def test_settings_channel_tab_uses_shared_list_with_logo_search_and_order():
     for name in ("templates/index.html", "templates/mobile.html"):
         assert "channel-list.js" in open(os.path.join(root, name), encoding="utf-8").read()
     for name in ("static/js/index.js", "templates/mobile.html"):
-        body = open(os.path.join(root, name), encoding="utf-8").read()
+        body = _read_src(root, name)
         assert "YS.channelList.mount" in body and "last_checked" not in body
     client = app.app.test_client()
     assert client.get("/channels/logo/not-a-channel").status_code == 404
