@@ -1,6 +1,8 @@
 """한눈 요약 재생성 — 소제목 하나당 불릿 하나(2026-11-02 사용자 지시)."""
 import os
 import sys
+import yt_summary
+import yt_titles
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import brief_rebuild as B  # noqa: E402
@@ -92,18 +94,18 @@ def test_app_retries_once_then_drops_empty_heading(monkeypatch):
     def fake(prompt, label, model, effort, purpose="title"):
         calls.append((model, purpose))
         return "- 하나뿐", ""
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus", fake)
-    out = app._rebuild_brief(EMPTY, "opus", "m", "t")
+    monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, "opus", fake)
+    out = yt_summary._rebuild_brief(EMPTY, "opus", "m", "t")
     assert calls == [("m", "brief"), ("m", "brief")]                 # 한 번만 다시 시도
     assert "한눈 요약" not in out and "## 3. 핵심 내용" in out        # 빈 카드를 남기지 않는다
-    assert app._rebuild_brief(DOC, "opus", "m", "t") == DOC           # 불릿이 있던 옛 형식은 그대로
+    assert yt_summary._rebuild_brief(DOC, "opus", "m", "t") == DOC           # 불릿이 있던 옛 형식은 그대로
 
     replies = iter([("", "timeout"), ("- **매출**이 40% 늘었다.\n- 비용은 두 배다.", "")])
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus", lambda *a, **k: next(replies))
-    out = app._rebuild_brief(EMPTY, "opus", "m", "t")
+    monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, "opus", lambda *a, **k: next(replies))
+    out = yt_summary._rebuild_brief(EMPTY, "opus", "m", "t")
     assert "## 2. 한눈 요약\n\n- **매출**이 40% 늘었다.\n- 비용은 두 배다.\n\n## 3." in out
 
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
-    assert "한눈 요약" not in app._rebuild_brief(EMPTY, "opus", "m", "t")   # 예외도 저장을 막지 않는다
+    monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, "opus", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    assert "한눈 요약" not in yt_summary._rebuild_brief(EMPTY, "opus", "m", "t")   # 예외도 저장을 막지 않는다
     monkeypatch.setenv("YT_BRIEF_REBUILD", "0")
-    assert app._rebuild_brief(DOC, "opus", "m", "t") == DOC
+    assert yt_summary._rebuild_brief(DOC, "opus", "m", "t") == DOC

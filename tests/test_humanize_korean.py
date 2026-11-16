@@ -1,6 +1,7 @@
 """요약 저장 직전 im-not-ai 결정적 윤문."""
 import humanize_korean as hk
 import app
+import yt_summary
 
 
 def test_c11_drops_comma_after_connective_but_keeps_geurigo_hajiman():
@@ -66,7 +67,7 @@ def test_english_only_is_noop():
 
 def test_prepare_summary_body_runs_humanize(monkeypatch):
     monkeypatch.delenv("HUMANIZE_SUMMARY", raising=False)
-    out = app._prepare_summary_body("메타.\n# 제목\n\n했고, 끝이라는 것이다.")
+    out = yt_summary._prepare_summary_body("메타.\n# 제목\n\n했고, 끝이라는 것이다.")
     assert out.startswith("# 제목")
     assert "했고 끝이다." in out
 

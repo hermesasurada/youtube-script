@@ -4,6 +4,8 @@ import os
 import app
 import notation
 import transcript_translator as tt
+import yt_summary
+import yt_titles
 
 
 def test_common_korean_brand_spellings_become_original():
@@ -27,14 +29,14 @@ def test_summary_keeps_original_title_and_meta_table():
     text = "# 엔비디아 주가 전망\n| 업로더 | 엔비디아 코리아 |\n엔비디아가 발표했다"
     assert notation.normalize_summary(text) == \
         "# 엔비디아 주가 전망\n| 업로더 | 엔비디아 코리아 |\nNVIDIA가 발표했다"
-    assert app._polish_summary("엔비디아가 발표했고, 구글은 따랐다") == "NVIDIA가 발표했고 Google은 따랐다"
+    assert yt_summary._polish_summary("엔비디아가 발표했고, 구글은 따랐다") == "NVIDIA가 발표했고 Google은 따랐다"
 
 
 def test_title_translation_normalizes_only_foreign_sources():
-    assert app._preserve_title_terms("Anthropic went CRAZY", "Anthropic가 미쳤다") == "Anthropic이 미쳤다"
+    assert yt_titles._preserve_title_terms("Anthropic went CRAZY", "Anthropic가 미쳤다") == "Anthropic이 미쳤다"
     # 원래 한국어 제목은 원문이라 손대지 않는다
-    assert app._preserve_title_terms("엔비디아 실적 분석", "엔비디아 실적 분석") == "엔비디아 실적 분석"
-    p = app._TITLE_TR_PROMPT
+    assert yt_titles._preserve_title_terms("엔비디아 실적 분석", "엔비디아 실적 분석") == "엔비디아 실적 분석"
+    p = yt_titles._TITLE_TR_PROMPT
     assert "마크 저커버그 ×" in p and "엔비디아 ×" in p and "나사 ×" in p
     assert "Anthropic가 ×" in p
 

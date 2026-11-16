@@ -4,6 +4,8 @@ from contextlib import nullcontext
 
 import llm_gateway
 import llm_runners as R
+import yt_models
+import yt_titles
 
 
 def _no_log(monkeypatch):
@@ -97,9 +99,9 @@ def test_run_text_grok_timeout_and_missing_binary(monkeypatch, tmp_path):
 def test_title_runner_drops_unknown_grok_effort(monkeypatch):
     import app
     seen = {}
-    monkeypatch.setattr(app, "_llm_text", lambda family, prompt, **kw: seen.update(kw, family=family) or ("ok", ""))
-    monkeypatch.setattr(app.llm_gateway.llm_catalog, "levels", lambda model: ["low", "high"])
-    assert app._TITLE_TR_PROVIDERS["grok"]("p", "label", "grok-4.7", "xhigh") == ("ok", "")
+    monkeypatch.setattr(yt_models, "_llm_text", lambda family, prompt, **kw: seen.update(kw, family=family) or ("ok", ""))
+    monkeypatch.setattr(llm_gateway.llm_catalog, "levels", lambda model: ["low", "high"])
+    assert yt_titles._TITLE_TR_PROVIDERS["grok"]("p", "label", "grok-4.7", "xhigh") == ("ok", "")
     assert seen["effort"] == "default" and seen["purpose"] == "title" and seen["title"] == "label"
-    app._TITLE_TR_PROVIDERS["gpt"]("p", "label", None, "xhigh", purpose="brief")
+    yt_titles._TITLE_TR_PROVIDERS["gpt"]("p", "label", None, "xhigh", purpose="brief")
     assert seen["family"] == "gpt" and seen["effort"] == "xhigh" and seen["purpose"] == "brief"

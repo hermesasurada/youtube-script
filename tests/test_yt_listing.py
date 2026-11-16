@@ -5,6 +5,7 @@ import app
 import channel_monitor
 import db
 import yt_listing
+import yt_titles
 
 CID = "UC" + "a" * 22
 
@@ -94,7 +95,7 @@ def _pending_titles_setup(monkeypatch, saved):
     monkeypatch.setattr(app.db, "mark_korean_titles", lambda: None)
     monkeypatch.setattr(app.db, "titles_needing_translation", lambda n: todo)
     monkeypatch.setattr(app.db, "set_title_ko", lambda y, t: saved.__setitem__(y, t) or 1)
-    monkeypatch.setattr(app.yt_listing, "korean_entries",
+    monkeypatch.setattr(yt_listing, "korean_entries",
                         lambda c: {"A": {"title": "안녕"}, "B": {"title": "World"}} if c == CID else {})
 
 
@@ -106,8 +107,8 @@ def test_pending_titles_prefer_youtube_korean_then_llm(monkeypatch):
     def tr(titles, first_id=0):
         asked.append((titles, first_id))
         return ["세계", "NVIDIA"]
-    monkeypatch.setattr(app, "_translate_titles", tr)
-    assert app.translate_pending_titles()["done"] == 2
+    monkeypatch.setattr(yt_titles, "_translate_titles", tr)
+    assert yt_titles.translate_pending_titles()["done"] == 2
     assert asked == [(["World", "NVIDIA"], 2)]                # A는 YouTube 한국어 제목, C는 목록 실패
     assert saved == {"A": "안녕", "B": "세계", "D": ""}         # C는 다음에 다시
 
@@ -115,6 +116,6 @@ def test_pending_titles_prefer_youtube_korean_then_llm(monkeypatch):
 def test_pending_titles_llm_failure_retries_later(monkeypatch):
     saved = {}
     _pending_titles_setup(monkeypatch, saved)
-    monkeypatch.setattr(app, "_translate_titles", lambda titles, first_id=0: None)
-    app.translate_pending_titles()
+    monkeypatch.setattr(yt_titles, "_translate_titles", lambda titles, first_id=0: None)
+    yt_titles.translate_pending_titles()
     assert saved == {"A": "안녕"}                              # 실패한 B·D는 비워 둬 다시 시도

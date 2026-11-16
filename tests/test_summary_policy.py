@@ -2,6 +2,8 @@
 import importlib
 
 import summary_policy
+import yt_core
+import yt_summary
 
 
 def test_short_videos_are_skipped_and_long_or_clipped_are_not():
@@ -28,9 +30,9 @@ def test_summarize_endpoint_refuses_short_video(tmp_path, monkeypatch):
     import app
     md = tmp_path / "short.md"
     md.write_text("---\ntitle: 짧은 영상\nduration: 240\n---\n\n본문 " * 3, encoding="utf-8")
-    monkeypatch.setattr(app, "_check_res_path", lambda p: (str(md), None))
+    monkeypatch.setattr(yt_core, "_check_res_path", lambda p: (str(md), None))
     called = []
-    monkeypatch.setattr(app, "_summarize_with_claude", lambda *a, **k: called.append(1) or iter(()))
+    monkeypatch.setattr(yt_summary, "_summarize_with_claude", lambda *a, **k: called.append(1) or iter(()))
     r = app.app.test_client().post("/summarize", json={"txt_path": "x"})
     assert r.status_code == 422
     assert r.get_json()["skipped"] == "short_video"

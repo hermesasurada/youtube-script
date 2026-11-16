@@ -7,7 +7,14 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 
 | 파일 | 역할 |
 |------|------|
-| `app.py` | Flask 라우트·SSE 스트림·작업(jobs) 관리·전사/요약 오케스트레이션 |
+| `app.py` | 서버 진입점(로깅·FD 한도·DB 초기화·서버 실행, 라우트 모듈 등록) |
+| `yt_web.py` | Flask 앱 객체·원격 접근 제한·응답 압축·공용 글꼴 |
+| `yt_core.py` | 공용 설정(경로·실행 파일·모델 환경변수)·작업 상태·md 저장/파싱 |
+| `yt_transcribe.py` / `yt_jobs.py` | whisper 전사·붕괴 판정 / URL·파일 전사 작업(다운로드·썸네일·오디오 보관) |
+| `yt_summary.py` / `yt_models.py` / `yt_titles.py` | 요약 생성·다듬기·한눈 요약 / 모델 설정·라벨·`_llm_text` / 제목 한국어 표기 |
+| `llm_runners.py` | 계열별 LLM 실행기(Claude·Codex·Grok·Gemini)와 Claude 스트리밍 |
+| `yt_queue.py` / `yt_blog.py` | 처리 큐 도우미 / 블로그 발행 도우미 |
+| `routes_*.py` | HTTP 라우트(main·summary·queue·channels·history·media) — `from yt_web import app`으로 붙인다 |
 | `db.py` | SQLite + FTS5 이력 인덱스(upsert/검색/reindex). `PRAGMA user_version` 마이그레이션 |
 | `keyframe_report.py` | 영상 다운로드(yt-dlp) → ffmpeg 프레임 추출 → LLM 비전 분류 → 요약 md에 캡처 스트립 주입 |
 | `templates/` | `index.html`(데스크톱) · `mobile.html`(모바일 이력) |
@@ -37,9 +44,9 @@ launchd 에이전트 `com.yhandhs.youtube-script`(KeepAlive)로 상시 구동 �
 launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script
 ```
 
-- 정적 프런트(html/js/css)는 no-store → **새로고침만으로 반영**. `app.py`/`db.py`/`keyframe_report.py` 변경은 재기동 필요.
+- 정적 프런트(html/js/css)는 no-store → **새로고침만으로 반영**. 서버 `.py`(app·yt_*·routes_*·db·keyframe_report 등) 변경은 재기동 필요.
 - 로그: `~/Library/Logs/hermes/youtube-script.{out,err}.log`
-- 원격 접속(Tailscale 등)은 **이력 모드** — 이력 조회·요약/전사 보기·읽음 표시·삭제는 허용하되, **새 전사·프롬프트 편집·키프레임 생성·로컬 파일 탐색은 차단**(허용 목록은 `app.py`의 `_REMOTE_DATA_ALLOWED`). 사설망(Tailscale, 본인 기기) 전제.
+- 원격 접속(Tailscale 등)은 **이력 모드** — 이력 조회·요약/전사 보기·읽음 표시·삭제는 허용하되, **새 전사·프롬프트 편집·키프레임 생성·로컬 파일 탐색은 차단**(허용 목록은 `yt_web.py`의 `_REMOTE_DATA_ALLOWED`). 사설망(Tailscale, 본인 기기) 전제.
 
 ### PO 토큰 공급자 (다운로드 403 방지)
 

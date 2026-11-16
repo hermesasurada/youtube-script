@@ -1,5 +1,8 @@
 """요약 슬롯별 모델 버전(모니터 모델 선택기) — 2026-09-23."""
 import llm_gateway
+import yt_core
+import yt_models
+import yt_summary
 
 
 def test_choices_include_new_models():
@@ -19,7 +22,7 @@ def test_slots_drop_unknown_models_and_cap_at_five():
 def test_summary_attempts_follow_slots():
     """요약 실행이 슬롯의 모델·추론을 그대로 쓴다(같은 계열 두 슬롯도 각각)."""
     import app
-    att = app._summary_attempts(slots=[{"model": "gpt-6-sol", "effort": "low"},
+    att = yt_summary._summary_attempts(slots=[{"model": "gpt-6-sol", "effort": "low"},
                                        {"model": "gpt-6-luna", "effort": "high"},
                                        {"model": "claude-opus-5-5", "effort": "default"}])
     assert [(a["family"], a["model"], a["effort"]) for a in att] == [
@@ -65,7 +68,7 @@ def test_grok_catalog_options_and_vision_filter(monkeypatch, tmp_path):
     data['models'].append(c.entry('grok-vision-test', 'grok', levels=['default'], vision=True))
     c.save(data, 0)
     monkeypatch.setattr(app.db, 'get_monitor_summary_slots', lambda: {'slots': [], 'next_index': 0})
-    payload = app._monitor_model_payload()
+    payload = yt_models._monitor_model_payload()
     assert 'grok-4.7' in {x['value'] for x in payload['model_options']}
     assert 'capture_models' not in payload and 'capture_options' not in payload   # 캡처 설정은 없다
     assert llm_gateway.is_valid_summary_slots([{'model': 'grok-4.7', 'effort': 'default'}])
@@ -77,9 +80,9 @@ def test_grok_summary_passes_selected_model(monkeypatch):
     import app
     from contextlib import nullcontext
     commands = []
-    monkeypatch.setattr(app, 'GROK_BIN', '/bin/echo')
+    monkeypatch.setattr(yt_core, 'GROK_BIN', '/bin/echo')
     monkeypatch.setattr(llm_gateway, 'llm_track', lambda *a, **kw: nullcontext(None))
     monkeypatch.setattr(llm_gateway, 'llm_fill', lambda *a, **kw: None)
     monkeypatch.setattr(llm_gateway, 'run_command', lambda cmd, **kw: commands.append(cmd) or llm_gateway.ProcessResult(0, '요약', '', False))
-    app._summarize_with_grok('test', model='grok-4.7')
+    yt_summary._summarize_with_grok('test', model='grok-4.7')
     assert commands[0][commands[0].index('-m') + 1] == 'grok-4.7'

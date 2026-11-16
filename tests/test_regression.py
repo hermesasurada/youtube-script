@@ -22,7 +22,26 @@ import channel_monitor
 import db
 import keyframe_report
 import llm_gateway
+import routes_media
+import subprocess
+import term_senses
+import yt_blog
+import yt_core
+import yt_jobs
+import yt_models
+import yt_queue
+import yt_summary
+import yt_titles
+import yt_transcribe
 
+
+
+def _server_src() -> str:
+    """서버 코드 전체(app.py + 2026-11-16에 나눈 yt_*·routes_* 모듈) — 문자열 배선 검사용."""
+    import glob
+    root = os.path.dirname(os.path.abspath(app.__file__))
+    names = ["app.py"] + sorted(os.path.basename(p) for p in glob.glob(os.path.join(root, "yt_*.py")) + glob.glob(os.path.join(root, "routes_*.py")))
+    return "\n".join(open(os.path.join(root, n), encoding="utf-8").read() for n in names)
 
 def test_summary_prompt_groups_term_notes_and_excludes_common_terms():
     project = os.path.dirname(os.path.dirname(__file__))
@@ -86,7 +105,7 @@ def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
     assert 'blog' in saved          # 뷰어가 발행 버튼을 즉시 갱신할 수 있도록 상태를 함께 준다
     db.init()  # 재시작/초기화로 사용자 메모가 지워지지 않는다.
     source = '<div><h3 data-summary-section="전력 &amp; 투자::1">전력</h3><p>본문</p><h3 data-summary-section="다음::1">다음</h3><p>내용</p></div>'
-    published = app._include_blog_notes(source, db.get_summary_notes(item['md_path']))
+    published = yt_blog._include_blog_notes(source, db.get_summary_notes(item['md_path']))
     assert '<script>' not in published
     assert '&lt;script&gt;' in published
     # 머리말 없이 전구만 앞세운다(라벨 텍스트는 넣지 않는다)
@@ -96,7 +115,7 @@ def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
     # 마지막 섹션의 메모는 '원본 영상' 푸터(<div data-summary-footer>) 앞에 들어간다
     footed = ('<div><h3 data-summary-section="전력 &amp; 투자::1">전력</h3><p>본문</p>'
               '<div data-summary-footer="1">원본 영상: u</div></div>')
-    out = app._include_blog_notes(footed, db.get_summary_notes(item['md_path']))
+    out = yt_blog._include_blog_notes(footed, db.get_summary_notes(item['md_path']))
     assert out.index('\U0001F4A1') < out.index('원본 영상')
     assert out.endswith('원본 영상: u</div></div>')
     assert client.post('/summary/note', json={**payload, 'body': 'x' * 10001}).status_code == 400
@@ -115,29 +134,29 @@ def test_blog_state_flags_edits_made_after_publishing(tmp_path, monkeypatch):
             "blog_url": "https://blog.example/post", "blog_post_id": "77"}
 
     published = "2026-09-13 12:00:00"
-    base["blog_render_ver"] = app.BLOG_RENDER_VERSION      # 현재 형식으로 발행된 글
+    base["blog_render_ver"] = yt_blog.BLOG_RENDER_VERSION      # 현재 형식으로 발행된 글
     old = datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timestamp() - 600
     os.utime(summary, (old, old))
-    assert app._blog_state(dict(base, blog_published_at=published))["stale"] is False
+    assert yt_blog._blog_state(dict(base, blog_published_at=published))["stale"] is False
 
     newer = datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timestamp() + 60
     os.utime(summary, (newer, newer))
-    state = app._blog_state(dict(base, blog_published_at=published))
+    state = yt_blog._blog_state(dict(base, blog_published_at=published))
     assert state["stale"] is True and state["published_at"] == published
 
     # 메모만 고쳐도 수정 대상이다(메모가 블로그 본문에 실리므로).
     os.utime(summary, (old, old))
     db.save_summary_note(md_path, "구간::1", "생각")
-    assert app._blog_state(dict(base, blog_published_at=published))["stale"] is True
+    assert yt_blog._blog_state(dict(base, blog_published_at=published))["stale"] is True
 
     # 메모를 '지운' 것도 변경이다 — 발행본에는 남아 있으므로 되돌리려면 수정해야 한다.
     db.save_summary_note(md_path, "구간::1", "")
     assert db.get_summary_notes(md_path) == {}
-    assert app._blog_state(dict(base, blog_published_at=published))["stale"] is True
+    assert yt_blog._blog_state(dict(base, blog_published_at=published))["stale"] is True
 
     # 미발행 글과 발행시각 미기록 글
-    assert app._blog_state(dict(base, blog_url="", blog_published_at=""))["stale"] is False
-    assert app._blog_state(dict(base, blog_published_at=""))["stale"] is True
+    assert yt_blog._blog_state(dict(base, blog_url="", blog_published_at=""))["stale"] is False
+    assert yt_blog._blog_state(dict(base, blog_published_at=""))["stale"] is True
 
     # 내용이 그대로여도 표시 형식(렌더 버전)이 바뀌었으면 다시 올릴 거리가 있다
     db.save_summary_note(md_path, "구간::1", "")
@@ -146,8 +165,8 @@ def test_blog_state_flags_edits_made_after_publishing(tmp_path, monkeypatch):
     conn.commit()
     os.utime(summary, (old, old))
     fresh = dict(base, blog_published_at=published)
-    assert app._blog_state(fresh)["stale"] is False
-    outdated = app._blog_state(dict(fresh, blog_render_ver="옛-형식"))
+    assert yt_blog._blog_state(fresh)["stale"] is False
+    outdated = yt_blog._blog_state(dict(fresh, blog_render_ver="옛-형식"))
     assert outdated["stale"] is True
     assert outdated["outdated_render"] is True and outdated["content_changed"] is False
 
@@ -227,11 +246,11 @@ def test_keyframes_capture_the_transcribed_video_not_the_queue_url(tmp_path):
     md = tmp_path / "v.md"
     md.write_text("---\ntitle: T\nwebpage_url: https://www.youtube.com/watch?v=NR9NI51D7ek\n"
                   "---\n\n본문", encoding="utf-8")
-    assert app._keyframe_source_url(str(md), "https://www.youtube.com/watch?v=REPOST00001") \
+    assert routes_media._keyframe_source_url(str(md), "https://www.youtube.com/watch?v=REPOST00001") \
         == "https://www.youtube.com/watch?v=NR9NI51D7ek"
     plain = tmp_path / "f.md"
     plain.write_text("---\ntitle: 로컬 파일\n---\n\n본문", encoding="utf-8")
-    assert app._keyframe_source_url(str(plain), "https://x/y") == "https://x/y"
+    assert routes_media._keyframe_source_url(str(plain), "https://x/y") == "https://x/y"
 
 
 def test_collapse_detector_counts_time_not_only_segment_count(tmp_path):
@@ -242,20 +261,20 @@ def test_collapse_detector_counts_time_not_only_segment_count(tmp_path):
     normal = [seg(f"sentence {i}", i * 5, i * 5 + 5) for i in range(30)]
     j = tmp_path / "ok.json"
     j.write_text(__import__("json").dumps({"transcription": normal}), encoding="utf-8")
-    assert app._looks_collapsed(str(j)) == (False, "")
+    assert yt_transcribe._looks_collapsed(str(j)) == (False, "")
 
     collapsed = normal[:5] + [seg("AND HE WROTE A FAMOUS ENCYCLICAL", 25 + i * 30, 55 + i * 30)
                               for i in range(25)]      # 25회 × 30초 = 12.5분
     j2 = tmp_path / "bad.json"
     j2.write_text(__import__("json").dumps({"transcription": collapsed}), encoding="utf-8")
-    flag, detail = app._looks_collapsed(str(j2))
+    flag, detail = yt_transcribe._looks_collapsed(str(j2))
     assert flag is True and "초 연속" in detail
 
     # 짧은 맞장구 반복(시간이 짧고 횟수도 적음)은 붕괴가 아니다
     chatter = normal[:22] + [seg("Yeah.", 110 + i, 111 + i) for i in range(8)]
     j3 = tmp_path / "chat.json"
     j3.write_text(__import__("json").dumps({"transcription": chatter}), encoding="utf-8")
-    assert app._looks_collapsed(str(j3)) == (False, "")
+    assert yt_transcribe._looks_collapsed(str(j3)) == (False, "")
 
 
 def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkeypatch):
@@ -290,7 +309,7 @@ def test_manual_queue_inherits_last_channel_capture_and_distill(tmp_path, monkey
         importlib.reload(db)
 
     root = os.path.dirname(app.__file__)
-    app_src = open(os.path.join(root, "app.py"), encoding="utf-8").read()
+    app_src = _server_src()
     assert "last_queue_prefs_for_channel" in app_src
     # 폼을 거치지 않는 호출도 서버가 채운다
     idx = app_src.index("def queue_add()")
@@ -339,8 +358,8 @@ def test_summary_section_edit_replaces_only_that_block(tmp_path, monkeypatch):
     item = {"item_id": 11, "md_path": str(tmp_path / "v.md"), "summary_path": str(summary),
             "blog_url": "", "blog_published_at": ""}
     monkeypatch.setattr(db, "get_history_item", lambda i: item if int(i) == 11 else None)
-    monkeypatch.setattr(app, "SUMMARY_DIR", str(tmp_path))
-    monkeypatch.setattr(app, "_reindex_summary", lambda p: None)
+    monkeypatch.setattr(yt_core, "SUMMARY_DIR", str(tmp_path))
+    monkeypatch.setattr(yt_summary, "_reindex_summary", lambda p: None)
     client = app.app.test_client()
 
     original = "### 가 [00:01]\n\n첫 구간\n"
@@ -376,7 +395,7 @@ def test_section_editor_is_wired_and_never_reaches_the_blog():
     assert strip and "sec-edit-box" in strip.group(1)
     for src in (js, mobile):
         assert "attachSectionEditors" in src
-    assert "/summary/section" in open(os.path.join(root, "app.py"), encoding="utf-8").read()
+    assert "/summary/section" in _server_src()
 
 
 def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
@@ -388,10 +407,10 @@ def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
     assert float(re.search(r"line-height:([\d.]+)", para).group(1)) <= 1.6
     assert float(re.search(r"line-height:([\d.]+)", li).group(1)) <= 1.6
     # 서버가 붙이는 블록(메모·원제 줄)도 본문보다 넓게 벌어지지 않는다
-    app_src = open(os.path.join(os.path.dirname(app.__file__), "app.py"), encoding="utf-8").read()
+    app_src = _server_src()
     memo = re.search(r"white-space:pre-wrap;font-size:15px;line-height:([\d.]+)", app_src)
     assert memo and float(memo.group(1)) <= 1.6
-    assert float(re.search(r"line-height:([\d.]+)", app._BLOG_ORIGINAL_STYLE).group(1)) <= 1.6
+    assert float(re.search(r"line-height:([\d.]+)", yt_blog._BLOG_ORIGINAL_STYLE).group(1)) <= 1.6
     assert float(re.search(r"foot:\s*'[^']*line-height:([\d.]+)", common).group(1)) <= 1.6
 
 
@@ -453,7 +472,7 @@ def test_term_exclusions_route_and_prompt_injection(monkeypatch):
     monkeypatch.setattr(db, "list_term_exclusions", lambda: list(store))
     monkeypatch.setattr(db, "term_exclusion_senses",
                         lambda: {db.normalize_term(t): {"term": t, "senses": []} for t in store})
-    monkeypatch.setattr(app.term_senses, "kept_keys", lambda: [])
+    monkeypatch.setattr(term_senses, "kept_keys", lambda: [])
     monkeypatch.setattr(db, "add_term_exclusion", lambda t: (store.append(t) or True) if t not in store else False)
     monkeypatch.setattr(db, "remove_term_exclusion", lambda t: (store.remove(t) or True) if t in store else False)
     c = app.app.test_client()
@@ -466,11 +485,11 @@ def test_term_exclusions_route_and_prompt_injection(monkeypatch):
     assert r["removed"] is True and r["terms"] == ["색인"]
 
     tpl = "# 규칙\n- 별표 규칙\n\n전사:\n{transcript}\n"
-    out = app._inject_term_exclusions(tpl, ["크롤링", "색인"])
+    out = yt_summary._inject_term_exclusions(tpl, ["크롤링", "색인"])
     assert "크롤링·색인" in out
     assert out.index("크롤링·색인") < out.index("{transcript}")      # 전사 앞에 들어간다
-    assert app._inject_term_exclusions(tpl, []) == tpl
-    assert "크롤링" in app._inject_term_exclusions("규칙만 있음", ["크롤링"])
+    assert yt_summary._inject_term_exclusions(tpl, []) == tpl
+    assert "크롤링" in yt_summary._inject_term_exclusions("규칙만 있음", ["크롤링"])
 
 
 def test_term_exclusion_senses_db(tmp_path, monkeypatch):
@@ -486,9 +505,9 @@ def test_term_exclusion_senses_db(tmp_path, monkeypatch):
     assert db.term_sense_checks()[(key, db.sense_key(ai))][0] is True       # ✕를 누른 뜻 자체는 '같음'
     car = "차량 내부에서 전력과 신호를 전달하는 전선 묶음"
     db.set_term_sense_check(key, car, False)
-    assert app.term_senses.kept_keys() == [f"{key}\u0001{db.sense_key(car)}"]
+    assert term_senses.kept_keys() == [f"{key}\u0001{db.sense_key(car)}"]
     assert db.add_term_exclusion("하네스", "모델 주변을 감싸 실행을 돕는 장치") is True   # 두 번째 뜻
-    assert app.term_senses.kept_keys() == []                                 # '다른 뜻' 판정은 다시
+    assert term_senses.kept_keys() == []                                 # '다른 뜻' 판정은 다시
     assert db.add_term_exclusion("크롤링") is True                           # 직접 입력 = 모든 뜻
     assert db.term_exclusion_senses()[db.normalize_term("크롤링")]["senses"] == []
     assert db.remove_term_exclusion("하네스") is True
@@ -515,7 +534,7 @@ def test_term_senses_parse_and_judge(monkeypatch):
 
 def test_scoped_term_exclusions_in_prompt():
     tpl = "규칙\n{transcript}\n"
-    out = app._inject_term_exclusions(tpl, ["크롤링", ("하네스", ["AI 모델의 실행 환경"])])
+    out = yt_summary._inject_term_exclusions(tpl, ["크롤링", ("하네스", ["AI 모델의 실행 환경"])])
     assert "붙이지 않는다: 크롤링\n" in out
     assert "하네스(AI 모델의 실행 환경)" in out and "다른 뜻으로 쓰이면 평소 기준대로" in out
     assert out.index("하네스(") < out.index("{transcript}")
@@ -555,7 +574,7 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     assert "renderTermExclusions();" in index_js.split("function switchSettingsTab(")[1].split("\n}")[0]
     assert 'id="terms-btn"' not in mobile and "async function renderTermsM()" in mobile
     assert "['terms', '각주 제외']" in mobile and "if (name === 'terms') renderTermsM();" in mobile
-    app_src = open(os.path.join(project, "app.py"), encoding="utf-8").read()
+    app_src = _server_src()
     assert '"/terms/excluded",' in app_src.split("_REMOTE_DATA_ALLOWED = {")[1].split("}")[0]
 
 
@@ -565,47 +584,47 @@ def test_collapse_retry_judges_coverage_and_chunk_merge(tmp_path):
 
     def seg(a_ms, b_ms, text="x"):
         return {"offsets": {"from": a_ms, "to": b_ms},
-                "timestamps": {"from": app._ms_to_ts(a_ms), "to": app._ms_to_ts(b_ms)}, "text": text}
+                "timestamps": {"from": yt_transcribe._ms_to_ts(a_ms), "to": yt_transcribe._ms_to_ts(b_ms)}, "text": text}
 
     # 24분 중 앞 3분 15초만 덮은 결과 → 커버리지 14% → 분할 재전사 대상
     sparse = tmp_path / "sparse.json"
     sparse.write_text(_json.dumps({"transcription": [seg(0, 195_000)]}), encoding="utf-8")
-    assert round(app._coverage_ratio(str(sparse), 1443), 2) == 0.14
+    assert round(yt_transcribe._coverage_ratio(str(sparse), 1443), 2) == 0.14
     full = tmp_path / "full.json"
     full.write_text(_json.dumps({"transcription": [seg(0, 600_000), seg(590_000, 1_400_000)]}), encoding="utf-8")
-    assert app._coverage_ratio(str(full), 1443) > 0.95          # 겹치는 구간은 한 번만 센다
-    assert app._coverage_ratio(str(tmp_path / "missing.json"), 1443) == 0.0
-    assert app._coverage_ratio(str(sparse), 0) == 1.0            # 길이를 모르면 판정 보류
-    assert app._MIN_COVERAGE > 0.14
+    assert yt_transcribe._coverage_ratio(str(full), 1443) > 0.95          # 겹치는 구간은 한 번만 센다
+    assert yt_transcribe._coverage_ratio(str(tmp_path / "missing.json"), 1443) == 0.0
+    assert yt_transcribe._coverage_ratio(str(sparse), 0) == 1.0            # 길이를 모르면 판정 보류
+    assert yt_transcribe._MIN_COVERAGE > 0.14
 
     # 구간 병합: 절대 시각 구간은 그대로, 상대 시각으로 온 구간은 offset을 더한다
     c0 = tmp_path / "c0.json"; c0.write_text(_json.dumps({"transcription": [seg(0, 5_000, "a")]}), encoding="utf-8")
     c1 = tmp_path / "c1.json"; c1.write_text(_json.dumps({"transcription": [seg(600_000, 605_000, "b")]}), encoding="utf-8")
     c2 = tmp_path / "c2.json"; c2.write_text(_json.dumps({"transcription": [seg(0, 4_000, "c")]}), encoding="utf-8")  # 상대 시각
     out = tmp_path / "merged.json"
-    n = app._merge_whisper_chunks([(0, str(c0)), (600_000, str(c1)), (1_200_000, str(c2))], str(out))
+    n = yt_transcribe._merge_whisper_chunks([(0, str(c0)), (600_000, str(c1)), (1_200_000, str(c2))], str(out))
     merged = _json.loads(out.read_text(encoding="utf-8"))["transcription"]
     assert n == 3 and [m["text"] for m in merged] == ["a", "b", "c"]
     assert merged[2]["offsets"] == {"from": 1_200_000, "to": 1_204_000}
     assert merged[2]["timestamps"]["from"] == "00:20:00,000"
-    assert app._ms_to_ts(3_723_456) == "01:02:03,456"
+    assert yt_transcribe._ms_to_ts(3_723_456) == "01:02:03,456"
 
 
 def test_title_translation_never_says_nobyeondamhwa_for_fireside_chat():
     """fireside chat → '대담'. 모델이 '노변담화'를 내놔도 결정적으로 바로잡는다."""
     src = "Commerce Sec. Lutnick and Nvidia CEO Jensen Huang in a fireside chat at G20 meeting — 9/2/2026"
-    out = app._preserve_title_terms(src, "러트닉 상무장관과 NVIDIA CEO 젠슨 황, G20 회의에서 노변담화 — 9/2/2026")
+    out = yt_titles._preserve_title_terms(src, "러트닉 상무장관과 NVIDIA CEO 젠슨 황, G20 회의에서 노변담화 — 9/2/2026")
     assert "노변담화" not in out and "대담" in out
-    out2 = app._preserve_title_terms("Alex Karp participate in a fireside chat", "Alex Karp, 노변담화 참여 — 9/2")
+    out2 = yt_titles._preserve_title_terms("Alex Karp participate in a fireside chat", "Alex Karp, 노변담화 참여 — 9/2")
     assert out2 == "Alex Karp, 대담 — 9/2"
     # fireside chat이 아닌 제목은 손대지 않는다
-    assert app._preserve_title_terms("Radio address", "노변담화 라디오 연설") == "노변담화 라디오 연설"
-    assert "노변담화" in app._TITLE_TR_PROMPT and "대담" in app._TITLE_TR_PROMPT
+    assert yt_titles._preserve_title_terms("Radio address", "노변담화 라디오 연설") == "노변담화 라디오 연설"
+    assert "노변담화" in yt_titles._TITLE_TR_PROMPT and "대담" in yt_titles._TITLE_TR_PROMPT
 
 
 def test_title_translation_prompt_covers_recurring_failure_modes():
     """2026-09-11 362건 감사에서 드러난 유형: 인명·제품명 음차, 영어 앞머리 방치, 사전 직역, 한자."""
-    p = app._TITLE_TR_PROMPT
+    p = yt_titles._TITLE_TR_PROMPT
     assert "음차하지 않는다" in p and "제이미 다이먼 ×" in p           # 인명 음차 금지 + 반례
     assert "Hugging Face, Jalapeño, GPT-5.6 Sol, Neutron" in p       # 제품·코드명 원문 유지
     assert "같은 사람·회사는 어느 제목에서든 같은 표기" in p          # 제목 간 표기 통일
@@ -618,24 +637,24 @@ def test_title_translation_prompt_covers_recurring_failure_modes():
 def test_title_translation_preserves_neocloud_original_spelling():
     source = "Most Neoclouds Suck At Security (Neoclouds, Security)"
     translated = "대부분의 뉴클라우드는 보안에 취약하다 (네오클라우드, 보안)"
-    assert app._preserve_title_terms(source, translated) == (
+    assert yt_titles._preserve_title_terms(source, translated) == (
         "대부분의 Neocloud는 보안에 취약하다 (Neocloud, 보안)"
     )
 
 
 def test_clean_summary_removes_preamble_before_inline_h1():
     dirty = "전사 중반이 잘려 있어 전체 내용을 먼저 확인합니다.# 영상 제목\n\n## 1. 메타정보"
-    assert app._clean_summary(dirty) == "# 영상 제목\n\n## 1. 메타정보"
+    assert yt_summary._clean_summary(dirty) == "# 영상 제목\n\n## 1. 메타정보"
 
 
 def test_clean_summary_does_not_treat_h3_as_title():
     body = "요약할 수 없습니다.\n\n### 참고"
-    assert app._clean_summary(body) == body
+    assert yt_summary._clean_summary(body) == body
 
 
 def test_clean_summary_skips_stray_hash_before_real_title():
     dirty = "#\n\n# 실제 영상 제목\n\n## 1. 메타정보"
-    assert app._clean_summary(dirty) == "# 실제 영상 제목\n\n## 1. 메타정보"
+    assert yt_summary._clean_summary(dirty) == "# 실제 영상 제목\n\n## 1. 메타정보"
 
 
 def test_clean_summary_inserts_missing_gfm_table_delimiter():
@@ -645,11 +664,11 @@ def test_clean_summary_inserts_missing_gfm_table_delimiter():
         "| 제목 | Foo \\| Bar |\n"
         "| 업로더 | Fortune |\n"
     )
-    out = app._clean_summary(dirty)
+    out = yt_summary._clean_summary(dirty)
     assert "| --- | --- |" in out
     assert "| 제목 | Foo \\| Bar |" in out
     # 이미 구분행이 있으면 중복 삽입하지 않는다
-    assert app._clean_summary(out) == out
+    assert yt_summary._clean_summary(out) == out
 
 
 def test_model_order_normalization_is_complete_and_unique():
@@ -679,9 +698,9 @@ def test_markdown_save_parse_roundtrip(tmp_path):
         "tags": ["alpha", "beta"],
     }
     md = str(tmp_path / "x.md")
-    app._save_md(md, meta, "전사 본문\n둘째 줄")
+    yt_core._save_md(md, meta, "전사 본문\n둘째 줄")
 
-    parsed, body = app._parse_md(md)
+    parsed, body = yt_core._parse_md(md)
     assert body == "전사 본문\n둘째 줄"
     assert parsed["title"] == "테스트 영상 제목"
     assert parsed["uploader"] == "채널A"
@@ -690,20 +709,20 @@ def test_markdown_save_parse_roundtrip(tmp_path):
 
 
 def test_app_and_db_frontmatter_parsers_agree(tmp_path):
-    """app._parse_yaml_front_matter 와 db._parse_yaml_front_matter 가 같은 결과여야(중복 구현 드리프트 방지)."""
+    """yt_core._parse_yaml_front_matter 와 db._parse_yaml_front_matter 가 같은 결과여야(중복 구현 드리프트 방지)."""
     md = str(tmp_path / "y.md")
-    app._save_md(md, {"title": "T", "uploader": "U", "tags": ["x", "y"]}, "본문")
+    yt_core._save_md(md, {"title": "T", "uploader": "U", "tags": ["x", "y"]}, "본문")
     fm = open(md, encoding="utf-8").read().split("---\n", 2)[1]
-    assert app._parse_yaml_front_matter(fm) == db._parse_yaml_front_matter(fm)
+    assert yt_core._parse_yaml_front_matter(fm) == db._parse_yaml_front_matter(fm)
 
 
 # ── ② 경로 이탈 차단 ───────────────────────────────────────────────────
 def test_path_traversal_blocked():
-    ok, err = app._check_res_path(os.path.join(app.RES_DIR, "20260101", "x.md"))
-    assert err is None and ok.startswith(os.path.realpath(app.RES_DIR))
+    ok, err = yt_core._check_res_path(os.path.join(yt_core.RES_DIR, "20260101", "x.md"))
+    assert err is None and ok.startswith(os.path.realpath(yt_core.RES_DIR))
 
-    for bad in ("/etc/passwd", os.path.join(app.RES_DIR, "..", "..", "etc", "passwd")):
-        _, e = app._check_res_path(bad)
+    for bad in ("/etc/passwd", os.path.join(yt_core.RES_DIR, "..", "..", "etc", "passwd")):
+        _, e = yt_core._check_res_path(bad)
         assert e is not None, f"이탈 경로가 허용됨: {bad}"
 
 
@@ -740,8 +759,8 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     """카드 목록은 본문·절대경로를 싣지 않고, 상세는 정수 ID로 조회한다."""
     monkeypatch.setattr(db, "RES_DIR", str(tmp_path))
     monkeypatch.setattr(db, "SUMMARY_DIR", str(tmp_path / "summary"))
-    monkeypatch.setattr(app, "RES_DIR", str(tmp_path))
-    monkeypatch.setattr(app, "SUMMARY_DIR", str(tmp_path / "summary"))
+    monkeypatch.setattr(yt_core, "RES_DIR", str(tmp_path))
+    monkeypatch.setattr(yt_core, "SUMMARY_DIR", str(tmp_path / "summary"))
     db.init()
 
     date_dir = tmp_path / "20260813"
@@ -1025,7 +1044,7 @@ def test_queue_idle_when_nothing_has_been_processed():
     db._conn().execute("DELETE FROM watch_queue")
     assert db.last_queue_activity_epoch() is None
     assert db.queue_has_processing() is False
-    assert app._queue_idle_enough() is True
+    assert yt_queue._queue_idle_enough() is True
 
 
 def test_queue_not_idle_during_recent_processing():
@@ -1036,7 +1055,7 @@ def test_queue_not_idle_during_recent_processing():
     claimed = db.queue_claim_one()
     assert claimed
     assert db.queue_has_processing() is True
-    assert app._queue_idle_enough() is False
+    assert yt_queue._queue_idle_enough() is False
 
 
 def test_queue_idle_after_cycle_since_last_activity(monkeypatch):
@@ -1050,15 +1069,15 @@ def test_queue_idle_after_cycle_since_last_activity(monkeypatch):
         "UPDATE watch_queue SET status='done', claimed_at=NULL, updated_at=? WHERE id=?",
         (old, claimed["id"]),
     )
-    monkeypatch.setattr(app, "_QUEUE_CYCLE_SEC", 1800)
-    assert app._queue_idle_enough() is True
+    monkeypatch.setattr(yt_queue, "_QUEUE_CYCLE_SEC", 1800)
+    assert yt_queue._queue_idle_enough() is True
 
 
 def test_manual_add_kicks_drain_when_idle(monkeypatch):
     db.init()
     db._conn().execute("DELETE FROM watch_queue")
     spawned = []
-    monkeypatch.setattr(app, "_spawn_drain", lambda: spawned.append(True) or True)
+    monkeypatch.setattr(yt_queue, "_spawn_drain", lambda: spawned.append(True) or True)
     c = app.app.test_client()
     r = c.post("/queue/items", json={
         "url": "https://www.youtube.com/watch?v=abcdefghijk",
@@ -1082,7 +1101,7 @@ def test_manual_add_does_not_kick_when_recently_processed(monkeypatch):
         (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), claimed["id"]),
     )
     spawned = []
-    monkeypatch.setattr(app, "_spawn_drain", lambda: spawned.append(True) or True)
+    monkeypatch.setattr(yt_queue, "_spawn_drain", lambda: spawned.append(True) or True)
     c = app.app.test_client()
     r = c.post("/queue/items", json={
         "url": "https://www.youtube.com/watch?v=xyzxyzxyzxy",
@@ -1098,8 +1117,8 @@ def test_idle_eta_is_now_not_next_cycle(monkeypatch):
     db._conn().execute("DELETE FROM watch_queue")
     db.enqueue_video("eta-test", "https://youtu.be/etatest123", "eta", "manual")
     overview = db.queue_overview()
-    monkeypatch.setattr(app, "_QUEUE_CYCLE_SEC", 1800)
-    app._attach_queue_eta(overview)
+    monkeypatch.setattr(yt_queue, "_QUEUE_CYCLE_SEC", 1800)
+    yt_queue._attach_queue_eta(overview)
     pending = [v for v in overview["waiting"] if v["status"] == "pending"]
     assert pending
     assert abs(pending[0]["eta"] - time.time()) < 2
@@ -1162,21 +1181,21 @@ def test_declared_language_overrides_weak_probe():
     33자로 끝남. 두 번 다 같아 '동일 실패 반복' 규칙이 영구 실패로 굳힐 케이스.)
     """
     import app
-    assert app._norm_lang("en-US") == "en"
-    assert app._norm_lang("ko") == "ko"
-    assert app._norm_lang(None) == ""
-    assert app._norm_lang("1234") == ""                   # 코드가 아니면 버린다
-    assert app._norm_lang("zxx-weird-1") == "zxx"         # 첫 서브태그만 쓴다
+    assert yt_transcribe._norm_lang("en-US") == "en"
+    assert yt_transcribe._norm_lang("ko") == "ko"
+    assert yt_transcribe._norm_lang(None) == ""
+    assert yt_transcribe._norm_lang("1234") == ""                   # 코드가 아니면 버린다
+    assert yt_transcribe._norm_lang("zxx-weird-1") == "zxx"         # 첫 서브태그만 쓴다
     # 약한 표본(ru 0.63) vs 선언 ko → ko 쓰고 ru를 대체 후보로
-    assert app._choose_language("ru", 0.63, "ko") == ("ko", "ru")
+    assert yt_transcribe._choose_language("ru", 0.63, "ko") == ("ko", "ru")
     # 강한 표본(en 0.97)은 선언(ko)을 이긴다 — 업로더 기본값이 틀린 경우
-    assert app._choose_language("en", 0.97, "ko") == ("en", "ko")
+    assert yt_transcribe._choose_language("en", 0.97, "ko") == ("en", "ko")
     # 표본과 선언이 같으면 대체 없음
-    assert app._choose_language("ko", 0.7, "ko") == ("ko", "")
+    assert yt_transcribe._choose_language("ko", 0.7, "ko") == ("ko", "")
     # 표본이 불확실(p<0.5)하면 선언 언어, 표본은 대체
-    assert app._choose_language("en", 0.31, "ko") == ("ko", "en")
+    assert yt_transcribe._choose_language("en", 0.31, "ko") == ("ko", "en")
     # 둘 다 없으면 auto 유지
-    assert app._choose_language("", 0.0, "") == ("", "")
+    assert yt_transcribe._choose_language("", 0.0, "") == ("", "")
 
 
 def test_no_speech_verdict_is_permanent():
@@ -1279,7 +1298,7 @@ def test_publish_blog_route_publishes_once_and_records(monkeypatch):
     r = c.post("/history/publish-blog", json={"item_id": 7, "html": "<p>x</p>"}).get_json()
     assert r["status"] == "ok" and r["url"].endswith("/p1.html")
     assert saved == {"i": 7, "u": "https://x.blogspot.com/p1.html", "p": "p1",
-                     "v": app.BLOG_RENDER_VERSION}   # 발행 시 렌더 버전도 기록한다
+                     "v": yt_blog.BLOG_RENDER_VERSION}   # 발행 시 렌더 버전도 기록한다
     assert published["title"] == "OpenAI와 연구"
     assert 'data-ys-original-title="1"' in published["html"]
     assert "원제 : OpenAI &amp; Research" in published["html"]
@@ -1292,10 +1311,10 @@ def test_publish_blog_route_publishes_once_and_records(monkeypatch):
 def test_blog_original_title_is_idempotent_and_translation_only():
     """원제 행은 번역 발행에만 한 번 추가한다."""
     body = '<div style="font-size:16px"><p>본문</p></div>'
-    rendered = app._ensure_blog_original_title(body, "OpenAI & Research", "OpenAI와 연구")
+    rendered = yt_blog._ensure_blog_original_title(body, "OpenAI & Research", "OpenAI와 연구")
     assert rendered.index("원제 :") < rendered.index("본문")
-    assert app._ensure_blog_original_title(rendered, "OpenAI & Research", "OpenAI와 연구") == rendered
-    assert app._ensure_blog_original_title(body, "한국어 제목", "한국어 제목") == body
+    assert yt_blog._ensure_blog_original_title(rendered, "OpenAI & Research", "OpenAI와 연구") == rendered
+    assert yt_blog._ensure_blog_original_title(body, "한국어 제목", "한국어 제목") == body
 
     root = os.path.dirname(os.path.dirname(__file__))
     common = open(os.path.join(root, "static", "js", "common.js"), encoding="utf-8").read()
@@ -1388,13 +1407,13 @@ def test_item_distill_overrides_channel_setting():
 
 
 def test_monitor_model_options_follow_catalog(monkeypatch, tmp_path):
-    catalog = app.llm_gateway.llm_catalog
+    catalog = llm_gateway.llm_catalog
     monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
     data = catalog.seed()
     next(m for m in data['models'] if m['key'] == 'grok')['label'] = '중앙 Grok 별칭'
     catalog.save(data, 0)
-    monkeypatch.setattr(app.llm_gateway, "resolve_grok_default_model", lambda: "grok-4.6")
-    monkeypatch.setattr(app, "GROK_MODEL", "")
+    monkeypatch.setattr(llm_gateway, "resolve_grok_default_model", lambda: "grok-4.6")
+    monkeypatch.setattr(yt_core, "GROK_MODEL", "")
     payload = app.app.test_client().get("/channels").get_json()
     labels = {o["value"]: o["label"] for o in payload["model_options"]}
     for key in ("grok", "opus", "claude-opus-5-5", "gpt-6-sol"):
@@ -1403,7 +1422,7 @@ def test_monitor_model_options_follow_catalog(monkeypatch, tmp_path):
 
 
 def test_monitor_summary_slots_persist_and_capture_setting_is_gone(monkeypatch, tmp_path):
-    catalog = app.llm_gateway.llm_catalog
+    catalog = llm_gateway.llm_catalog
     monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
     catalog.save(catalog.seed(), 0)
     db.init()
@@ -1437,7 +1456,7 @@ def test_monitor_summary_slots_persist_and_capture_setting_is_gone(monkeypatch, 
 def test_duplicate_slots_raise_start_share_but_fallback_skips_repeats(monkeypatch, tmp_path):
     """같은 모델을 여러 슬롯에 두면 시작 비중이 늘고(2026-09-27 사용자 지시), 실패 폴백은
     방금 실패한 모델을 다시 부르지 않는다."""
-    catalog = app.llm_gateway.llm_catalog
+    catalog = llm_gateway.llm_catalog
     monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
     catalog.save(catalog.seed(), 0)
     db.init()
@@ -1451,10 +1470,10 @@ def test_duplicate_slots_raise_start_share_but_fallback_skips_repeats(monkeypatc
         starts = [db.reserve_monitor_summary_slots()["primary"]["model"] for _ in range(6)]
         assert starts.count("gpt-6-sol") == 4 and starts.count("claude-opus-5-5") == 2
         rotated = db.reserve_monitor_summary_slots()["slots"]        # sol, opus, sol
-        assert [a["model"] for a in app._summary_attempts(slots=rotated)] == ["gpt-6-sol", "claude-opus-5-5"]
+        assert [a["model"] for a in yt_summary._summary_attempts(slots=rotated)] == ["gpt-6-sol", "claude-opus-5-5"]
         # 같은 모델·다른 추론도 폴백에서는 한 번만(모델 장애는 추론 수준과 무관)
         mixed = [{"model": "grok", "effort": "high"}, {"model": "grok", "effort": "low"}]
-        assert app._summary_attempts(slots=mixed) == [{"family": "grok", "model": "grok", "effort": "high"}]
+        assert yt_summary._summary_attempts(slots=mixed) == [{"family": "grok", "model": "grok", "effort": "high"}]
     finally:
         db.set_monitor_summary_slots([{"model": "opus", "effort": "default"},
                                       {"model": "gpt-6-astra", "effort": "high"},
@@ -1486,24 +1505,24 @@ def test_capture_order_starts_with_the_model_that_summarized(monkeypatch, tmp_pa
              {"model": "grok-4.7", "effort": "default"}]
     monkeypatch.setattr(app.db, "get_monitor_summary_slots",
                         lambda: {"slots": slots, "next_index": 0})
-    monkeypatch.setattr(app.llm_gateway.llm_catalog, "valid", lambda m, **kw: True)
+    monkeypatch.setattr(llm_gateway.llm_catalog, "valid", lambda m, **kw: True)
     summary = tmp_path / "s.md"
     summary.write_text("<!--SUMMARY_MODEL:GPT 6 Sol · 1회 재시도-->\n\n## 본문\n", encoding="utf-8")
     import keyframe_report as kr
     monkeypatch.setattr(kr, "VISION_OPUS_TO", "")          # 치환을 끄면 요약 모델 순서 그대로
-    assert app._capture_order(str(summary)) == ["gpt-6-sol", "claude-opus-5-5", "grok-4.7"]
+    assert yt_models._capture_order(str(summary)) == ["gpt-6-sol", "claude-opus-5-5", "grok-4.7"]
     # 마커가 없으면 슬롯 순서 그대로
     summary.write_text("## 본문\n", encoding="utf-8")
-    assert app._capture_order(str(summary)) == ["claude-opus-5-5", "gpt-6-sol", "grok-4.7"]
+    assert yt_models._capture_order(str(summary)) == ["claude-opus-5-5", "gpt-6-sol", "grok-4.7"]
     # 2026-11-09: 비전 티어 Opus → Sonnet(기본) — 요약이 Opus여도 캡처는 Sonnet
     monkeypatch.setattr(kr, "VISION_OPUS_TO", "claude-sonnet-5-5")
-    assert app._capture_order(str(summary)) == ["claude-sonnet-5-5", "gpt-6-sol", "grok-4.7"]
+    assert yt_models._capture_order(str(summary)) == ["claude-sonnet-5-5", "gpt-6-sol", "grok-4.7"]
     assert kr._vision_claude_env()["DISABLE_PROMPT_CACHING"] == "1"
     assert kr._vision_claude_env()["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
     # 이미지 입력이 안 되는 모델은 뺀다
-    monkeypatch.setattr(app.llm_gateway.llm_catalog, "valid",
+    monkeypatch.setattr(llm_gateway.llm_catalog, "valid",
                         lambda m, **kw: m != "grok-4.7")
-    assert "grok-4.7" not in app._capture_order(str(summary))
+    assert "grok-4.7" not in yt_models._capture_order(str(summary))
 
 
 def test_keyframe_vision_accepts_any_length_order():
@@ -1680,14 +1699,14 @@ def test_stream_command_timeout_and_stderr_drain():
 
 def test_codex_summary_passes_selected_reasoning_effort(monkeypatch):
     seen = {}
-    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
 
     def run_command(args, **kwargs):
         seen["args"] = args
         return llm_gateway.ProcessResult(0, "# 결과", "")
 
-    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
-    result = app.llm_gateway.run_codex_prompt(
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    result = llm_gateway.run_codex_prompt(
         "prompt", model="gpt-6-astra", timeout=10, reasoning_effort="xhigh"
     )
     assert result.returncode == 0
@@ -1696,14 +1715,14 @@ def test_codex_summary_passes_selected_reasoning_effort(monkeypatch):
 
 def test_grok_summary_passes_selected_reasoning_effort(monkeypatch):
     seen = {}
-    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(yt_core, "GROK_BIN", "/bin/echo")
 
     def run_command(args, **kwargs):
         seen["args"] = args
         return llm_gateway.ProcessResult(0, "# 결과", "")
 
-    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
-    body, error = app._summarize_with_grok("prompt", reasoning_effort="high")
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    body, error = yt_summary._summarize_with_grok("prompt", reasoning_effort="high")
     assert body and not error
     assert seen["args"][-2:] == ["--reasoning-effort", "high"]
 
@@ -1721,10 +1740,10 @@ def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
         ),
         llm_gateway.StreamEvent("complete", returncode=1, stderr="usage limit"),
     ]
-    monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *args, **kwargs: iter(stream))
-    monkeypatch.setattr(app, "_summarize_with_grok", lambda prompt, **kw: ("# Grok 결과", ""))
+    monkeypatch.setattr(llm_gateway, "stream_command", lambda *args, **kwargs: iter(stream))
+    monkeypatch.setattr(yt_summary, "_summarize_with_grok", lambda prompt, **kw: ("# Grok 결과", ""))
 
-    output = list(app._summarize_with_claude("prompt", None))
+    output = list(yt_summary._summarize_with_claude("prompt", None))
     partial_index = next(i for i, chunk in enumerate(output) if "partial" in chunk)
     reset_index = next(i for i, chunk in enumerate(output) if chunk.startswith("event: reset"))
     grok_index = next(
@@ -1738,19 +1757,19 @@ def test_claude_partial_output_is_reset_before_grok_fallback(monkeypatch):
 def test_ordered_summary_uses_requested_fallback_order(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        app, "_summarize_with_gpt",
+        yt_summary, "_summarize_with_gpt",
         lambda prompt, **kwargs: calls.append(("gpt", kwargs["reasoning_effort"])) or ("", "quota"),
     )
     monkeypatch.setattr(
-        app, "_summarize_with_grok",
+        yt_summary, "_summarize_with_grok",
         lambda prompt, **kwargs: calls.append(("grok", kwargs["reasoning_effort"])) or ("# Grok 성공", ""),
     )
     monkeypatch.setattr(
-        app.llm_gateway, "stream_command",
+        llm_gateway, "stream_command",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Opus should not run")),
     )
 
-    output = list(app._summarize_ordered(
+    output = list(yt_summary._summarize_ordered(
         "prompt", None, ["gpt", "grok", "opus"], transcript_chars=100,
         reasoning_levels={"gpt": "xhigh", "grok": "low", "opus": "default"},
     ))
@@ -1788,7 +1807,7 @@ def test_keyframe_gpt_can_be_first_vision_model(monkeypatch):
 def _make_job(job_id, meta=None):
     import queue as _queue
     import threading as _threading
-    app.jobs[job_id] = {
+    yt_core.jobs[job_id] = {
         "queue": _queue.Queue(), "stop_event": _threading.Event(),
         "status": "running", "result": None, "output_file": None,
         "error_stage": "", "error_message": "", "meta": meta or {},
@@ -1803,88 +1822,88 @@ def test_truncated_audio_is_rejected_before_transcription(monkeypatch, tmp_path)
     audio = tmp_path / "a.mp3"
     audio.write_bytes(b"x")
     called = {"whisper": False}
-    monkeypatch.setattr(app, "get_file_duration", lambda p: 400.0)          # 실제 오디오 400초
-    monkeypatch.setattr(app, "_run_whisper", lambda *a, **k: called.__setitem__("whisper", True) or 0)
+    monkeypatch.setattr(yt_core, "get_file_duration", lambda p: 400.0)          # 실제 오디오 400초
+    monkeypatch.setattr(yt_transcribe, "_run_whisper", lambda *a, **k: called.__setitem__("whisper", True) or 0)
 
     job_id = "truncated-audio"
     _make_job(job_id)
     try:
-        app._transcribe_and_finish(job_id, str(audio), "auto", "8", 13454.0, str(tmp_path / "out.md"))
+        yt_jobs._transcribe_and_finish(job_id, str(audio), "auto", "8", 13454.0, str(tmp_path / "out.md"))
         assert called["whisper"] is False, "잘린 오디오인데 전사를 시도했다"
-        assert app.jobs[job_id]["status"] == "error"
-        assert app.jobs[job_id]["error_stage"] == "download"
-        assert "잘렸습니다" in app.jobs[job_id]["error_message"]
+        assert yt_core.jobs[job_id]["status"] == "error"
+        assert yt_core.jobs[job_id]["error_stage"] == "download"
+        assert "잘렸습니다" in yt_core.jobs[job_id]["error_message"]
     finally:
-        app.jobs.pop(job_id, None)
+        yt_core.jobs.pop(job_id, None)
 
 
 def test_sparse_transcript_is_rejected_before_saving(monkeypatch, tmp_path):
     """길이 대비 본문이 사실상 비면 저장하지 않는다(요약·캡처 낭비 차단)."""
     md = tmp_path / "out.md"
     saved = {"called": False}
-    monkeypatch.setattr(app, "_parse_transcript", lambda p, off=0: "[00:00] We'll be right back.")
-    monkeypatch.setattr(app, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
+    monkeypatch.setattr(yt_transcribe, "_parse_transcript", lambda p, off=0: "[00:00] We'll be right back.")
+    monkeypatch.setattr(yt_core, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
 
     job_id = "sparse-transcript"
     _make_job(job_id, meta={"duration": 13454})
     try:
-        app._finish_transcription(job_id, str(tmp_path / "a.mp3"), 0, str(md))
+        yt_jobs._finish_transcription(job_id, str(tmp_path / "a.mp3"), 0, str(md))
         assert saved["called"] is False, "빈 전사를 저장했다"
-        assert app.jobs[job_id]["status"] == "error"
-        assert app.jobs[job_id]["error_stage"] == "transcribe"
+        assert yt_core.jobs[job_id]["status"] == "error"
+        assert yt_core.jobs[job_id]["error_stage"] == "transcribe"
         assert not md.exists()
     finally:
-        app.jobs.pop(job_id, None)
+        yt_core.jobs.pop(job_id, None)
 
 
 def test_normal_transcript_still_saves(monkeypatch, tmp_path):
     """정상 분량 전사는 그대로 저장돼야 한다(방어가 과하게 걸리지 않는지)."""
     md = tmp_path / "ok.md"
     saved = {"called": False}
-    monkeypatch.setattr(app, "_parse_transcript", lambda p, off=0: "[00:00] " + "가" * 3000)
-    monkeypatch.setattr(app, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
+    monkeypatch.setattr(yt_transcribe, "_parse_transcript", lambda p, off=0: "[00:00] " + "가" * 3000)
+    monkeypatch.setattr(yt_core, "_save_md", lambda *a, **k: saved.__setitem__("called", True))
 
     job_id = "normal-transcript"
     _make_job(job_id, meta={"duration": 1800})
     try:
-        app._finish_transcription(job_id, str(tmp_path / "a.mp3"), 0, str(md))
+        yt_jobs._finish_transcription(job_id, str(tmp_path / "a.mp3"), 0, str(md))
         assert saved["called"] is True
-        assert app.jobs[job_id]["status"] == "done"
+        assert yt_core.jobs[job_id]["status"] == "done"
     finally:
-        app.jobs.pop(job_id, None)
+        yt_core.jobs.pop(job_id, None)
 
 
 def test_job_result_exposes_failure_stage_and_reason():
     job_id = "ui-error-test"
-    app.jobs[job_id] = {
+    yt_core.jobs[job_id] = {
         "status": "running", "result": None, "output_file": None,
         "error_stage": "", "error_message": "",
     }
     try:
-        app._set_job_error(job_id, "download", "\x1b[31m다운로드 실패\x1b[0m\n접근 거부")
+        yt_jobs._set_job_error(job_id, "download", "\x1b[31m다운로드 실패\x1b[0m\n접근 거부")
         payload = app.app.test_client().get(f"/result/{job_id}").get_json()
         assert payload["status"] == "error"
         assert payload["error_stage"] == "download"
         assert payload["error_message"] == "다운로드 실패 접근 거부"
     finally:
-        app.jobs.pop(job_id, None)
+        yt_core.jobs.pop(job_id, None)
 
 
 # ── 시작 시각 지정 전사(?t=266) ────────────────────────────────────────
 
 def test_extract_start_sec_forms():
     """공유 링크의 t 파라미터는 초·h/m/s 표기 모두 초로 환산된다."""
-    assert app._extract_start_sec("https://youtu.be/0kC3xOZChdA?t=266") == 266
-    assert app._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk&t=4m26s") == 266
-    assert app._extract_start_sec("https://youtu.be/x?t=1h2m3s") == 3723
-    assert app._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk&start=90") == 90
-    assert app._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk") == 0
-    assert app._extract_start_sec("https://youtu.be/x?t=") == 0
+    assert yt_queue._extract_start_sec("https://youtu.be/0kC3xOZChdA?t=266") == 266
+    assert yt_queue._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk&t=4m26s") == 266
+    assert yt_queue._extract_start_sec("https://youtu.be/x?t=1h2m3s") == 3723
+    assert yt_queue._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk&start=90") == 90
+    assert yt_queue._extract_start_sec("https://www.youtube.com/watch?v=abcdefghijk") == 0
+    assert yt_queue._extract_start_sec("https://youtu.be/x?t=") == 0
 
 
 def test_start_time_url_keeps_video_id_for_dedup():
     """t 파라미터가 붙어도 영상 ID 추출(중복 판정 키)은 그대로여야 한다."""
-    assert app._extract_yt_id("https://youtu.be/0kC3xOZChdA?t=266") == "0kC3xOZChdA"
+    assert yt_queue._extract_yt_id("https://youtu.be/0kC3xOZChdA?t=266") == "0kC3xOZChdA"
 
 
 def test_parse_transcript_offsets_timestamps(tmp_path):
@@ -1894,8 +1913,8 @@ def test_parse_transcript_offsets_timestamps(tmp_path):
         {"text": "first", "offsets": {"from": 0}},
         {"text": "second", "offsets": {"from": 20000}},
     ]}), encoding="utf-8")
-    assert app._parse_transcript(str(j)).startswith("[00:00] first")
-    shifted = app._parse_transcript(str(j), 266)
+    assert yt_transcribe._parse_transcript(str(j)).startswith("[00:00] first")
+    shifted = yt_transcribe._parse_transcript(str(j), 266)
     assert shifted.startswith("[04:26] first")
     assert "[04:46] second" in shifted
 
@@ -1903,8 +1922,8 @@ def test_parse_transcript_offsets_timestamps(tmp_path):
 def test_queue_add_start_sec_is_stored(monkeypatch):
     """시작 시각을 지정한 요청은 start_sec과 t 파라미터가 붙은 url로 큐에 들어간다."""
     monkeypatch.setattr(app.db, "get_item_by_yt_id", lambda i: None)
-    monkeypatch.setattr(app, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
-    monkeypatch.setattr(app, "_kick_drain_if_idle", lambda: False)
+    monkeypatch.setattr(yt_queue, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
+    monkeypatch.setattr(yt_queue, "_kick_drain_if_idle", lambda: False)
     seen = {}
 
     def _enq(yt_id, url, title, channel_id, **kw):
@@ -1924,7 +1943,7 @@ def test_queue_add_start_sec_is_stored(monkeypatch):
 def test_transcribed_video_stays_blocked_even_with_start_sec(monkeypatch):
     """이미 전사된 영상은 시작 시각을 지정해도 중복으로 거절한다."""
     monkeypatch.setattr(app.db, "get_item_by_yt_id", lambda i: {"md_path": "x"})
-    monkeypatch.setattr(app, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
+    monkeypatch.setattr(yt_queue, "_oembed_meta", lambda u: {"title": "T", "channel": "C"})
     c = app.app.test_client()
     for url in ("https://youtu.be/0kC3xOZChdA?t=266", "https://youtu.be/0kC3xOZChdA"):
         r = c.post("/queue/items", json={"url": url})
@@ -1938,7 +1957,7 @@ def test_transcribed_video_stays_blocked_even_with_start_sec(monkeypatch):
 
 def test_detect_language_skips_short_audio():
     """짧은 오디오는 표본을 뽑을 여지가 없어 whisper 기본 감지에 맡긴다."""
-    assert app._detect_language("/nonexistent.mp3", 60, "8") == ("", 0.0)
+    assert yt_transcribe._detect_language("/nonexistent.mp3", 60, "8") == ("", 0.0)
 
 
 def test_detect_language_majority_across_samples(monkeypatch, tmp_path):
@@ -1962,8 +1981,8 @@ def test_detect_language_majority_across_samples(monkeypatch, tmp_path):
         lang, p = ("en", 0.40) if n == 1 else ("ko", 0.98)
         return R(f"whisper_full_with_state: auto-detected language: {lang} (p = {p})")
 
-    monkeypatch.setattr(app.subprocess, "run", fake_run)
-    lang, p = app._detect_language(str(probe), 1800, "8")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    lang, p = yt_transcribe._detect_language(str(probe), 1800, "8")
     assert lang == "ko"          # 0.98*2 > 0.40
     assert p == 0.98
     assert len(calls) == 3       # 25/50/75% 세 지점
@@ -1984,9 +2003,9 @@ def test_detect_language_low_confidence_keeps_auto(monkeypatch, tmp_path):
             open(cmd[-1], "wb").write(b"x")
         return R()
 
-    monkeypatch.setattr(app.subprocess, "run", fake_run)
-    lang, p = app._detect_language(str(probe), 1800, "8")
-    assert lang == "en" and p < app._LANG_MIN_P    # 호출부가 이 임계로 걸러낸다
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    lang, p = yt_transcribe._detect_language(str(probe), 1800, "8")
+    assert lang == "en" and p < yt_transcribe._LANG_MIN_P    # 호출부가 이 임계로 걸러낸다
 
 
 def test_permanent_reasons_are_detected_for_main_pipeline():
@@ -2019,7 +2038,7 @@ def _whisper_json(tmp_path, texts):
 def test_collapse_detected_on_repetition_loop(tmp_path):
     """같은 문장이 수천 번 반복되면 붕괴로 판정한다(실제 사례 재현)."""
     texts = ["intro one", "intro two"] + ["I'm excited to be on a rollercoaster ride."] * 500
-    collapsed, detail = app._looks_collapsed(_whisper_json(tmp_path, texts))
+    collapsed, detail = yt_transcribe._looks_collapsed(_whisper_json(tmp_path, texts))
     assert collapsed
     assert "rollercoaster" in detail
 
@@ -2029,7 +2048,7 @@ def test_collapse_not_triggered_on_normal_transcript(tmp_path):
     texts = [f"sentence number {i}" for i in range(200)]
     texts.insert(50, texts[50])          # 우연한 연속 중복 몇 개
     texts.insert(120, texts[120])
-    collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, texts))
+    collapsed, _ = yt_transcribe._looks_collapsed(_whisper_json(tmp_path, texts))
     assert not collapsed
 
 
@@ -2041,7 +2060,7 @@ def test_collapse_not_triggered_by_short_backchannels(tmp_path):
     texts = []
     for i in range(300):
         texts += [f"substantive sentence {i}", "Yeah.", "Yeah.", "Right.", "Right."]
-    collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, texts))
+    collapsed, _ = yt_transcribe._looks_collapsed(_whisper_json(tmp_path, texts))
     assert not collapsed
 
 
@@ -2060,7 +2079,7 @@ def test_collapse_detected_on_multi_sentence_cycle(tmp_path):
     for _ in range(40):
         for s in loop:
             segs.append((s, t, t + 2)); t += 2
-    collapsed, detail = app._looks_collapsed(_whisper_json_timed(tmp_path, segs))
+    collapsed, detail = yt_transcribe._looks_collapsed(_whisper_json_timed(tmp_path, segs))
     assert collapsed and "4문장 묶음" in detail
 
 
@@ -2075,14 +2094,14 @@ def test_collapse_detected_on_short_loop_of_full_window_segments(tmp_path):
             segs.append((text, t, t + 30)); t += 30
         segs += [(f"뒤 {i}", t + i * 4, t + i * 4 + 4) for i in range(10)]
         return segs
-    collapsed, detail = app._looks_collapsed(_whisper_json_timed(tmp_path, build("금리에 훨씬 민감해지기 시작한 상태에서")))
+    collapsed, detail = yt_transcribe._looks_collapsed(_whisper_json_timed(tmp_path, build("금리에 훨씬 민감해지기 시작한 상태에서")))
     assert collapsed and "세그먼트로 되풀이" in detail
     for filler in ("We'll be right back.", "자막은 설정에서 선택하실 수 있습니다.", "한글자막 by 한효정"):
-        assert app._looks_collapsed(_whisper_json_timed(tmp_path, build(filler)))[0] is False, filler
+        assert yt_transcribe._looks_collapsed(_whisper_json_timed(tmp_path, build(filler)))[0] is False, filler
     # 긴 세그먼트가 한 번뿐이면(정상 발화의 긴 문장) 붕괴가 아니다
     segs = [(f"문장 {i}", i * 4.0, i * 4.0 + 4) for i in range(30)] + [("긴 문장", 120, 148), ("긴 문장", 148, 175)]
     segs += [(f"뒤 {i}", 175 + i * 4, 179 + i * 4) for i in range(10)]
-    assert app._looks_collapsed(_whisper_json_timed(tmp_path, segs))[0] is False
+    assert yt_transcribe._looks_collapsed(_whisper_json_timed(tmp_path, segs))[0] is False
 
 
 def test_cycle_not_triggered_by_varied_backchannels_or_short_outro(tmp_path):
@@ -2094,13 +2113,13 @@ def test_cycle_not_triggered_by_varied_backchannels_or_short_outro(tmp_path):
     for _ in range(22):
         for s in ("감사합니다", "네"):
             segs.append((s, t, t + 1)); t += 1
-    collapsed, _ = app._looks_collapsed(_whisper_json_timed(tmp_path, segs))
+    collapsed, _ = yt_transcribe._looks_collapsed(_whisper_json_timed(tmp_path, segs))
     assert not collapsed
 
 
 def test_collapse_ignores_too_short_output(tmp_path):
     """세그먼트가 적으면 판정하지 않는다(짧은 영상의 후렴 반복 등)."""
-    collapsed, _ = app._looks_collapsed(_whisper_json(tmp_path, ["같은 말"] * 10))
+    collapsed, _ = yt_transcribe._looks_collapsed(_whisper_json(tmp_path, ["같은 말"] * 10))
     assert not collapsed
 
 
@@ -2108,13 +2127,13 @@ def test_collapse_ignores_too_short_output(tmp_path):
 
 def test_script_mix_flags_foreign_scripts():
     """한국어 요약에 아랍/키릴이 섞이면 경고 대상(실제 사례 재현)."""
-    assert app._warn_script_mix("x.md", "비용을 압도하기 전에 تمويل할 수 있느냐다")
-    assert app._warn_script_mix("x.md", "경조직 수술은 연조ічой과 달리 어렵다")
+    assert yt_summary._warn_script_mix("x.md", "비용을 압도하기 전에 تمويل할 수 있느냐다")
+    assert yt_summary._warn_script_mix("x.md", "경조직 수술은 연조ічой과 달리 어렵다")
 
 
 def test_script_mix_flags_cjk_inside_word():
     """한글 음절 사이에 낀 한자는 단어를 깨므로 경고한다."""
-    assert app._warn_script_mix("x.md", "언론의 과격함이 민粹주의를 낳는다")
+    assert yt_summary._warn_script_mix("x.md", "언론의 과격함이 민粹주의를 낳는다")
 
 
 def test_script_mix_allows_normal_hanja_annotation():
@@ -2123,7 +2142,7 @@ def test_script_mix_allows_normal_hanja_annotation():
                "2025년 매출 6억 달러(전년比 +38%)",
                "거주 주(州)에 따라 세율이 다르다",
                "RC 상수(τ = R × C)는 지연을 뜻한다"):
-        assert not app._warn_script_mix("x.md", ok), ok
+        assert not yt_summary._warn_script_mix("x.md", ok), ok
 
 
 # ── 한자·이질 문자 누출 게이트 (2026-09-12 All-In 요약 "主张하는") ──────────────
@@ -2153,30 +2172,30 @@ def test_latin_fragments_in_korean_sentences_are_caught_but_not_proper_nouns():
         "국소 중력은 \\(\\sqrt{1-2GM/r}\\) 보정이 붙어",              # 수식
     }
     for t in leaks:
-        assert app._latin_fragments(t, src), t
-        assert app._script_leaks(t, src), t          # 게이트 경로로도 잡힌다
+        assert yt_summary._latin_fragments(t, src), t
+        assert yt_summary._script_leaks(t, src), t          # 게이트 경로로도 잡힌다
     for t in fine:
-        assert not app._latin_fragments(t, src), t
+        assert not yt_summary._latin_fragments(t, src), t
 
 
 def test_grok_gets_the_style_note_and_retry_note_mentions_english_fragments(monkeypatch, tmp_path):
     seen = {}
-    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(yt_core, "GROK_BIN", "/bin/echo")
 
     def run_command(args, **kwargs):
         seen["prompt"] = open(args[args.index("--prompt-file") + 1], encoding="utf-8").read()
         return llm_gateway.ProcessResult(0, "# 결과\n\n- 항목", "")
 
-    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
-    body, err = app._summarize_with_grok("본 지시문 {transcript}")
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    body, err = yt_summary._summarize_with_grok("본 지시문 {transcript}")
     assert body and not err
     assert seen["prompt"].startswith("[문체 보정") and seen["prompt"].endswith("본 지시문 {transcript}")
     assert "사전형 동사" in seen["prompt"] and "영어 단어를 한국어 문장 안에 조각으로" in seen["prompt"]
     # 다른 모델 경로에는 붙지 않는다(Grok 전용)
     import inspect
-    assert "_GROK_STYLE_NOTE" not in inspect.getsource(app._summarize_with_gpt)
-    assert "_GROK_STYLE_NOTE" in inspect.getsource(app._summarize_with_grok)
-    assert "영어 조각" in app._SCRIPT_RETRY_NOTE
+    assert "_GROK_STYLE_NOTE" not in inspect.getsource(yt_summary._summarize_with_gpt)
+    assert "_GROK_STYLE_NOTE" in inspect.getsource(yt_summary._summarize_with_grok)
+    assert "영어 조각" in yt_summary._SCRIPT_RETRY_NOTE
 
 
 def test_script_leaks_detects_chinese_words_but_allows_korean_hanja_usage():
@@ -2197,9 +2216,9 @@ def test_script_leaks_detects_chinese_words_but_allows_korean_hanja_usage():
         "정상 한국어 요약 NVIDIA GPU",
     }
     for t in leaks:
-        assert app._script_leaks(t), t
+        assert yt_summary._script_leaks(t), t
     for t in fine:
-        assert not app._script_leaks(t), t
+        assert not yt_summary._script_leaks(t), t
 
 
 def _ordered_bodies(output):
@@ -2216,9 +2235,9 @@ def test_summarize_ordered_retries_once_on_han_leak_then_falls_through(monkeypat
             return "# 요약\n\nAI 부처를 主张하는 단체", ""
         return "# 요약\n\nAI 부처를 주장하는 단체", ""
 
-    monkeypatch.setattr(app, "_summarize_with_grok", fake_grok)
-    monkeypatch.setattr(app, "_summarize_with_gpt", lambda *a, **k: ("", "unused"))
-    output = list(app._summarize_ordered("프롬프트", None, ["grok"], transcript_chars=100))
+    monkeypatch.setattr(yt_summary, "_summarize_with_grok", fake_grok)
+    monkeypatch.setattr(yt_summary, "_summarize_with_gpt", lambda *a, **k: ("", "unused"))
+    output = list(yt_summary._summarize_ordered("프롬프트", None, ["grok"], transcript_chars=100))
     bodies = _ordered_bodies(output)
     assert any("주장하는" in b for b in bodies) and not any("主张" in b for b in bodies)
     assert output[-1].startswith("event: done")
@@ -2236,9 +2255,9 @@ def test_summarize_ordered_han_leak_persisting_after_retry_moves_to_next_model(m
         gpt_calls.append(prompt)
         return "# 요약\n\n중국 시장에서", ""
 
-    monkeypatch.setattr(app, "_summarize_with_grok", fake_grok)
-    monkeypatch.setattr(app, "_summarize_with_gpt", fake_gpt)
-    output = list(app._summarize_ordered("프롬프트", None, ["grok", "gpt"], transcript_chars=100))
+    monkeypatch.setattr(yt_summary, "_summarize_with_grok", fake_grok)
+    monkeypatch.setattr(yt_summary, "_summarize_with_gpt", fake_gpt)
+    output = list(yt_summary._summarize_ordered("프롬프트", None, ["grok", "gpt"], transcript_chars=100))
     bodies = _ordered_bodies(output)
     assert any("중국 시장" in b for b in bodies) and not any("中国" in b for b in bodies)
     assert len(grok_calls) == 2 and len(gpt_calls) == 1
@@ -2347,22 +2366,22 @@ def test_codex_usage_and_final_message_fallback(monkeypatch):
 
 
 def test_grok_summary_logs_usage_and_keeps_text(llm_db, monkeypatch):
-    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(yt_core, "GROK_BIN", "/bin/echo")
     seen = {}
 
     def run_command(args, **kwargs):
         seen["args"] = args
         env = dict(_GROK_ENV, text="# 요약\n\n본문")
         return llm_gateway.ProcessResult(0, json.dumps(env), "")
-    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
-    body, err = app._summarize_with_grok("prompt", reasoning_effort="high", title="영상 A")
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    body, err = yt_summary._summarize_with_grok("prompt", reasoning_effort="high", title="영상 A")
     assert not err
     assert seen["args"][-2:] == ["--reasoning-effort", "high"]
     assert "--output-format" in seen["args"] and "json" in seen["args"]
     # plain 출력("# 요약\n\n본문\n")을 넣었을 때와 결과가 같다
-    monkeypatch.setattr(app.llm_gateway, "run_command",
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(0, "# 요약\n\n본문\n", ""))
-    plain_body, _ = app._summarize_with_grok("prompt", reasoning_effort="high", title="영상 A")
+    plain_body, _ = yt_summary._summarize_with_grok("prompt", reasoning_effort="high", title="영상 A")
     assert body == plain_body
     rows = _llm_rows(llm_db)
     assert len(rows) == 2
@@ -2375,14 +2394,14 @@ def test_grok_summary_logs_usage_and_keeps_text(llm_db, monkeypatch):
 
 
 def test_grok_summary_logs_failures(llm_db, monkeypatch):
-    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
-    monkeypatch.setattr(app.llm_gateway, "run_command",
+    monkeypatch.setattr(yt_core, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(-1, "", "", timed_out=True))
-    body, err = app._summarize_with_grok("prompt", title="T")
+    body, err = yt_summary._summarize_with_grok("prompt", title="T")
     assert not body and "타임아웃" in err
-    monkeypatch.setattr(app.llm_gateway, "run_command",
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(1, "", "usage limit"))
-    body, err = app._summarize_with_grok("prompt", title="T")
+    body, err = yt_summary._summarize_with_grok("prompt", title="T")
     assert not body and err == "usage limit"
     rows = _llm_rows(llm_db)
     assert [r["status"] for r in rows] == ["timeout", "error"]
@@ -2390,14 +2409,14 @@ def test_grok_summary_logs_failures(llm_db, monkeypatch):
 
 
 def test_gpt_summary_logs_tokens_from_json_events(llm_db, monkeypatch):
-    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
-    monkeypatch.setattr(app.llm_gateway, "run_command",
+    monkeypatch.setattr(llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(0, _CODEX_EVENTS, ""))
-    body, err = app._summarize_with_gpt("prompt", reasoning_effort="xhigh", title="영상 B")
+    body, err = yt_summary._summarize_with_gpt("prompt", reasoning_effort="xhigh", title="영상 B")
     assert body.startswith("# 결과") and not err
     row = _llm_rows(llm_db)[0]
     assert (row["provider"], row["model"], row["reasoning"], row["purpose"], row["title"]) == \
-        ("codex", app.GPT_MODEL, "xhigh", "summary", "영상 B")
+        ("codex", yt_core.GPT_MODEL, "xhigh", "summary", "영상 B")
     assert (row["input_tokens"], row["output_tokens"],
             row["cache_read_tokens"], row["cache_write_tokens"]) == (17566, 5, 13056, 7)
 
@@ -2416,13 +2435,13 @@ def test_claude_stream_summary_logs_result_usage(llm_db, monkeypatch):
         llm_gateway.StreamEvent("stdout", data=json.dumps(result) + "\n"),
         llm_gateway.StreamEvent("complete", returncode=0, stderr=""),
     ]
-    monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *a, **k: iter(stream))
-    output = list(app._summarize_with_claude("prompt", None, title="영상 C"))
+    monkeypatch.setattr(llm_gateway, "stream_command", lambda *a, **k: iter(stream))
+    output = list(yt_summary._summarize_with_claude("prompt", None, title="영상 C"))
     assert output[-1].startswith("event: done")
     row = _llm_rows(llm_db)[0]
     assert (row["provider"], row["model"], row["purpose"], row["title"], row["status"]) == \
         ("claude", "claude-opus-5-0", "summary", "영상 C", "ok")
-    assert json.loads(row["meta"])["alias"] == app.CLAUDE_MODEL
+    assert json.loads(row["meta"])["alias"] == yt_core.CLAUDE_MODEL
     assert (row["input_tokens"], row["output_tokens"],
             row["cache_read_tokens"], row["cache_write_tokens"]) == (2, 4, 28517, 16581)
 
@@ -2432,10 +2451,10 @@ def test_claude_stream_summary_logs_result_usage(llm_db, monkeypatch):
         llm_gateway.StreamEvent("stdout", data='{"type":"result","is_error":true,"result":"usage limit"}\n'),
         llm_gateway.StreamEvent("complete", returncode=1, stderr="usage limit"),
     ]
-    monkeypatch.setattr(app.llm_gateway, "stream_command", lambda *a, **k: iter(fail_stream))
-    monkeypatch.setattr(app, "_summarize_with_grok", lambda p, **kw: ("# Grok", ""))
-    monkeypatch.setattr(app, "_summarize_with_gpt", lambda p, **kw: ("", "quota"))
-    list(app._summarize_ordered("prompt", None, ["opus", "gpt", "grok"], title="영상 D",
+    monkeypatch.setattr(llm_gateway, "stream_command", lambda *a, **k: iter(fail_stream))
+    monkeypatch.setattr(yt_summary, "_summarize_with_grok", lambda p, **kw: ("# Grok", ""))
+    monkeypatch.setattr(yt_summary, "_summarize_with_gpt", lambda p, **kw: ("", "quota"))
+    list(yt_summary._summarize_ordered("prompt", None, ["opus", "gpt", "grok"], title="영상 D",
                                 reasoning_levels={"opus": "high", "gpt": "high", "grok": "default"}))
     rows = _llm_rows(llm_db)
     assert rows[1]["provider"] == "claude" and rows[1]["status"] == "error"
@@ -2453,12 +2472,12 @@ def test_title_translate_log_rows(llm_db, monkeypatch):
     def run_codex_prompt(prompt, **kwargs):
         codex_calls.append(kwargs)
         return llm_gateway.ProcessResult(0, '["안녕하세요 세계", "두 번째"]', "")
-    monkeypatch.setattr(app.llm_gateway, "run_command", run_command)
-    monkeypatch.setattr(app.llm_gateway, "run_codex_prompt", run_codex_prompt)
-    out = app._translate_titles(["Hello world", "Second"])
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    monkeypatch.setattr(llm_gateway, "run_codex_prompt", run_codex_prompt)
+    out = yt_titles._translate_titles(["Hello world", "Second"])
     assert out == ["안녕하세요 세계", "두 번째"]
     # 제목 번역은 GPT-6 Luna, 추론 기본값(2026-09-23 사용자 지시).
-    assert codex_calls == [{"model": "gpt-6-luna", "timeout": app.TITLE_TR_TIMEOUT,
+    assert codex_calls == [{"model": "gpt-6-luna", "timeout": yt_titles.TITLE_TR_TIMEOUT,
                             "reasoning_effort": "default"}]
     rows = _llm_rows(llm_db)
     assert [(r["provider"], r["purpose"], r["title"], r["model"], r["reasoning"]) for r in rows] == [
@@ -2466,17 +2485,17 @@ def test_title_translate_log_rows(llm_db, monkeypatch):
 
 
 def test_title_translation_falls_back_to_summary_slots_after_luna(monkeypatch):
-    order = app._title_tr_order(1)
+    order = yt_titles._title_tr_order(1)
     assert order[0] == ("gpt", "gpt-6-luna")
     assert order.count(("gpt", "gpt-6-luna")) == 1
     tried = []
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "gpt",
+    monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, "gpt",
                         lambda p, label, model=None, effort="default": (tried.append(model) or ("", "quota")))
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "opus",
+    monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, "opus",
                         lambda p, label, model=None, effort="default": (tried.append(model) or ('["번역"]', "")))
-    monkeypatch.setitem(app._TITLE_TR_PROVIDERS, "grok",
+    monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, "grok",
                         lambda p, label, model=None, effort="default": (tried.append(model) or ("", "down")))
-    assert app._translate_titles(["Hello"], first_id=1) == ["번역"]
+    assert yt_titles._translate_titles(["Hello"], first_id=1) == ["번역"]
     assert tried[0] == "gpt-6-luna" and len(tried) >= 2
 
 
@@ -2536,63 +2555,63 @@ def test_transcript_translator_logs_local_call(llm_db, monkeypatch):
 def test_llm_logging_never_breaks_the_work(tmp_path, monkeypatch):
     """(a) llm_log 모듈 부재, (b) DB 경로 기록 불가 — 두 경우 모두 본업 결과가 그대로다."""
     import transcript_translator as tt
-    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
-    monkeypatch.setattr(app.llm_gateway, "run_command",
+    monkeypatch.setattr(yt_core, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(0, json.dumps(dict(_GROK_ENV, text="# 요약\n\n본문")), ""))
-    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
     monkeypatch.setattr(tt, "_client", lambda idx=0: _FakeOpenAIClient())
     monkeypatch.setattr(tt, "_active", 0)
-    expected_grok = app._summarize_with_grok("prompt", title="T")
-    expected_gpt = app._summarize_with_gpt("prompt", title="T")
+    expected_grok = yt_summary._summarize_with_grok("prompt", title="T")
+    expected_gpt = yt_summary._summarize_with_gpt("prompt", title="T")
     expected_tr = tt.translate_chunk("hello", title="T")
 
     # (a) 모듈을 못 찾은 상태
     monkeypatch.setattr(llm_gateway, "llm_log", None)
     monkeypatch.setattr(tt, "llm_log", None)
-    assert app._summarize_with_grok("prompt", title="T") == expected_grok
-    assert app._summarize_with_gpt("prompt", title="T") == expected_gpt
+    assert yt_summary._summarize_with_grok("prompt", title="T") == expected_grok
+    assert yt_summary._summarize_with_gpt("prompt", title="T") == expected_gpt
     assert tt.translate_chunk("hello", title="T") == expected_tr
     assert llm_gateway.unwrap_grok_json(json.dumps(_GROK_ENV))[0] == "ok\n"
     monkeypatch.undo()
 
     # (b) DB를 쓸 수 없는 경로
-    monkeypatch.setattr(app, "GROK_BIN", "/bin/echo")
-    monkeypatch.setattr(app.llm_gateway, "run_command",
+    monkeypatch.setattr(yt_core, "GROK_BIN", "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(0, json.dumps(dict(_GROK_ENV, text="# 요약\n\n본문")), ""))
-    monkeypatch.setattr(app.llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "resolve_codex_bin", lambda: "/bin/echo")
     monkeypatch.setattr(tt, "_client", lambda idx=0: _FakeOpenAIClient())
     monkeypatch.setattr(tt, "_active", 0)
     monkeypatch.setenv("HERMES_LLM_LOG_DB", "/dev/null/x/calls.db")
     monkeypatch.delenv("HERMES_LLM_LOG_DISABLED", raising=False)
-    assert app._summarize_with_grok("prompt", title="T") == expected_grok
-    assert app._summarize_with_gpt("prompt", title="T") == expected_gpt
+    assert yt_summary._summarize_with_grok("prompt", title="T") == expected_grok
+    assert yt_summary._summarize_with_gpt("prompt", title="T") == expected_gpt
     assert tt.translate_chunk("hello", title="T") == expected_tr
 
 
 def test_model_label_formats_claude_ids(monkeypatch):
     """Claude는 접두어 없이 등급+버전 — 예전엔 두 조각 ID(claude-opus-5)가 원문 그대로 찍혔다."""
-    monkeypatch.setattr(app, "_CLAUDE_SEEN", {})
-    assert app._model_label("claude-opus-5-5") == "Opus 5.5"
-    assert app._model_label("claude-opus-5") == "Opus 5"
-    assert app._model_label("claude-opus-4-8") == "Opus 4.8"
-    assert app._model_label("claude-haiku-4-5-20251001") == "Haiku 4.5"
-    assert app._model_label("claude-fable-5-1") == "Fable 5.1"
-    assert app._model_label("claude-sonnet-5") == "Sonnet 5"
+    monkeypatch.setattr(yt_models, "_CLAUDE_SEEN", {})
+    assert yt_models._model_label("claude-opus-5-5") == "Opus 5.5"
+    assert yt_models._model_label("claude-opus-5") == "Opus 5"
+    assert yt_models._model_label("claude-opus-4-8") == "Opus 4.8"
+    assert yt_models._model_label("claude-haiku-4-5-20251001") == "Haiku 4.5"
+    assert yt_models._model_label("claude-fable-5-1") == "Fable 5.1"
+    assert yt_models._model_label("claude-sonnet-5") == "Sonnet 5"
     # 다른 LLM 표기는 그대로
-    assert app._model_label("grok-4.7") == "Grok 4.7"
-    assert app._model_label("gpt-6-astra") == "GPT 6 Astra"
+    assert yt_models._model_label("grok-4.7") == "Grok 4.7"
+    assert yt_models._model_label("gpt-6-astra") == "GPT 6 Astra"
 
 
 def test_model_label_alias_uses_last_confirmed_model(monkeypatch):
-    monkeypatch.setattr(app, "_CLAUDE_SEEN", {})
-    assert app._model_label("opus") == "Opus"                 # 아직 확인된 모델 없음
-    app._model_label("claude-opus-5-5")                         # 실제 응답으로 확인
-    assert app._model_label("opus") == "Opus 5.5"
+    monkeypatch.setattr(yt_models, "_CLAUDE_SEEN", {})
+    assert yt_models._model_label("opus") == "Opus"                 # 아직 확인된 모델 없음
+    yt_models._model_label("claude-opus-5-5")                         # 실제 응답으로 확인
+    assert yt_models._model_label("opus") == "Opus 5.5"
 
 
 def test_title_translation_model_is_configurable(monkeypatch, tmp_path):
     """제목 번역 모델·추론을 설정에서 고른다(2026-09-29 사용자 지시). 저장 전엔 환경 기본값."""
-    catalog = app.llm_gateway.llm_catalog
+    catalog = llm_gateway.llm_catalog
     monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
     catalog.save(catalog.seed(), 0)
     db.init()
@@ -2600,14 +2619,14 @@ def test_title_translation_model_is_configurable(monkeypatch, tmp_path):
     try:
         db.set_title_model("", "")
         payload = client.get("/channels").get_json()
-        assert (payload["title_model"], payload["title_effort"]) == (app.TITLE_TR_MODEL, app.TITLE_TR_REASONING)
+        assert (payload["title_model"], payload["title_effort"]) == (yt_titles.TITLE_TR_MODEL, yt_titles.TITLE_TR_REASONING)
         before = db.get_monitor_summary_slots()["slots"]
         r = client.patch("/channels/model-orders",
                          json={"title_model": "claude-opus-5-5", "title_effort": "low"})
         assert r.status_code == 200
         assert (r.get_json()["title_model"], r.get_json()["title_effort"]) == ("claude-opus-5-5", "low")
         assert db.get_monitor_summary_slots()["slots"] == before          # 요약 슬롯은 그대로
-        assert app._title_tr_order(1)[0] == ("opus", "claude-opus-5-5")
+        assert yt_titles._title_tr_order(1)[0] == ("opus", "claude-opus-5-5")
         # 거부: 모르는 모델, 모델이 못 받는 추론, 로컬 모델(제목 번역 러너 없음), 형식 오류
         for bad in ({"title_model": "gpt-9"}, {"title_model": "grok", "title_effort": "extreme"},
                     {"title_model": "qwen3.8-27b", "title_effort": "default"}):
@@ -2618,10 +2637,10 @@ def test_title_translation_model_is_configurable(monkeypatch, tmp_path):
         # 1순위만 설정 추론으로, 폴백은 추론 기본값
         tried = []
         for fam in ("gpt", "opus", "grok"):
-            monkeypatch.setitem(app._TITLE_TR_PROVIDERS, fam,
+            monkeypatch.setitem(yt_titles._TITLE_TR_PROVIDERS, fam,
                                 lambda p, label, model=None, effort="default":
                                 (tried.append((model, effort)) or ("", "down")))
-        assert app._translate_titles(["Hello"], first_id=1) is None
+        assert yt_titles._translate_titles(["Hello"], first_id=1) is None
         assert tried[0] == ("claude-opus-5-5", "low")
         assert all(e == "default" for _, e in tried[1:]) and len(tried) >= 2
     finally:
@@ -2655,12 +2674,12 @@ def test_remote_phone_can_load_reader_fonts():
 def test_downloaded_audio_is_archived_then_pruned(monkeypatch, tmp_path):
     """전사가 끝난 다운로드 오디오는 바로 지우지 않고 보관함에 90일 둔다(2026-10-31 사용자 지시)."""
     archive = tmp_path / "audio_archive"
-    monkeypatch.setattr(app, "AUDIO_ARCHIVE_DIR", str(archive))
-    monkeypatch.setattr(app, "AUDIO_RETENTION_DAYS", 90)
-    monkeypatch.setattr(app, "DELETE_AUDIO_AFTER", True)
-    monkeypatch.setattr(app, "_parse_transcript", lambda p, off=0: "[00:00] " + "가" * 3000)
-    monkeypatch.setattr(app, "_save_md", lambda *a, **k: None)
-    monkeypatch.setattr(app, "save_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(yt_core, "AUDIO_ARCHIVE_DIR", str(archive))
+    monkeypatch.setattr(yt_core, "AUDIO_RETENTION_DAYS", 90)
+    monkeypatch.setattr(yt_core, "DELETE_AUDIO_AFTER", True)
+    monkeypatch.setattr(yt_transcribe, "_parse_transcript", lambda p, off=0: "[00:00] " + "가" * 3000)
+    monkeypatch.setattr(yt_core, "_save_md", lambda *a, **k: None)
+    monkeypatch.setattr(yt_jobs, "save_thumbnail", lambda *a, **k: None)
     old_day = archive / "20260701"
     old_day.mkdir(parents=True)
     old = old_day / "old.mp3"
@@ -2672,14 +2691,14 @@ def test_downloaded_audio_is_archived_then_pruned(monkeypatch, tmp_path):
     job_id = "archive-audio"
     _make_job(job_id, meta={"duration": 1800})
     try:
-        app._finish_transcription(job_id, str(audio), 0, str(tmp_path / "ok.md"), delete_audio=True)
-        assert app.jobs[job_id]["status"] == "done"
+        yt_jobs._finish_transcription(job_id, str(audio), 0, str(tmp_path / "ok.md"), delete_audio=True)
+        assert yt_core.jobs[job_id]["status"] == "done"
         assert not audio.exists()
         kept = list(archive.glob("*/a.mp3"))
         assert len(kept) == 1 and kept[0].read_bytes() == b"mp3"
         assert not old.exists() and not old_day.exists(), "보관 기한이 지난 오디오가 남았다"
     finally:
-        app.jobs.pop(job_id, None)
+        yt_core.jobs.pop(job_id, None)
 
 
 def test_whisper_first_pass_uses_ctx64_vad_and_chunks_skip_vad(tmp_path, monkeypatch):
@@ -2690,10 +2709,10 @@ def test_whisper_first_pass_uses_ctx64_vad_and_chunks_skip_vad(tmp_path, monkeyp
     import threading as _threading
 
     vad = tmp_path / "vad.bin"; vad.write_bytes(b"x")
-    monkeypatch.setattr(app, "VAD_MODEL_PATH", str(vad))
-    monkeypatch.setattr(app, "_VAD_ENABLED", True)
-    monkeypatch.setattr(app, "_FIRST_CONTEXT", 64)
-    monkeypatch.setattr(app, "_NO_SPEECH_THOLD", "0.6")
+    monkeypatch.setattr(yt_transcribe, "VAD_MODEL_PATH", str(vad))
+    monkeypatch.setattr(yt_transcribe, "_VAD_ENABLED", True)
+    monkeypatch.setattr(yt_transcribe, "_FIRST_CONTEXT", 64)
+    monkeypatch.setattr(yt_transcribe, "_NO_SPEECH_THOLD", "0.6")
     cmds = []
 
     class P:
@@ -2701,28 +2720,28 @@ def test_whisper_first_pass_uses_ctx64_vad_and_chunks_skip_vad(tmp_path, monkeyp
             cmds.append(cmd); self.stdout = io.BytesIO(b""); self.returncode = 0
         def wait(self, timeout=None):
             return 0
-    monkeypatch.setattr(app.subprocess, "Popen", P)
+    monkeypatch.setattr(subprocess, "Popen", P)
     jid = "t-vad"
-    app.jobs[jid] = {"queue": _queue.Queue(), "stop_event": _threading.Event()}
+    yt_core.jobs[jid] = {"queue": _queue.Queue(), "stop_event": _threading.Event()}
     try:
-        app._run_whisper(jid, "a.mp3", "ko", "4", 300)
+        yt_transcribe._run_whisper(jid, "a.mp3", "ko", "4", 300)
         first = cmds[-1]
         assert first[first.index("--max-context") + 1] == "64"
         assert first[first.index("--no-speech-thold") + 1] == "0.6"
         assert "--vad" in first and first[first.index("--vad-model") + 1] == str(vad)
-        app._run_whisper(jid, "a.mp3", "ko", "4", 300, max_context=0, offset_ms=0, duration_ms=600_000,
+        yt_transcribe._run_whisper(jid, "a.mp3", "ko", "4", 300, max_context=0, offset_ms=0, duration_ms=600_000,
                          output_prefix="p", vad=False)
         assert "--vad" not in cmds[-1] and cmds[-1][cmds[-1].index("--max-context") + 1] == "0"
-        monkeypatch.setattr(app, "_VAD_ENABLED", False)        # 비상 스위치: 예전 경로
-        monkeypatch.setattr(app, "_FIRST_CONTEXT", -1)
-        app._run_whisper(jid, "a.mp3", "ko", "4", 300)
+        monkeypatch.setattr(yt_transcribe, "_VAD_ENABLED", False)        # 비상 스위치: 예전 경로
+        monkeypatch.setattr(yt_transcribe, "_FIRST_CONTEXT", -1)
+        yt_transcribe._run_whisper(jid, "a.mp3", "ko", "4", 300)
         assert "--vad" not in cmds[-1] and "--max-context" not in cmds[-1]
-        monkeypatch.setattr(app, "_VAD_ENABLED", True)
-        monkeypatch.setattr(app, "VAD_MODEL_PATH", str(tmp_path / "missing.bin"))   # 모델 없으면 폴백
-        app._run_whisper(jid, "a.mp3", "ko", "4", 300)
+        monkeypatch.setattr(yt_transcribe, "_VAD_ENABLED", True)
+        monkeypatch.setattr(yt_transcribe, "VAD_MODEL_PATH", str(tmp_path / "missing.bin"))   # 모델 없으면 폴백
+        yt_transcribe._run_whisper(jid, "a.mp3", "ko", "4", 300)
         assert "--vad" not in cmds[-1]
     finally:
-        app.jobs.pop(jid, None)
+        yt_core.jobs.pop(jid, None)
 
 
 def test_collapse_with_ctx64_first_pass_goes_straight_to_chunks(monkeypatch):
@@ -2732,20 +2751,20 @@ def test_collapse_with_ctx64_first_pass_goes_straight_to_chunks(monkeypatch):
 
     for first_ctx, expect in ((64, ["pass1", "chunk"]), (-1, ["pass1", "ctx64", "chunk"])):
         calls = []
-        monkeypatch.setattr(app, "_FIRST_CONTEXT", first_ctx)
-        monkeypatch.setattr(app, "_run_whisper", lambda *a, **k: calls.append(
-            "ctx64" if k.get("max_context") == app._COLLAPSE_CONTEXT else "pass1") or 0)
-        monkeypatch.setattr(app, "_run_whisper_chunked", lambda *a, **k: calls.append("chunk") or 0)
-        monkeypatch.setattr(app, "_looks_collapsed", lambda p: (True, "붕괴"))
-        monkeypatch.setattr(app, "_coverage_ratio", lambda p, t: 1.0)
-        monkeypatch.setattr(app, "_finish_transcription", lambda *a, **k: None)
-        monkeypatch.setattr(app, "get_file_duration", lambda p: 300)
+        monkeypatch.setattr(yt_transcribe, "_FIRST_CONTEXT", first_ctx)
+        monkeypatch.setattr(yt_transcribe, "_run_whisper", lambda *a, **k: calls.append(
+            "ctx64" if k.get("max_context") == yt_transcribe._COLLAPSE_CONTEXT else "pass1") or 0)
+        monkeypatch.setattr(yt_transcribe, "_run_whisper_chunked", lambda *a, **k: calls.append("chunk") or 0)
+        monkeypatch.setattr(yt_transcribe, "_looks_collapsed", lambda p: (True, "붕괴"))
+        monkeypatch.setattr(yt_transcribe, "_coverage_ratio", lambda p, t: 1.0)
+        monkeypatch.setattr(yt_jobs, "_finish_transcription", lambda *a, **k: None)
+        monkeypatch.setattr(yt_core, "get_file_duration", lambda p: 300)
         jid = f"t-col{first_ctx}"
-        app.jobs[jid] = {"queue": _queue.Queue(), "stop_event": _threading.Event()}
+        yt_core.jobs[jid] = {"queue": _queue.Queue(), "stop_event": _threading.Event()}
         try:
-            app._transcribe_and_finish(jid, "a.mp3", "ko", "4", 300, "x.md")
+            yt_jobs._transcribe_and_finish(jid, "a.mp3", "ko", "4", 300, "x.md")
         finally:
-            app.jobs.pop(jid, None)
+            yt_core.jobs.pop(jid, None)
         assert calls == expect, (first_ctx, calls)
 
 

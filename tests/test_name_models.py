@@ -8,6 +8,7 @@ import sqlite3
 import app
 import db
 import name_fix
+import llm_gateway
 
 
 def _reset_names():
@@ -63,7 +64,7 @@ def test_name_model_getters_setters_roundtrip():
 
 
 def test_patch_name_models_validation(monkeypatch, tmp_path):
-    catalog = app.llm_gateway.llm_catalog
+    catalog = llm_gateway.llm_catalog
     monkeypatch.setenv('HERMES_LLM_CATALOG', str(tmp_path / 'catalog.json'))
     catalog.save(catalog.seed(), 0)
     db.init()
