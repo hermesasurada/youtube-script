@@ -15,7 +15,7 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 | `llm_runners.py` | 계열별 LLM 실행기(Claude·Codex·Grok·Gemini)와 Claude 스트리밍 |
 | `yt_queue.py` / `yt_blog.py` | 처리 큐 도우미 / 블로그 발행 도우미 |
 | `routes_*.py` | HTTP 라우트(main·summary·queue·channels·history·media) — `from yt_web import app`으로 붙인다 |
-| `db.py` | SQLite + FTS5 이력 인덱스(upsert/검색/reindex). `PRAGMA user_version` 마이그레이션 |
+| `db.py` | SQLite 연결·스키마·공용 도우미 — 쿼리는 `db_items`(이력)·`db_channels`(채널·모니터 설정)·`db_terms`(각주 제외)·`db_queue`(처리 큐), 마이그레이션은 `db_migrations`(번호별 함수 목록). 호출은 `db.이름`으로 통일(db.py가 다시 내보냄) |
 | `keyframe_report.py` | 영상 다운로드(yt-dlp) → ffmpeg 프레임 추출 → LLM 비전 분류 → 요약 md에 캡처 스트립 주입 |
 | `templates/` | `index.html`(데스크톱) · `mobile.html`(모바일 이력) |
 | `static/js/common.js` | 공유 모듈(`window.YS`): 마크다운 렌더·이스케이프·이력 API·키프레임 라이트박스 |
@@ -80,6 +80,12 @@ curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"v
 - 토큰이 있어도 간헐적으로 걸릴 수 있어, 403이면 큐 지연 전에 **새 세션으로 즉시 1회 재시도**한다(`app.py` 전사 / `keyframe_report.py` 캡처).
 
 ## 주요 환경변수
+
+서버 설정은 대부분 `yt_core.py` 한 곳에서 읽는다(경로·실행 파일·모델·타임아웃·동시 실행·오디오 보관·무음 판정). 그 밖의 위치:
+whisper 세부값은 `yt_transcribe.py`(`WHISPER_MIN_COVERAGE`·`WHISPER_CHUNK_SEC`·`WHISPER_FIRST_CONTEXT`·`WHISPER_NO_SPEECH`·`WHISPER_VAD`·`WHISPER_VAD_MODEL`),
+제목 번역 기본 모델은 `yt_titles.py`(`TITLE_TR_MODEL`·`TITLE_TR_REASONING`), 큐 주기는 `yt_queue.py`(`QUEUE_CYCLE_SEC`), 요약 생략 길이는
+`summary_policy.py`(`YT_SUMMARY_MIN_SECONDS`), DB 경로는 `db.py`(`DB_PATH`), 서버 주소·로그는 `app.py`(`HOST`·`PORT`·`LOG_LEVEL`).
+실행 중 바로 읽는 비상 스위치: `YT_BRIEF_REBUILD`(yt_summary)·`NAME_FIX`(name_fix). 캡처 관련은 `keyframe_report.py`, 채널 모니터 관련은 `channel_monitor.py`.
 
 | 변수 | 기본 | 설명 |
 |------|------|------|
