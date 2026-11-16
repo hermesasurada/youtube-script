@@ -2597,7 +2597,6 @@ def test_llm_logging_never_breaks_the_work(tmp_path, monkeypatch):
 
     # (a) 모듈을 못 찾은 상태
     monkeypatch.setattr(llm_gateway, "llm_log", None)
-    monkeypatch.setattr(tt, "llm_log", None)
     assert yt_summary._summarize_with_grok("prompt", title="T") == expected_grok
     assert yt_summary._summarize_with_gpt("prompt", title="T") == expected_gpt
     assert tt.translate_chunk("hello", title="T") == expected_tr

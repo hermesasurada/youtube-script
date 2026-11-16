@@ -144,6 +144,35 @@ def llm_finish(call, **fill) -> None:
         pass
 
 
+def local_host_label(base_url: str) -> str:
+    """로컬 LLM 주소의 이력용 호스트 표기(spark·macmini 등). 이력 모듈이 없으면 주소의 호스트 부분."""
+    try:
+        if llm_log is not None:
+            return llm_log.local_host_label(base_url)
+        from urllib.parse import urlparse
+        return urlparse(base_url).netloc or base_url
+    except Exception:  # noqa: BLE001
+        return base_url
+
+
+def llm_record_openai(call, r) -> None:
+    """openai SDK 응답 객체의 model/usage를 call에 옮긴다. 실패해도 조용히."""
+    if call is None:
+        return
+    try:
+        usage = getattr(r, "usage", None)
+        call.tokens(input=getattr(usage, "prompt_tokens", None),
+                    output=getattr(usage, "completion_tokens", None))
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", None)
+        if cached is not None:
+            call.tokens(cache_read=cached)
+        if getattr(r, "model", None):
+            call.model = r.model
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def unwrap_claude_json(stdout: str) -> tuple[str, dict]:
     """`claude -p --output-format json` stdout → (plain 출력과 동일한 텍스트, usage dict).
 

@@ -1,32 +1,33 @@
 """전사 번역 결함 가드(2026-09-26): 중국어 누출 교정과 줄 반복 루프 판정."""
 import transcript_translator as tt
+import translation_guards
 
 SRC = "[00:00] So one example of building compute for the future\nis the massive Ohio data center\n"
 
 
 def test_han_leaks_flags_chinese_slips_but_keeps_normal_hanja():
-    assert tt.han_leaks("[01:31]顺便说一下, Boeing이 2004년") == ["顺便说一下"]
-    assert tt.han_leaks("해저 케이블을铺设하려는 시도") == ["铺设"]
-    assert tt.han_leaks("민粹주의가 퍼졌다") == ["粹"]            # 한 글자라도 한글 사이면 누출
-    assert tt.han_leaks("반(反)이민 정서, 前 CEO, 對중국 수출") == []
-    assert tt.han_leaks("Liang Wenfeng(梁文锋)이 말했다", source="Liang Wenfeng 梁文锋") == []
+    assert translation_guards.han_leaks("[01:31]顺便说一下, Boeing이 2004년") == ["顺便说一下"]
+    assert translation_guards.han_leaks("해저 케이블을铺设하려는 시도") == ["铺设"]
+    assert translation_guards.han_leaks("민粹주의가 퍼졌다") == ["粹"]            # 한 글자라도 한글 사이면 누출
+    assert translation_guards.han_leaks("반(反)이민 정서, 前 CEO, 對중국 수출") == []
+    assert translation_guards.han_leaks("Liang Wenfeng(梁文锋)이 말했다", source="Liang Wenfeng 梁文锋") == []
 
 
 def test_repeat_loop_is_degenerate_even_under_length_limit():
     loop = "[00:00] 시작\n" + "대규모로 컴퓨터를 구축해야 하고, 대규모로 컴퓨터를 구축해야 합니다.\n" * 6
     src = "".join(f"[00:{i:02d}] distinct source sentence number {i} about compute\n" for i in range(8))
     assert len(loop) < len(src) * 2.5                  # 분량 기준만으로는 못 잡는 크기
-    assert tt._looks_degenerate(loop, src, "stop")
+    assert translation_guards._looks_degenerate(loop, src, "stop")
     # 원문 자체가 반복(whisper 반복)이면 따라간 것이라 폭주가 아니다
     src_loop = "[00:00] start\n" + "we need to build compute at scale.\n" * 6
-    assert not tt._looks_degenerate(loop, src_loop, "stop")
+    assert not translation_guards._looks_degenerate(loop, src_loop, "stop")
     # 짧은 맞장구 반복은 정상
-    assert not tt._looks_degenerate("네.\n" * 10 + "좋습니다.", SRC, "stop")
+    assert not translation_guards._looks_degenerate("네.\n" * 10 + "좋습니다.", SRC, "stop")
 
 
 def test_collapse_repeats_keeps_first_line_only():
     text = "[00:10] 가\n같은 문장이 계속 반복되는 긴 줄입니다.\n같은 문장이 계속 반복되는 긴 줄입니다.\n끝"
-    assert tt._collapse_repeats(text) == "[00:10] 가\n같은 문장이 계속 반복되는 긴 줄입니다.\n끝"
+    assert translation_guards._collapse_repeats(text) == "[00:10] 가\n같은 문장이 계속 반복되는 긴 줄입니다.\n끝"
 
 
 def test_repair_leaks_replaces_only_bad_lines(monkeypatch):
@@ -86,24 +87,24 @@ def test_repair_leaks_rejects_changes_outside_the_leak(monkeypatch):
     monkeypatch.setattr(tt, "_call", lambda *a, **k: (
         "1\t[01:31] 참고로, Boeing이 2004년에 10억 달러를 투자했습니다", "stop"))
     assert tt._repair_leaks(out, SRC) == "[01:31] 참고로, Boeing이 2004년에 10억 달러를 투자했습니다"
-    assert tt._only_leaks_replaced("민粹주의가 퍼졌다", "민중주의가 퍼졌다", tt._leak_spans("민粹주의가 퍼졌다"))
-    assert not tt._only_leaks_replaced("민粹주의가 퍼졌다", "민중주의가 사라졌다", tt._leak_spans("민粹주의가 퍼졌다"))
+    assert translation_guards._only_leaks_replaced("민粹주의가 퍼졌다", "민중주의가 퍼졌다", translation_guards._leak_spans("민粹주의가 퍼졌다"))
+    assert not translation_guards._only_leaks_replaced("민粹주의가 퍼졌다", "민중주의가 사라졌다", translation_guards._leak_spans("민粹주의가 퍼졌다"))
     # 한자에 붙은 한글 어미·괄호 풀이는 함께 다듬어도 된다(운영 번역본 실제 교정 사례)
     for orig, new in (("더精简된 팀을 통한 비용 절감.", "더 간결한 팀을 통한 비용 절감."),
                       ("그리고现在我们(지금 우리는) 다른 누출을", "그리고 지금 우리는 다른 누출을")):
-        assert tt._only_leaks_replaced(orig, new, tt._leak_spans(orig))
-    assert not tt._only_leaks_replaced("Boeing은 2004년铺设했다", "Boeing은 2024년 부설했다",
-                                       tt._leak_spans("Boeing은 2004년铺设했다"))
+        assert translation_guards._only_leaks_replaced(orig, new, translation_guards._leak_spans(orig))
+    assert not translation_guards._only_leaks_replaced("Boeing은 2004년铺设했다", "Boeing은 2024년 부설했다",
+                                       translation_guards._leak_spans("Boeing은 2004년铺设했다"))
     # 누출 구간을 지우기만 한 교정은 뜻이 사라지므로 버린다
     for bad_fix in ("매출이 10억 달러.", "매출이 10억 달러 .", "매출이 10억 달러  ."):
-        assert not tt._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
-                                           tt._leak_spans("매출이 10억 달러增加했다."))
-    assert tt._only_leaks_replaced("매출이 10억 달러增加했다.", "매출이 10억 달러 증가했다.",
-                                   tt._leak_spans("매출이 10억 달러增加했다."))
+        assert not translation_guards._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
+                                           translation_guards._leak_spans("매출이 10억 달러增加했다."))
+    assert translation_guards._only_leaks_replaced("매출이 10억 달러增加했다.", "매출이 10억 달러 증가했다.",
+                                   translation_guards._leak_spans("매출이 10억 달러增加했다."))
     # 대체어로 원래 없던 숫자·영문을 끼워 넣는 것도 사실 변조다
     for bad_fix in ("매출이 10억 달러 2배 증가했다.", "매출이 10억 달러 USD 증가했다."):
-        assert not tt._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
-                                           tt._leak_spans("매출이 10억 달러增加했다."))
+        assert not translation_guards._only_leaks_replaced("매출이 10억 달러增加했다.", bad_fix,
+                                           translation_guards._leak_spans("매출이 10억 달러增加했다."))
     # 앞말은 넓히지 않는다(단위 바꿔치기 차단). 단 가나는 한글 음절과 쪼개져 섞이므로 예외,
     # 한 글자도 의미가 있는지 판정할 수 없으므로 단순 삭제는 거부한다.
     cases = (("매출이 10억 달러增加했다.", "매출이 10억 엔 증가했다.", False),
@@ -111,7 +112,7 @@ def test_repair_leaks_rejects_changes_outside_the_leak(monkeypatch):
              ("상황이 바뀌었希고, 그들은", "상황이 바뀌었고, 그들은", False),
              ("매출이 10억 달러增加했다.", "매출이 10억 달러 증가했다. 추가 문장.", False))
     for orig, new, want in cases:
-        assert tt._only_leaks_replaced(orig, new, tt._leak_spans(orig)) is want, new
+        assert translation_guards._only_leaks_replaced(orig, new, translation_guards._leak_spans(orig)) is want, new
 
 
 def test_single_han_deletion_is_rejected_but_translation_is_accepted(monkeypatch):

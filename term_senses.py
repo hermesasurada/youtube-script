@@ -87,19 +87,21 @@ def _ask(user: str, term: str) -> str | None:
     자주 오판했다(2026-10-30 실측: 15건 중 14건 오판 → 추론 켜고 경계 사례 7건 전부 정답, 건당 5~30초).
     판정은 백그라운드라 지연은 괜찮다. 둘 다 안 되면 None."""
     try:
+        import llm_gateway
         import transcript_translator as tt
     except Exception:  # noqa: BLE001 — 판정은 부가 기능, 실패하면 예전처럼 뺀다
         return None
     for idx, (_name, base, model) in enumerate(tt.BACKENDS):
         try:
-            with tt._llm_track("local", model, purpose="term_sense", title=term,
-                               reasoning="think", backend="http", host=tt._llm_host(base)) as call:
+            with llm_gateway.llm_track("local", model, purpose="term_sense", title=term,
+                                       reasoning="think", backend="http",
+                                       host=llm_gateway.local_host_label(base)) as call:
                 r = tt._client(idx).chat.completions.create(
                     model=model,
                     messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
                     max_tokens=4000, temperature=0.0,
                     extra_body={"chat_template_kwargs": {"enable_thinking": True}})
-                tt._llm_record_response(call, r)
+                llm_gateway.llm_record_openai(call, r)
             return (r.choices[0].message.content or "").strip()
         except Exception as e:  # noqa: BLE001
             if not tt._is_conn_error(str(e)):
