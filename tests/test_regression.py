@@ -27,6 +27,7 @@ import subprocess
 import term_senses
 import yt_blog
 import yt_core
+import yt_download
 import yt_jobs
 import yt_models
 import yt_queue
@@ -1261,11 +1262,11 @@ def test_capture_download_retry_trigger_covers_empty_file():
     raise돼 대체 클라이언트 폴백을 못 탔다.)
     """
     import keyframe_report as kr
-    assert kr._is_retryable_download_error("ERROR: The downloaded file is empty")
-    assert kr._is_retryable_download_error("HTTP Error 403: Forbidden")
-    assert kr._is_retryable_download_error("Requested format is not available")
-    assert not kr._is_retryable_download_error("Private video. Sign in if you have been granted access")
-    assert not kr._is_retryable_download_error("")
+    assert yt_download.is_retryable_video_error("ERROR: The downloaded file is empty")
+    assert yt_download.is_retryable_video_error("HTTP Error 403: Forbidden")
+    assert yt_download.is_retryable_video_error("Requested format is not available")
+    assert not yt_download.is_retryable_video_error("Private video. Sign in if you have been granted access")
+    assert not yt_download.is_retryable_video_error("")
 
 
 def test_kf_retry_claim_honors_next_retry_at(tmp_path, monkeypatch):
