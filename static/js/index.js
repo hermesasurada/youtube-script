@@ -20,10 +20,7 @@ async function loadSavedPrompt() {
 
 // ── 각주 제외 용어(프롬프트 패널 하단 칩) ─────────────────────────────
 // 칩 툴팁: ✕로 뺀 용어는 저장된 뜻(같은 표기의 다른 뜻은 남는다), 직접 입력한 용어는 모든 뜻
-function _termSenseTitle(t) {
-  const senses = YS.termSenses(t);
-  return senses.length ? '이 뜻일 때만 뺌: ' + senses.join(' / ') : '모든 뜻에서 뺌(직접 입력)';
-}
+function _termSenseTitle(t) { return YS.termSenseTitle(t); }
 async function renderTermExclusions() {
   const list = document.getElementById('term-excl-list');
   if (!list) return;
@@ -316,58 +313,19 @@ function _populateUploaderOptions() {
 /* ── 채널 선택 팝업(2026-10-11 사용자 지시): 채널별 전체·미읽음 건수 표시, 누르면 그 채널로 좁힌다.
    실제 필터 상태는 숨긴 select(#hf-uploader)가 들고 있어 기존 저장·복원·초기화 경로를 그대로 쓴다. ── */
 // 안읽은 영상의 원본 길이 합계(2026-10-15 사용자 지시) — '3시간 12분'·'45분'
-function fmtUnreadDur(secs) {
-  const m = Math.round((Number(secs) || 0) / 60);
-  if (!m) return '';
-  const h = Math.floor(m / 60);
-  return h ? `${h}시간${m % 60 ? ' ' + (m % 60) + '분' : ''}` : `${m}분`;
-}
-// 채널 정렬 기준(2026-10-29 사용자 지시): 안읽은 개수 / 안읽은 영상 길이 합계 / 안읽은 영상 평균 길이.
-// 고른 기준은 localStorage ytUploaderSort에 기억한다(모바일과 공유). 동점이면 다른 쪽 값 → 채널 이름순.
-const _UP_SORT_KEYS = {
-  unread: s => [s.unread, s.unreadSecs],
-  secs:   s => [s.unreadSecs, s.unread],
-  avg:    s => [s.unread ? s.unreadSecs / s.unread : 0, s.unread],
-};
-function _uploaderSortMode() {
-  let m = 'unread';
-  try { m = localStorage.getItem('ytUploaderSort') || m; } catch (e) {}
-  return _UP_SORT_KEYS[m] ? m : 'unread';
-}
-function _sortUploaders(stats, mode) {
-  const key = _UP_SORT_KEYS[mode] || _UP_SORT_KEYS.unread;
-  return [...stats.keys()].sort((a, b) => {
-    const x = key(stats.get(a)), y = key(stats.get(b));
-    return (y[0] - x[0]) || (y[1] - x[1]) || a.localeCompare(b, 'ko');
-  });
-}
+function fmtUnreadDur(secs) { return YS.fmtUnreadDur(secs); }
+// 채널 정렬 기준·통계는 common.js YS.uploaderSort(PC·모바일 공용, localStorage ytUploaderSort)
+function _uploaderSortMode() { return YS.uploaderSort.mode(); }
+function _sortUploaders(stats, mode) { return YS.uploaderSort.order(stats, mode); }
 // 행 오른쪽 길이 표시 — 평균 기준이면 평균 길이, 아니면 합계
 function _uploaderDurLabel(s, mode) {
-  if (!s.unread) return null;
-  if (mode === 'avg') {
-    const d = fmtUnreadDur(s.unreadSecs / s.unread);
-    return d ? { text: `평균 ${d}`, title: '안읽은 영상 평균 길이' } : null;
-  }
-  const d = fmtUnreadDur(s.unreadSecs);
-  return d ? { text: d, title: '안읽은 영상 원본 길이 합계' } : null;
+  const text = YS.uploaderSort.durText(s, mode);
+  return text ? { text, title: mode === 'avg' ? '안읽은 영상 평균 길이' : '안읽은 영상 원본 길이 합계' } : null;
 }
 function setUploaderSort(mode) {
-  if (!_UP_SORT_KEYS[mode]) return;
-  try { localStorage.setItem('ytUploaderSort', mode); } catch (e) {}
-  _renderUploaderList();
+  if (YS.uploaderSort.set(mode)) _renderUploaderList();
 }
-function _uploaderStats() {
-  const stats = new Map();
-  for (const it of _historyItems) {
-    const u = it.uploader;
-    if (!u || u === '—') continue;
-    const s = stats.get(u) || { total: 0, unread: 0, unreadSecs: 0 };
-    s.total += 1;
-    if (!it.is_read) { s.unread += 1; s.unreadSecs += Number(it.duration) || 0; }
-    stats.set(u, s);
-  }
-  return stats;
-}
+function _uploaderStats() { return YS.uploaderSort.stats(_historyItems); }
 function _paintUploaderBtn() {
   const btn = document.getElementById('hf-uploader-btn');
   if (!btn) return;
@@ -637,13 +595,7 @@ function deleteCard(btn) {
 
 /* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg.com)로
    나가는 요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
-function _thumbFallback(img) {
-  img.onerror = null;
-  const ph = document.createElement('div');
-  ph.className = 'hist-thumb-placeholder';
-  ph.textContent = '썸네일 없음';
-  img.replaceWith(ph);
-}
+function _thumbFallback(img) { YS.thumbFallback(img); }
 
 function _historyGoToPage(p) {
   const totalPages = Math.max(1, Math.ceil(_historyFiltered.length / HIST_PAGE_SIZE));
@@ -1147,12 +1099,7 @@ function closeQueueModal() {
   document.body.style.overflow = '';
 }
 
-function _qhms(sec) {
-  const s = Math.max(0, Math.floor(sec)), h = Math.floor(s / 3600),
-        m = Math.floor((s % 3600) / 60), x = s % 60;
-  const p = n => String(n).padStart(2, '0');
-  return h ? `${h}:${p(m)}:${p(x)}` : `${m}:${p(x)}`;
-}
+function _qhms(sec) { return YS.hms(sec); }
 
 async function refreshQueueModal() {
   const body = document.getElementById('queue-modal-body');
@@ -1219,40 +1166,27 @@ async function refreshQueueModal() {
 }
 
 async function requeueItem(id) {
-  const r = await fetch(`/queue/items/${id}/requeue`, {method: 'POST'});
-  const d = await r.json();
-  if (!d.ok) alert(d.error || '복귀 실패');
+  await YS.queueApi.requeue(id);
   refreshQueueModal();
 }
 
 async function toggleQueueDistill(id, enable) {
-  await fetch(`/queue/items/${id}`, {
-    method: 'PATCH', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({distill: enable}),
-  });
+  await YS.queueApi.setFlags(id, {distill: enable});
   refreshQueueModal();
 }
 
 async function toggleQueueCapture(id, enable) {
-  await fetch(`/queue/items/${id}`, {
-    method: 'PATCH', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({capture: enable}),
-  });
+  await YS.queueApi.setFlags(id, {capture: enable});
   refreshQueueModal();
 }
 
 async function moveQueueItem(id, direction) {
-  await fetch(`/queue/items/${id}/move`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({direction}),
-  });
+  await YS.queueApi.move(id, direction);
   refreshQueueModal();
 }
 
 async function cancelQueueItem(id) {
-  if (!confirm('이 영상을 큐에서 취소할까요?')) return;
-  await fetch(`/queue/items/${id}`, {method: 'DELETE'});
-  refreshQueueModal();
+  if (await YS.queueApi.cancel(id)) refreshQueueModal();
 }
 
 /* ── Start transcription ── */

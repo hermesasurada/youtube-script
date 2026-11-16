@@ -1765,7 +1765,107 @@
     return d >= from;
   }
 
+  /* ── PC·모바일 공용 목록 도우미(2026-11-16 리팩토링 3단계 — index.js·mobile.js에 같은 글로 두 벌 있던 것) ── */
+  // 안읽은 영상 길이 합계 표시: '10시간 34분'·'45분'(분 단위 반올림, 0이면 빈 문자열)
+  function fmtUnreadDur(secs) {
+    const m = Math.round((Number(secs) || 0) / 60);
+    if (!m) return '';
+    const h = Math.floor(m / 60);
+    return h ? `${h}시간${m % 60 ? ' ' + (m % 60) + '분' : ''}` : `${m}분`;
+  }
+  // 큐 시작 시각 표시: 'H:MM:SS' 또는 'M:SS'
+  function hms(sec) {
+    const s = Math.max(0, Math.floor(sec)), h = Math.floor(s / 3600),
+          m = Math.floor((s % 3600) / 60), x = s % 60;
+    const p = n => String(n).padStart(2, '0');
+    return h ? `${h}:${p(m)}:${p(x)}` : `${m}:${p(x)}`;
+  }
+  // 썸네일 사본이 없으면 '썸네일 없음' 자리표시로 바꾼다(img onerror)
+  function thumbFallback(img) {
+    img.onerror = null;
+    const ph = document.createElement('div');
+    ph.className = 'hist-thumb-placeholder';
+    ph.textContent = '썸네일 없음';
+    img.replaceWith(ph);
+  }
+  // 각주 제외 칩의 tooltip — 뜻 단위 제외면 그 뜻, 직접 입력이면 모든 뜻
+  function termSenseTitle(t) {
+    const senses = global.YS.termSenses(t);
+    return senses.length ? '이 뜻일 때만 뺌: ' + senses.join(' / ') : '모든 뜻에서 뺌(직접 입력)';
+  }
+  /* 채널 선택 팝업의 통계·정렬(2026-10-15·10-29 사용자 지시): 안읽은 개수 / 안읽은 영상 길이 합계 / 평균 길이.
+     고른 기준은 localStorage ytUploaderSort(PC·모바일 공유). 동점이면 다른 쪽 값 → 채널 이름순. */
+  const UP_SORT_KEYS = {
+    unread: s => [s.unread, s.unreadSecs],
+    secs:   s => [s.unreadSecs, s.unread],
+    avg:    s => [s.unread ? s.unreadSecs / s.unread : 0, s.unread],
+  };
+  const uploaderSort = {
+    keys: UP_SORT_KEYS,
+    mode() {
+      let m = 'unread';
+      try { m = localStorage.getItem('ytUploaderSort') || m; } catch (e) {}
+      return UP_SORT_KEYS[m] ? m : 'unread';
+    },
+    set(mode) {                      // 알 수 없는 기준이면 false(호출측은 다시 그리지 않는다)
+      if (!UP_SORT_KEYS[mode]) return false;
+      try { localStorage.setItem('ytUploaderSort', mode); } catch (e) {}
+      return true;
+    },
+    stats(items) {                   // 채널명 → {total, unread, unreadSecs}
+      const stats = new Map();
+      for (const it of items) {
+        const u = it.uploader;
+        if (!u || u === '—') continue;
+        const s = stats.get(u) || { total: 0, unread: 0, unreadSecs: 0 };
+        s.total += 1;
+        if (!it.is_read) { s.unread += 1; s.unreadSecs += Number(it.duration) || 0; }
+        stats.set(u, s);
+      }
+      return stats;
+    },
+    order(stats, mode) {             // 채널명 정렬
+      const key = UP_SORT_KEYS[mode] || UP_SORT_KEYS.unread;
+      return [...stats.keys()].sort((a, b) => {
+        const x = key(stats.get(a)), y = key(stats.get(b));
+        return (y[0] - x[0]) || (y[1] - x[1]) || a.localeCompare(b, 'ko');
+      });
+    },
+    durText(s, mode) {               // 행 오른쪽 길이 — 평균 기준이면 '평균 N분', 아니면 합계(없으면 '')
+      if (!s.unread) return '';
+      if (mode === 'avg') {
+        const d = fmtUnreadDur(s.unreadSecs / s.unread);
+        return d ? `평균 ${d}` : '';
+      }
+      return fmtUnreadDur(s.unreadSecs);
+    },
+  };
+  /* 처리 큐 항목 조작 API — 화면 갱신은 호출측(PC refreshQueueModal·모바일 loadQueueM)이 한다. */
+  const queueApi = {
+    async requeue(id) {
+      const d = await (await fetch(`/queue/items/${id}/requeue`, { method: 'POST' })).json();
+      if (!d.ok) alert(d.error || '복귀 실패');
+      return d;
+    },
+    async setFlags(id, flags) {      // {capture: bool} 또는 {distill: bool}
+      await fetch(`/queue/items/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(flags),
+      });
+    },
+    async move(id, direction) {
+      await fetch(`/queue/items/${id}/move`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
+      });
+    },
+    async cancel(id) {               // 확인창에서 취소하면 false
+      if (!confirm('이 영상을 큐에서 취소할까요?')) return false;
+      await fetch(`/queue/items/${id}`, { method: 'DELETE' });
+      return true;
+    },
+  };
+
   global.YS = {
+    fmtUnreadDur, hms, thumbFallback, termSenseTitle, uploaderSort, queueApi,
     monitorModels: { load: mmLoad, mount: mmMount, fields: mmFields },
     withinRecentDays,
     renderMarkdown,

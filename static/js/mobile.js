@@ -119,24 +119,8 @@ function _paintUploaderBtnM() {
   $('q').placeholder = _uploader ? `${_uploader} 안에서 검색` : '검색';
 }
 // 안읽은 영상의 원본 길이 합계(2026-10-15 사용자 지시) — '3시간 12분'·'45분'
-function fmtUnreadDur(secs) {
-  const m = Math.round((Number(secs) || 0) / 60);
-  if (!m) return '';
-  const h = Math.floor(m / 60);
-  return h ? `${h}시간${m % 60 ? ' ' + (m % 60) + '분' : ''}` : `${m}분`;
-}
-function _uploaderStatsM() {
-  const stats = new Map();
-  for (const it of ALL) {
-    const u = it.uploader;
-    if (!u || u === '—') continue;
-    const st = stats.get(u) || { total: 0, unread: 0, unreadSecs: 0 };
-    st.total += 1;
-    if (!it.is_read) { st.unread += 1; st.unreadSecs += Number(it.duration) || 0; }
-    stats.set(u, st);
-  }
-  return stats;
-}
+function fmtUnreadDur(secs) { return YS.fmtUnreadDur(secs); }
+function _uploaderStatsM() { return YS.uploaderSort.stats(ALL); }
 function openUploaderM() {
   $('fs-ctrl').hidden = true;
   $('font-ctrl').hidden = true;
@@ -151,38 +135,19 @@ function openUploaderM() {
   $('uploader-q').addEventListener('input', _renderUploaderM);
   _renderUploaderM();
 }
-// 채널 정렬 기준(2026-10-29 사용자 지시, 데스크톱과 같은 규칙·같은 localStorage ytUploaderSort)
-const _UP_SORT_KEYS = {
-  unread: s => [s.unread, s.unreadSecs],
-  secs:   s => [s.unreadSecs, s.unread],
-  avg:    s => [s.unread ? s.unreadSecs / s.unread : 0, s.unread],
-};
-function _uploaderSortModeM() {
-  let m = 'unread';
-  try { m = localStorage.getItem('ytUploaderSort') || m; } catch (e) {}
-  return _UP_SORT_KEYS[m] ? m : 'unread';
-}
+// 채널 정렬 기준·통계는 common.js YS.uploaderSort(PC와 같은 규칙·같은 localStorage ytUploaderSort)
+function _uploaderSortModeM() { return YS.uploaderSort.mode(); }
 function setUploaderSortM(mode) {
-  if (!_UP_SORT_KEYS[mode]) return;
-  try { localStorage.setItem('ytUploaderSort', mode); } catch (e) {}
-  _renderUploaderM();
+  if (YS.uploaderSort.set(mode)) _renderUploaderM();
 }
-function _uploaderDurM(st, mode) {
-  if (!st.unread) return '';
-  return mode === 'avg' ? (fmtUnreadDur(st.unreadSecs / st.unread) ? `평균 ${fmtUnreadDur(st.unreadSecs / st.unread)}` : '')
-                        : fmtUnreadDur(st.unreadSecs);
-}
+function _uploaderDurM(st, mode) { return YS.uploaderSort.durText(st, mode); }
 function _renderUploaderM() {
   const q = ($('uploader-q').value || '').trim().toLowerCase();
   const stats = _uploaderStatsM();
   const mode = _uploaderSortModeM();
   document.querySelectorAll('#uploader-sort button').forEach(b =>
     b.setAttribute('aria-pressed', String(b.dataset.sort === mode)));
-  const key = _UP_SORT_KEYS[mode];
-  const names = [...stats.keys()].sort((a, b) => {
-    const x = key(stats.get(a)), y = key(stats.get(b));
-    return (y[0] - x[0]) || (y[1] - x[1]) || a.localeCompare(b, 'ko');
-  });
+  const names = YS.uploaderSort.order(stats, mode);
   const all = { total: ALL.length, unread: [...stats.values()].reduce((n, s) => n + s.unread, 0),
                 unreadSecs: [...stats.values()].reduce((n, s) => n + s.unreadSecs, 0) };
   const row = (val, label, st) => `<button type="button" class="uploader-item${val === _uploader ? ' selected' : ''}" role="option"
@@ -292,13 +257,7 @@ async function toggleBookmark(btn) {
   if (_bookmarkOnly && !next) applyFilter();
 }
 
-function _thumbFallback(img) {
-  img.onerror = null;
-  const ph = document.createElement('div');
-  ph.className = 'hist-thumb-placeholder';
-  ph.textContent = '썸네일 없음';
-  img.replaceWith(ph);
-}
+function _thumbFallback(img) { YS.thumbFallback(img); }
 
 function appendPage() {
   const slice = FILTERED.slice(shownCount, shownCount + PAGE);
@@ -481,10 +440,7 @@ const _Q_ST = {
 };
 // ── 각주 제외 용어(칩 나열) — 설정 팝업의 '각주 제외' 탭 ─────────────────
 // 칩 툴팁: ✕로 뺀 용어는 저장된 뜻(같은 표기의 다른 뜻은 남는다), 직접 입력한 용어는 모든 뜻
-function _termSenseTitle(t) {
-  const senses = YS.termSenses(t);
-  return senses.length ? '이 뜻일 때만 뺌: ' + senses.join(' / ') : '모든 뜻에서 뺌(직접 입력)';
-}
+function _termSenseTitle(t) { return YS.termSenseTitle(t); }
 async function renderTermsM() {
   const pane = $('modal-body').querySelector('[data-set-pane="terms"]');
   if (!pane) return;
@@ -582,12 +538,7 @@ async function mqAdd() {
   else $('mq-add-pv').innerHTML = `<span class="mq-pv-err">${attrEsc(d.error || '등록 실패')}</span>`;
 }
 
-function mqHms(sec) {
-  const t = Math.max(0, Math.floor(sec)), h = Math.floor(t / 3600),
-        m = Math.floor((t % 3600) / 60), x = t % 60;
-  const p = n => String(n).padStart(2, '0');
-  return h ? `${h}:${p(m)}:${p(x)}` : `${m}:${p(x)}`;
-}
+function mqHms(sec) { return YS.hms(sec); }
 
 async function loadQueueM() {
   const body = $('modal-body');
@@ -651,24 +602,19 @@ async function loadQueueM() {
   }
 }
 async function mqRequeue(id) {
-  const d = await (await fetch(`/queue/items/${id}/requeue`, {method: 'POST'})).json();
-  if (!d.ok) alert(d.error || '복귀 실패');
+  await YS.queueApi.requeue(id);
   loadQueueM();
 }
 async function mqToggleCapture(id, enable) {
-  await fetch(`/queue/items/${id}`, {method: 'PATCH',
-    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({capture: enable})});
+  await YS.queueApi.setFlags(id, {capture: enable});
   loadQueueM();
 }
 async function mqMove(id, direction) {
-  await fetch(`/queue/items/${id}/move`, {method: 'POST',
-    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({direction})});
+  await YS.queueApi.move(id, direction);
   loadQueueM();
 }
 async function mqCancel(id) {
-  if (!confirm('이 영상을 큐에서 취소할까요?')) return;
-  await fetch(`/queue/items/${id}`, {method: 'DELETE'});
-  loadQueueM();
+  if (await YS.queueApi.cancel(id)) loadQueueM();
 }
 
 /* ── 채널 자동 모니터(원격 관리) ── */
