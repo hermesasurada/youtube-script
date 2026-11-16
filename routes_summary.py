@@ -36,11 +36,8 @@ def summarize():
     if not transcript_blob.strip():
         return yt_core._json({"error": "전사 결과가 없습니다."}, 400)
     transcript_meta, transcript_body = document_io.parse_markdown_text(transcript_blob)
-    # 6분 이하 영상은 요약하지 않는다(2026-11-12 사용자 지시, summary_policy).
-    skip_reason = summary_policy.summary_skip_reason(transcript_meta)
-    if skip_reason:
-        log.info("summarize skipped: %s (%s)", os.path.basename(abs_path), skip_reason)
-        return yt_core._json({"error": skip_reason, "skipped": "short_video"}, 422)
+    # 6분 이하 영상은 한눈 요약을 만들지 않는다(2026-11-12 지시, 11-16 정정 — summary_policy).
+    brief = not summary_policy.skip_brief(transcript_meta)
     transcript_body, opening_cutoff = keyframe_report.trim_sequoia_opening(
         transcript_meta, transcript_body
     )
@@ -87,13 +84,13 @@ def summarize():
                     prompt, save_path, model_order,
                     transcript_chars=len(transcript_blob),
                     reasoning_levels=reasoning_levels,
-                    title=video_title, slots=slots,
+                    title=video_title, slots=slots, brief=brief,
                 )
             else:
                 yield from yt_summary._summarize_with_claude(
                     prompt, save_path, skip_claude=skip_claude,
                     transcript_chars=len(transcript_blob),
-                    title=video_title,
+                    title=video_title, brief=brief,
                 )
 
     return Response(guarded_summary(), mimetype="text/event-stream",

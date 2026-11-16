@@ -83,8 +83,8 @@ curl -s http://127.0.0.1:4416/ping                     # {"server_uptime":...,"v
 
 서버 설정은 대부분 `yt_core.py` 한 곳에서 읽는다(경로·실행 파일·모델·타임아웃·동시 실행·오디오 보관·무음 판정). 그 밖의 위치:
 whisper 세부값은 `yt_transcribe.py`(`WHISPER_MIN_COVERAGE`·`WHISPER_CHUNK_SEC`·`WHISPER_FIRST_CONTEXT`·`WHISPER_NO_SPEECH`·`WHISPER_VAD`·`WHISPER_VAD_MODEL`),
-제목 번역 기본 모델은 `yt_titles.py`(`TITLE_TR_MODEL`·`TITLE_TR_REASONING`), 큐 주기는 `yt_queue.py`(`QUEUE_CYCLE_SEC`), 요약 생략 길이는
-`summary_policy.py`(`YT_SUMMARY_MIN_SECONDS`), DB 경로는 `db.py`(`DB_PATH`), 서버 주소·로그는 `app.py`(`HOST`·`PORT`·`LOG_LEVEL`).
+제목 번역 기본 모델은 `yt_titles.py`(`TITLE_TR_MODEL`·`TITLE_TR_REASONING`), 큐 주기는 `yt_queue.py`(`QUEUE_CYCLE_SEC`), 한눈 요약 생략 길이는
+`summary_policy.py`(`YT_BRIEF_MIN_SECONDS`), DB 경로는 `db.py`(`DB_PATH`), 서버 주소·로그는 `app.py`(`HOST`·`PORT`·`LOG_LEVEL`).
 실행 중 바로 읽는 비상 스위치: `YT_BRIEF_REBUILD`(yt_summary)·`NAME_FIX`(name_fix). 캡처 관련은 `keyframe_report.py`, 채널 모니터 관련은 `channel_monitor.py`.
 
 | 변수 | 기본 | 설명 |

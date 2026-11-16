@@ -202,13 +202,16 @@ def _reindex_summary(save_path: str) -> None:
     yt_titles._translate_titles_async()      # 새 항목의 외국어 제목: YouTube 한국어 제목, 없으면 LLM 번역
 
 
-def _rebuild_brief(body: str, family: str, model: str | None, title: str | None) -> str:
+def _rebuild_brief(body: str, family: str, model: str | None, title: str | None,
+                   enabled: bool = True) -> str:
     """한눈 요약을 완성된 본문에서 뽑아 채운다 — 소제목 하나당 불릿 하나(2026-11-02 사용자 지시).
 
     첫 요약은 '## 2. 한눈 요약' 머리글만 비워 둔다(같은 날 B안 — 한눈 요약을 두 번 쓰던 중복 제거).
     요약을 낸 모델(계열·구체 모델, 추론 기본값)로 한 번 더 부르고, 실패·불릿 수 불일치·한자 누출이면
     한 번만 다시 시도한다. 그래도 안 되면 빈 머리글만 걷어 내고 요약은 그대로 저장한다 — 요약 저장을
     막지 않는다. 비상 스위치 YT_BRIEF_REBUILD=0(이때는 한눈 요약 없이 저장)."""
+    if not enabled:          # 6분 이하 영상은 한눈 요약을 만들지 않는다(summary_policy, 2026-11-16 정정)
+        return brief_rebuild.drop_empty(body)
     if os.environ.get("YT_BRIEF_REBUILD", "1") == "0":
         return brief_rebuild.drop_empty(body)
     try:
@@ -414,8 +417,9 @@ def _summary_attempts(model_order=None, reasoning_levels=None, slots=None) -> li
 
 def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
                        *, transcript_chars: int = 0, reasoning_levels=None,
-                       title: str | None = None, slots=None):
-    """지정 순서대로 요약 모델을 시도하는 자동모니터용 SSE 생성기(슬롯 단위)."""
+                       title: str | None = None, slots=None, brief: bool = True):
+    """지정 순서대로 요약 모델을 시도하는 자동모니터용 SSE 생성기(슬롯 단위).
+    brief=False면 한눈 요약 재구성을 건너뛴다(6분 이하 영상, summary_policy)."""
     attempts = _summary_attempts(model_order, reasoning_levels, slots)
     failures: list[str] = []
     client_has_output = False
@@ -468,7 +472,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
             cleaned = _clean_summary(outcome.text)
             body = _polish_summary(cleaned)
             if not error_msg and body:
-                body = _rebuild_brief(body, "opus", slot_model, title)
+                body = _rebuild_brief(body, "opus", slot_model, title, brief)
                 label = yt_models._model_label(used_model or slot_model)
                 if body != cleaned and client_has_output:
                     reset = reset_client()
@@ -527,7 +531,7 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
             failures.append(f"{label}: {err or '빈 응답'}")
             log.warning("summarize %s 실패 → 다음 모델: %s", key, failures[-1])
             continue
-        body = _rebuild_brief(body, key, slot_model, title)
+        body = _rebuild_brief(body, key, slot_model, title, brief)
         full, save_err = save_full(body, label)
         if save_err:
             yield f"event: error\ndata: {json.dumps(save_err)}\n\n"
@@ -543,8 +547,8 @@ def _summarize_ordered(prompt: str, save_path: str | None, model_order=None,
 
 
 def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: bool = False,
-                           transcript_chars: int = 0, title: str | None = None):
-    """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장.
+                           transcript_chars: int = 0, title: str | None = None, brief: bool = True):
+    """Claude Code CLI로 요약 → SSE 청크 생성, 완료 시 save_path에 저장(brief=False면 한눈 요약 생략).
     Claude 실패 시 Grok CLI로 폴백(GROK_FALLBACK).
     skip_claude=True 이면 Claude 호출 없이 Grok만 시도(게이트가 Claude 불가로 판정한 경우).
 
@@ -557,7 +561,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
         log.warning("summarize → Grok CLI%s", " (skip_claude)" if skip_claude else " 폴백 시도")
         gtext, gerr = _summarize_with_grok(prompt, title=title)
         if gtext:
-            gtext = _rebuild_brief(gtext, "grok", yt_core.GROK_MODEL or None, title)
+            gtext = _rebuild_brief(gtext, "grok", yt_core.GROK_MODEL or None, title, brief)
             # Claude 부분 출력이 이미 전송됐을 수 있으므로 클라이언트가 본문을 비우게 한다.
             yield "event: reset\ndata: \"\"\n\n"
             log.info("summarize grok 성공 (%d자)", len(gtext))
@@ -607,7 +611,7 @@ def _summarize_with_claude(prompt: str, save_path: str | None, *, skip_claude: b
     if not body:
         yield from _yield_grok("Claude 빈 응답")
         return
-    body = _rebuild_brief(body, "opus", yt_models._claude_model(), title)
+    body = _rebuild_brief(body, "opus", yt_models._claude_model(), title, brief)
     cline = _compress_line(body, transcript_chars)
     full = _model_line(yt_models._model_label(used_model or yt_models._claude_model())) + cline + body
     if body != cleaned and outcome.chunks:
