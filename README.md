@@ -12,11 +12,15 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 | `yt_core.py` | 공용 설정(경로·실행 파일·모델 환경변수)·작업 상태·md 저장/파싱 |
 | `yt_transcribe.py` / `yt_jobs.py` | whisper 전사·붕괴 판정 / URL·파일 전사 작업(다운로드·썸네일·오디오 보관) |
 | `yt_summary.py` / `yt_models.py` / `yt_titles.py` | 요약 생성·다듬기·한눈 요약 / 모델 설정·라벨·`_llm_text` / 제목 한국어 표기 |
-| `llm_runners.py` | 계열별 LLM 실행기(Claude·Codex·Grok·Gemini)와 Claude 스트리밍 |
+| `llm_runners.py` | 계열별 LLM 실행기(Claude·Codex·Grok·Gemini)·Claude 스트리밍·이미지 판정(`run_vision`) |
 | `yt_queue.py` / `yt_blog.py` | 처리 큐 도우미 / 블로그 발행 도우미 |
 | `routes_*.py` | HTTP 라우트(main·summary·queue·channels·history·media) — `from yt_web import app`으로 붙인다 |
 | `db.py` | SQLite 연결·스키마·공용 도우미 — 쿼리는 `db_items`(이력)·`db_channels`(채널·모니터 설정)·`db_terms`(각주 제외)·`db_queue`(처리 큐), 마이그레이션은 `db_migrations`(번호별 함수 목록). 호출은 `db.이름`으로 통일(db.py가 다시 내보냄) |
-| `keyframe_report.py` | 영상 다운로드(yt-dlp) → ffmpeg 프레임 추출 → LLM 비전 분류 → 요약 md에 캡처 스트립 주입 |
+| `yt_download.py` | yt-dlp 다운로드의 차단 대응 재시도(음성·영상 공용) |
+| `keyframe_report.py` + `kf_*.py` | 캡처: 진입점·요약 md 주입 / `kf_base`(설정) · `kf_targets`(대상 고르기) · `kf_frames`(영상 받기·프레임 추출) · `kf_vision`(LLM 비전 분류) |
+| `channel_monitor.py` + `cm_*.py` | 채널 감시(launchd 20분): 영상 처리·큐 비우기 / `cm_base`(설정) · `cm_health`(모델 상태 점검) · `cm_notify`(알림) · `cm_detect`(신규 영상 감지) |
+| `transcript_translator.py` / `translation_guards.py` | 외국어 전사 번역(launchd 30분) / 번역 결과 검사(반복 붕괴·한자 누출) |
+| `tools/` | 일회용·보수용 스크립트(일괄 재요약·압축률 소급·오디오 보관 소급) |
 | `templates/` | `index.html`(데스크톱) · `mobile.html`(모바일 이력) |
 | `static/js/common.js` | 공유 모듈(`window.YS`): 마크다운 렌더·이스케이프·이력 API·키프레임 라이트박스 |
 | `static/js/index.js`, `static/js/index-*.js` | 데스크톱 UI 로직(큐·SSE·모달·이력) — 읽는 순서는 `AGENTS.md` 코드 구조 |
