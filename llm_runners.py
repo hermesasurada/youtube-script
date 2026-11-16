@@ -133,6 +133,75 @@ def _run_gemini(prompt, *, model, effort, purpose, title, timeout, postprocess):
         return _finish_text(call, "gemini", text or "", postprocess)
 
 
+def run_vision(family: str, prompt: str, *, model: str, images: list[str], title: str | None, timeout: int,
+               finish: Callable, claude_bin: Callable[[], str], claude_env: Callable[[], dict],
+               grok_default_model: str = ""):
+    """이미지를 보는 단일턴 호출(purpose='vision') → (finish가 돌려준 값, 실행 오류 문자열).
+
+    family는 'claude'·'gpt'·'grok'. 실행 결과(ProcessResult)를 `finish(call, 결과)`에 넘기고 그 반환값을 그대로
+    돌려준다 — 응답 해석과 실패 기록은 호출처(캡처: kf_vision)가 정한다. CLI를 띄우지도 못한 경우만
+    (None, 오류)를 돌려준다. 추론 수준은 넘기지 않는다.
+
+      claude  프롬프트 안 @경로를 Read 도구로 읽는다. 도구가 필요해 cli_minimal 인자는 못 붙이지만 프롬프트 캐시
+              (1시간 캐시 쓰기는 입력 단가 2배)와 홈 자동 메모리는 끈 환경(claude_env)으로 돈다(2026-11-09).
+      gpt     Codex CLI에 이미지를 직접 첨부한다.
+      grok    이미지 첨부 옵션이 없지만 프롬프트의 @경로를 읽어 비전이 동작한다(TUI가 뜨지 않도록 --prompt-file 단일턴).
+    """
+    if family == "claude":
+        with llm_gateway.llm_track("claude", model, purpose="vision", title=title,
+                                   backend="cli") as call:
+            r = llm_gateway.run_command(
+                [claude_bin(), "-p", "--model", model, "--output-format", "json", prompt],
+                timeout=timeout, env=claude_env())
+            stdout, usage = llm_gateway.unwrap_claude_json(r.stdout or "")
+            llm_gateway.llm_fill(call, usage=usage)
+            r = llm_gateway.ProcessResult(r.returncode, stdout, r.stderr, r.timed_out)
+            return finish(call, r), ""
+    if family == "gpt":
+        with llm_gateway.llm_track("codex", model, purpose="vision", title=title,
+                                   backend="cli") as call:
+            try:
+                r = llm_gateway.run_codex_prompt(
+                    prompt,
+                    model=model,
+                    timeout=timeout,
+                    images=images,
+                )
+            except Exception as e:  # noqa: BLE001
+                llm_gateway.llm_fill(call, fail=e)
+                return None, f"gpt 실행 오류: {e}"
+            llm_gateway.llm_fill(call, usage=llm_gateway.codex_usage(getattr(r, "events", "")))
+            return finish(call, r), ""
+    if family == "grok":
+        selected_model = llm_gateway.grok_call_model(model, grok_default_model)
+        grok = llm_gateway.resolve_grok_bin()
+        if not (grok and os.path.exists(grok)):
+            return None, "grok 실행파일 없음"
+        with llm_gateway.llm_track("grok", selected_model or None, purpose="vision",
+                                   title=title, backend="cli") as call:
+            tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+            try:
+                tf.write(prompt)
+                tf.close()
+                cmd = [grok, "--prompt-file", tf.name, "--output-format", "json"]
+                if selected_model:
+                    cmd += ["-m", selected_model]
+                r = llm_gateway.run_command(cmd, timeout=timeout)
+            except Exception as e:  # noqa: BLE001
+                llm_gateway.llm_fill(call, fail=e)
+                return None, f"grok 실행 오류: {e}"
+            finally:
+                try:
+                    os.remove(tf.name)
+                except OSError:
+                    pass
+            stdout, usage = llm_gateway.unwrap_grok_json(r.stdout or "")
+            llm_gateway.llm_fill(call, usage=usage)
+            r = llm_gateway.ProcessResult(r.returncode, stdout, r.stderr, r.timed_out)
+            return finish(call, r), ""
+    return None, f"지원하지 않는 비전 모델 계열: {family}"
+
+
 def run_text(family: str, prompt: str, *, model: str, effort: str = "default", purpose: str,
              title: str | None, timeout: int, claude_bin: str = "", grok_bin: str = "",
              postprocess: Callable[[str], str] | None = None) -> tuple[str, str]:

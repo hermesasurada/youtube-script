@@ -142,7 +142,7 @@ def _capture_order(summary_path: str | None) -> list[str]:
     캡처 전용 설정은 두지 않는다(2026-09-23 사용자 지시: 요약 모델이 캡처까지 맡는다).
     이미지 입력이 안 되는 모델은 건너뛰고, 하나도 없으면 기본 비전 모델을 쓴다.
     """
-    import keyframe_report as kr
+    import kf_base
     try:
         slots = [x["model"] for x in db.get_monitor_summary_slots()["slots"]]
     except Exception:
@@ -151,13 +151,13 @@ def _capture_order(summary_path: str | None) -> list[str]:
     order = list(dict.fromkeys(([first] if first else []) + slots))
     # 비전 티어 Opus → Sonnet(2026-11-09 사용자 승인, 포탈 LLM 이력 분석: Opus 캡처 건당 약 16만 토큰·7일 캐시 쓰기 7.3M).
     # 요약이 Opus여도 캡처는 kr.VISION_CLAUDE_MODEL(기본 Sonnet 5.5)로 한다. 되돌리기: YT_VISION_OPUS_TO="" 로 재시작.
-    swap = kr.VISION_OPUS_TO
+    swap = kf_base.VISION_OPUS_TO
     if swap:
         order = list(dict.fromkeys(swap if ("opus" in m and m.startswith("claude")) else m for m in order))
     # Gemini는 이미지 러너가 없어 캡처 순서에서 뺀다(카탈로그상 비전 가능이어도, 2026-11-16).
     order = [m for m in order if llm_gateway.llm_catalog.valid(m, capability="vision")
              and llm_gateway.model_family(m) != llm_gateway.GEMINI_FAMILY]
-    return order or [kr.VISION_MODEL]
+    return order or [kf_base.VISION_MODEL]
 
 
 def _monitor_model_payload() -> dict:

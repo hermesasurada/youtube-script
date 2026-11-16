@@ -21,6 +21,10 @@ import app
 import channel_monitor
 import db
 import keyframe_report
+import kf_vision
+import kf_targets
+import kf_frames
+import kf_base
 import llm_gateway
 import routes_media
 import subprocess
@@ -448,7 +452,7 @@ def test_image_captions_are_excluded_from_term_notes():
     import keyframe_report
 
     project = os.path.dirname(os.path.dirname(__file__))
-    kf = open(os.path.join(project, "keyframe_report.py"), encoding="utf-8").read()
+    kf = open(os.path.join(project, "kf_vision.py"), encoding="utf-8").read()   # 비전 프롬프트
     assert "caption에는 용어 각주 표시(별표 `*`)를 붙이지 않는다" in kf
 
     assert keyframe_report._caption_text("정렬과 수율\\*이 필요하다") == "정렬과 수율이 필요하다"
@@ -844,7 +848,7 @@ def test_summary_renderer_is_local_and_secondary_assets_are_deferred():
 def test_keyframe_section_by_timestamp():
     headings = [{"idx": 0, "start": 0}, {"idx": 1, "start": 60}, {"idx": 2, "start": 120}]
     kept = [{"ts": 10, "section": None}, {"ts": 75, "section": None}, {"ts": 200, "section": None}]
-    keyframe_report._assign_sections_by_time(kept, headings)
+    kf_vision._assign_sections_by_time(kept, headings)
     assert [k["section"] for k in kept] == [0, 1, 2]
 
 
@@ -859,7 +863,7 @@ def test_keyframe_semantic_section_is_not_overwritten_by_timestamp():
         {"ts": 75, "section": 999},
     ]
 
-    keyframe_report._assign_sections_by_time(kept, headings)
+    kf_vision._assign_sections_by_time(kept, headings)
 
     assert [k["section"] for k in kept] == [3, 4, 4]
 
@@ -877,12 +881,12 @@ def test_visual_capture_targets_use_timestamped_transcript_across_sections():
         "[02:05] 마지막 결론만 말합니다."
     )
 
-    assert keyframe_report._visual_capture_targets(body, headings) == [10, 65]
+    assert kf_targets._visual_capture_targets(body, headings) == [10, 65]
 
 
 def test_keyframe_context_uses_nearby_transcript_only():
     segments = [(10, "첫 화면"), (20, "관련 그래프"), (90, "먼 내용")]
-    context = keyframe_report._context_for_timestamp(18, segments, window=10)
+    context = kf_targets._context_for_timestamp(18, segments, window=10)
     assert "첫 화면" in context and "관련 그래프" in context
     assert "먼 내용" not in context
 
@@ -893,25 +897,25 @@ def test_scored_keyframes_are_limited_per_section_without_changing_legacy_result
         {"ts": 2, "section": 3, "_vision_score": 5},
         {"ts": 3, "section": 3, "_vision_score": 4},
     ]
-    assert [x["ts"] for x in keyframe_report._limit_frames_per_section(scored, 2)] == [2, 3]
+    assert [x["ts"] for x in kf_vision._limit_frames_per_section(scored, 2)] == [2, 3]
 
     legacy = [{"ts": i, "section": 3} for i in range(4)]
-    assert keyframe_report._limit_frames_per_section(legacy, 2) == legacy
+    assert kf_vision._limit_frames_per_section(legacy, 2) == legacy
 
 
 def test_even_candidate_sampling_never_duplicates_when_budget_is_larger():
-    assert keyframe_report._evenly_sample([1, 2], 5) == [1, 2]
-    assert keyframe_report._evenly_sample(list(range(10)), 3) == [0, 3, 6]
+    assert kf_frames._evenly_sample([1, 2], 5) == [1, 2]
+    assert kf_frames._evenly_sample(list(range(10)), 3) == [0, 3, 6]
 
 
 def test_keyframe_ts_label_and_hms():
-    assert keyframe_report._parse_ts_label("제목 [3:20]") == 200
-    assert keyframe_report._parse_ts_label("[1:02:03]") == 3723
-    assert keyframe_report._parse_ts_label("시각 없음") is None
-    assert keyframe_report._hms(200) == "03:20"      # 분은 2자리 패딩
-    assert keyframe_report._hms(3723) == "1:02:03"
+    assert kf_targets._parse_ts_label("제목 [3:20]") == 200
+    assert kf_targets._parse_ts_label("[1:02:03]") == 3723
+    assert kf_targets._parse_ts_label("시각 없음") is None
+    assert kf_base._hms(200) == "03:20"      # 분은 2자리 패딩
+    assert kf_base._hms(3723) == "1:02:03"
     # 라벨↔시각 왕복 일관성
-    assert keyframe_report._parse_ts_label("[" + keyframe_report._hms(200) + "]") == 200
+    assert kf_targets._parse_ts_label("[" + kf_base._hms(200) + "]") == 200
 
 
 def test_keyframe_commit_restores_previous_frames_when_summary_update_fails(tmp_path, monkeypatch):
@@ -949,28 +953,28 @@ def test_sequoia_opening_is_removed_before_main_interview():
         "[01:15] main interview question"
     )
 
-    trimmed, intro_ts = keyframe_report.trim_sequoia_opening(meta, body)
+    trimmed, intro_ts = kf_targets.trim_sequoia_opening(meta, body)
 
     assert intro_ts == 52
     assert trimmed.startswith("[00:52]")
     assert "cold open" not in trimmed
-    assert keyframe_report._sequoia_opening_window(meta, body) == (0.0, 57.0)
+    assert kf_targets._sequoia_opening_window(meta, body) == (0.0, 57.0)
 
 
 def test_sequoia_opening_candidate_filter_includes_visual_tail():
     frames = [(0, "zero.jpg"), (25, "cold.jpg"), (55, "tail.jpg"), (58, "main.jpg")]
-    assert keyframe_report._exclude_opening_candidates(frames, (0, 57)) == [(58, "main.jpg")]
+    assert kf_targets._exclude_opening_candidates(frames, (0, 57)) == [(58, "main.jpg")]
 
 
 def test_non_pattern_sequoia_interview_is_not_trimmed():
     meta = {"uploader": "Sequoia Capital", "title": "Jensen interview"}
     body = "[00:00] Thank you so much, Jensen.\n[00:32] Can you tell us what is an AI factory?"
 
-    trimmed, intro_ts = keyframe_report.trim_sequoia_opening(meta, body)
+    trimmed, intro_ts = kf_targets.trim_sequoia_opening(meta, body)
 
     assert intro_ts is None
     assert trimmed == body
-    assert keyframe_report._sequoia_opening_window(meta, body) is None
+    assert kf_targets._sequoia_opening_window(meta, body) is None
 
 
 def test_existing_opening_figures_are_removed_without_touching_main_frames():
@@ -1262,6 +1266,10 @@ def test_capture_download_retry_trigger_covers_empty_file():
     raise돼 대체 클라이언트 폴백을 못 탔다.)
     """
     import keyframe_report as kr
+    import kf_vision
+    import kf_targets
+    import kf_frames
+    import kf_base
     assert yt_download.is_retryable_video_error("ERROR: The downloaded file is empty")
     assert yt_download.is_retryable_video_error("HTTP Error 403: Forbidden")
     assert yt_download.is_retryable_video_error("Requested format is not available")
@@ -1519,16 +1527,20 @@ def test_capture_order_starts_with_the_model_that_summarized(monkeypatch, tmp_pa
     summary = tmp_path / "s.md"
     summary.write_text("<!--SUMMARY_MODEL:GPT 6 Sol · 1회 재시도-->\n\n## 본문\n", encoding="utf-8")
     import keyframe_report as kr
-    monkeypatch.setattr(kr, "VISION_OPUS_TO", "")          # 치환을 끄면 요약 모델 순서 그대로
+    import kf_vision
+    import kf_targets
+    import kf_frames
+    import kf_base
+    monkeypatch.setattr(kf_base, "VISION_OPUS_TO", "")          # 치환을 끄면 요약 모델 순서 그대로
     assert yt_models._capture_order(str(summary)) == ["gpt-6-sol", "claude-opus-5-5", "grok-4.7"]
     # 마커가 없으면 슬롯 순서 그대로
     summary.write_text("## 본문\n", encoding="utf-8")
     assert yt_models._capture_order(str(summary)) == ["claude-opus-5-5", "gpt-6-sol", "grok-4.7"]
     # 2026-11-09: 비전 티어 Opus → Sonnet(기본) — 요약이 Opus여도 캡처는 Sonnet
-    monkeypatch.setattr(kr, "VISION_OPUS_TO", "claude-sonnet-5-5")
+    monkeypatch.setattr(kf_base, "VISION_OPUS_TO", "claude-sonnet-5-5")
     assert yt_models._capture_order(str(summary)) == ["claude-sonnet-5-5", "gpt-6-sol", "grok-4.7"]
-    assert kr._vision_claude_env()["DISABLE_PROMPT_CACHING"] == "1"
-    assert kr._vision_claude_env()["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+    assert kf_vision._vision_claude_env()["DISABLE_PROMPT_CACHING"] == "1"
+    assert kf_vision._vision_claude_env()["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
     # 이미지 입력이 안 되는 모델은 뺀다
     monkeypatch.setattr(llm_gateway.llm_catalog, "valid",
                         lambda m, **kw: m != "grok-4.7")
@@ -1537,8 +1549,10 @@ def test_capture_order_starts_with_the_model_that_summarized(monkeypatch, tmp_pa
 
 def test_keyframe_vision_accepts_any_length_order():
     """서버가 넘긴 순서를 자르지 않는다(예전 3칸 제한 없음) — 옛 계열 키는 비전 기본값으로."""
-    src = open(keyframe_report.__file__, encoding="utf-8").read()
-    assert "normalize_capture_models" not in src
+    project = os.path.dirname(keyframe_report.__file__)
+    for name in ("keyframe_report.py", "kf_vision.py"):
+        src = open(os.path.join(project, name), encoding="utf-8").read()
+        assert "normalize_capture_models" not in src
 
 
 def test_membership_capture_failure_is_not_retried(monkeypatch):
@@ -1798,12 +1812,12 @@ def test_keyframe_gpt_can_be_first_vision_model(monkeypatch):
         seen["prompt"] = prompt
         seen["images"] = kwargs["images"]
         return result
-    monkeypatch.setattr(keyframe_report.llm_gateway, "run_codex_prompt", run_gpt)
+    monkeypatch.setattr(llm_gateway, "run_codex_prompt", run_gpt)
     monkeypatch.setattr(
-        keyframe_report.llm_gateway, "run_command",
+        llm_gateway, "run_command",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Later models should not run")),
     )
-    verdict = keyframe_report.classify_and_assign(
+    verdict = kf_vision.classify_and_assign(
         [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}],
         transcript_segments=[(1.0, "화면의 매출 그래프를 설명합니다")],
         model_order=["gpt", "opus", "grok"],
@@ -2511,23 +2525,23 @@ def test_title_translation_falls_back_to_summary_slots_after_luna(monkeypatch):
 
 def test_keyframe_vision_calls_log_rows(llm_db, monkeypatch):
     verdict_json = '[{"name":"a.jpg","keep":true,"section":0,"type":"chart","caption":"차트"}]'
-    monkeypatch.setattr(keyframe_report.llm_gateway, "run_command",
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(
                             0, json.dumps(dict(_CLAUDE_ENV, result=verdict_json)), ""))
-    verdict = keyframe_report.classify_and_assign(
+    verdict = kf_vision.classify_and_assign(
         [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}], model_order=["opus"], title="영상 E")
     assert verdict["a.jpg"]["keep"] is True
     # grok 비전(봉투) + codex 비전(events)
-    monkeypatch.setattr(keyframe_report.llm_gateway, "resolve_grok_bin", lambda: "/bin/echo")
-    monkeypatch.setattr(keyframe_report.llm_gateway, "run_command",
+    monkeypatch.setattr(llm_gateway, "resolve_grok_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(llm_gateway, "run_command",
                         lambda args, **kw: llm_gateway.ProcessResult(
                             0, json.dumps(dict(_GROK_ENV, text=verdict_json)), ""))
-    assert keyframe_report.classify_and_assign(
+    assert kf_vision.classify_and_assign(
         [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}], model_order=["grok"], title="영상 E")
-    monkeypatch.setattr(keyframe_report.llm_gateway, "run_codex_prompt",
+    monkeypatch.setattr(llm_gateway, "run_codex_prompt",
                         lambda prompt, **kw: llm_gateway.ProcessResult(
                             0, verdict_json, "", events=_CODEX_EVENTS))
-    assert keyframe_report.classify_and_assign(
+    assert kf_vision.classify_and_assign(
         [(1.0, "/tmp/a.jpg")], [{"idx": 0, "text": "주제"}], model_order=["gpt"], title="영상 E")
     rows = _llm_rows(llm_db)
     assert [(r["provider"], r["purpose"], r["title"], r["status"]) for r in rows] == [

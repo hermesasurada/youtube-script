@@ -96,6 +96,43 @@ def test_run_text_grok_timeout_and_missing_binary(monkeypatch, tmp_path):
     assert body == "" and err == "grok 타임아웃(7s)"
 
 
+def test_run_vision_claude_reads_refs_with_given_env_and_gpt_attaches_images(monkeypatch):
+    _no_log(monkeypatch)
+    seen = {}
+
+    def run_command(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return llm_gateway.ProcessResult(0, json.dumps({"type": "result", "result": "[1]"}), "")
+    monkeypatch.setattr(llm_gateway, "run_command", run_command)
+    out, err = R.run_vision("claude", "P @/tmp/a.jpg", model="claude-sonnet-5-5", images=["/tmp/a.jpg"], title="t",
+                            timeout=9, finish=lambda call, r: ("판정", r.stdout), claude_bin=lambda: "claude",
+                            claude_env=lambda: {"X": "1"})
+    assert (out, err) == (("판정", "[1]\n"), "")                      # 봉투를 벗긴 글을 finish에 넘긴다
+    assert seen["cmd"] == ["claude", "-p", "--model", "claude-sonnet-5-5", "--output-format", "json", "P @/tmp/a.jpg"]
+    assert seen["kw"] == {"timeout": 9, "env": {"X": "1"}}             # 추론 수준·최소 구성 인자는 붙이지 않는다
+
+    def run_codex_prompt(prompt, **kw):
+        seen["codex"] = kw
+        return llm_gateway.ProcessResult(0, "[2]", "")
+    monkeypatch.setattr(llm_gateway, "run_codex_prompt", run_codex_prompt)
+    out, err = R.run_vision("gpt", "P", model="gpt-x", images=["/tmp/a.jpg"], title=None, timeout=9,
+                            finish=lambda call, r: r.stdout, claude_bin=lambda: "", claude_env=dict)
+    assert (out, err) == ("[2]", "") and seen["codex"] == {"model": "gpt-x", "timeout": 9, "images": ["/tmp/a.jpg"]}
+
+
+def test_run_vision_launch_failures_return_error_without_calling_finish(monkeypatch, tmp_path):
+    _no_log(monkeypatch)
+    called = []
+    finish = lambda call, r: called.append(r) or "x"                    # noqa: E731
+    common = dict(model="grok-4.7", images=[], title=None, timeout=5, finish=finish, claude_bin=lambda: "", claude_env=dict)
+    monkeypatch.setattr(llm_gateway, "resolve_grok_bin", lambda: str(tmp_path / "none"))
+    assert R.run_vision("grok", "P", **common) == (None, "grok 실행파일 없음")
+    monkeypatch.setattr(llm_gateway, "run_codex_prompt", lambda p, **kw: (_ for _ in ()).throw(RuntimeError("codex 없음")))
+    assert R.run_vision("gpt", "P", **common) == (None, "gpt 실행 오류: codex 없음")
+    assert R.run_vision("gemini", "P", **common)[1].startswith("지원하지 않는")
+    assert called == []
+
+
 def test_title_runner_drops_unknown_grok_effort(monkeypatch):
     import app
     seen = {}

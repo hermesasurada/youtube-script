@@ -7,7 +7,8 @@ import db
 import document_io
 import term_senses
 import name_fix
-import keyframe_report
+import kf_targets
+import kf_base
 import summary_policy
 import llm_gateway
 from flask import Response, request
@@ -38,7 +39,7 @@ def summarize():
     transcript_meta, transcript_body = document_io.parse_markdown_text(transcript_blob)
     # 6분 이하 영상은 한눈 요약을 만들지 않는다(2026-11-12 지시, 11-16 정정 — summary_policy).
     brief = not summary_policy.skip_brief(transcript_meta)
-    transcript_body, opening_cutoff = keyframe_report.trim_sequoia_opening(
+    transcript_body, opening_cutoff = kf_targets.trim_sequoia_opening(
         transcript_meta, transcript_body
     )
     if opening_cutoff is not None:
@@ -47,7 +48,7 @@ def summarize():
         )
         log.info(
             "Sequoia opening omitted from summary input: %s (before %s)",
-            os.path.basename(abs_path), keyframe_report._hms(opening_cutoff),
+            os.path.basename(abs_path), kf_base._hms(opening_cutoff),
         )
 
     template = yt_summary._inject_term_exclusions(data.get("prompt") or yt_core.DEFAULT_PROMPT,
