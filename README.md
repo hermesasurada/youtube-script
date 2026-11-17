@@ -18,7 +18,7 @@ YouTube 영상을 **전사(whisper.cpp) → LLM 요약 → 키프레임 리포�
 | `db.py` | SQLite 연결·스키마·공용 도우미 — 쿼리는 `db_items`(이력)·`db_channels`(채널·모니터 설정)·`db_terms`(각주 제외)·`db_queue`(처리 큐), 마이그레이션은 `db_migrations`(번호별 함수 목록). 호출은 `db.이름`으로 통일(db.py가 다시 내보냄) |
 | `yt_download.py` | yt-dlp 다운로드의 차단 대응 재시도(음성·영상 공용) |
 | `keyframe_report.py` + `kf_*.py` | 캡처: 진입점·요약 md 주입 / `kf_base`(설정) · `kf_targets`(대상 고르기) · `kf_frames`(영상 받기·프레임 추출) · `kf_vision`(LLM 비전 분류) |
-| `channel_monitor.py` + `cm_*.py` | 채널 감시(launchd 20분): 영상 처리·큐 비우기 / `cm_base`(설정) · `cm_health`(모델 상태 점검) · `cm_notify`(알림) · `cm_detect`(신규 영상 감지) |
+| `channel_monitor.py` + `cm_*.py` | 채널 감시(launchd 10분): 영상 처리·큐 비우기 / `cm_base`(설정) · `cm_health`(모델 상태 점검) · `cm_notify`(알림) · `cm_detect`(신규 영상 감지) |
 | `transcript_translator.py` / `translation_guards.py` | 외국어 전사 번역(launchd 30분) / 번역 결과 검사(반복 붕괴·한자 누출) |
 | `tools/` | 일회용·보수용 스크립트(일괄 재요약·압축률 소급·오디오 보관 소급) |
 | `templates/` | `index.html`(데스크톱) · `mobile.html`(모바일 이력) |

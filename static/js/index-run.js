@@ -3,7 +3,7 @@
    index-urlqueue → index-summary → index-boot 순서로 읽는다(2026-11-17 index.js에서 분리). */
 /* ── Start transcription ── */
 /* URL 전사는 서버 큐(watch_queue)에 줄을 선다 — 자동 모니터와 같은 파이프라인.
-   유휴(최근 주기 동안 처리 없음)면 즉시 시작하고, 이후 20분에 한 건.
+   유휴(최근 주기 동안 처리 없음)면 즉시 시작하고, 이후 10분에 한 건.
    입력창 URL + 사이드바 대기열의 대기 항목을 전부 적재.
    (파일 업로드는 유튜브와 무관하므로 종전대로 즉시 처리) */
 async function enqueueUrls() {
@@ -39,7 +39,7 @@ async function enqueueUrls() {
       lines.push(`⚠️ 서버 연결 실패: ${e.message}`);
     }
     logEl.textContent = lines.join('\n') +
-      '\n\n최근 20분 동안 처리가 없었으면 바로 시작하고, 이후에는 20분에 한 건입니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
+      '\n\n최근 10분 동안 처리가 없었으면 바로 시작하고, 이후에는 10분에 한 건입니다. 우측 상단 [큐] 버튼에서 순서를 바꿀 수 있습니다.';
   }
   renderQueue();
   openQueueModal();          // 등록 직후 현재 대기 순서를 바로 보여준다

@@ -17,7 +17,7 @@ log = logging.getLogger("yt-script")
 
 # ── 채널 자동 모니터링(로컬 전용 — 원격은 before_request에서 차단) ──────
 # ── 처리 큐 (단일 파이프라인 관리) ────────────────────────────────────
-# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(유휴면 즉시, 이후 20분에 1건).
+# 수동 전사 요청도 자동 모니터와 같은 watch_queue에 줄을 선다(유휴면 즉시, 이후 10분에 1건).
 
 _YT_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?[^#]*v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
@@ -60,7 +60,7 @@ def _oembed_meta(url: str) -> dict:
         return {}
 
 
-_QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "1200"))
+_QUEUE_CYCLE_SEC = int(os.environ.get("QUEUE_CYCLE_SEC", "600"))  # launchd StartInterval과 같게
 _MONITOR_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channel_monitor.py")
 _MONITOR_LOG_DIR = os.path.expanduser("~/Library/Logs/hermes")
 

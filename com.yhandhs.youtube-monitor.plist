@@ -18,9 +18,9 @@
         <key>HOME</key>
         <string>/Users/yhandhs</string>
     </dict>
-    <!-- 20분 주기. KeepAlive 아님(1회 실행 후 종료). 단일 인스턴스는 스크립트 락파일이 보장. -->
+    <!-- 10분 주기(2026-11-18 사용자 결정, 이전 20분). KeepAlive 아님(1회 실행 후 종료). 단일 인스턴스는 스크립트 락파일이 보장. -->
     <key>StartInterval</key>
-    <integer>1200</integer>
+    <integer>600</integer>
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>

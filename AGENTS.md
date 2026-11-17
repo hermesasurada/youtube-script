@@ -4,7 +4,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 이 문서에는 **지금 지켜야 할 규칙**만 둔다. 도입 계기 영상·실측 수치·소급 건수·백업 이름·뒤집힌 옛 결정은 `docs/HISTORY.md`, 구성 표·환경변수 표·PO 토큰 절차는 `README.md`를 본다.
 
 - 서버는 launchd `com.yhandhs.youtube-script`(KeepAlive, `.venv/bin/python app.py`, 포트 5001)다. `.py`를 고치면 `launchctl kickstart -k gui/$(id -u)/com.yhandhs.youtube-script`, 정적 프런트는 새로고침만으로 반영된다.
-- 채널 감시는 launchd `com.yhandhs.youtube-monitor`(20분 주기)다. 서버 로그는 `~/Library/Logs/hermes/youtube-script.{out,err}.log`.
+- 채널 감시는 launchd `com.yhandhs.youtube-monitor`(10분 주기, 2026-11-18 사용자 결정 — plist `StartInterval`과 `yt_queue.QUEUE_CYCLE_SEC`를 함께 바꾼다. 403은 간격과 무관함을 로그로 확인)다. 서버 로그는 `~/Library/Logs/hermes/youtube-script.{out,err}.log`.
 - 비상 스위치 환경변수는 launchd plist에 넣고 kickstart한다.
 
 ## 코드 구조 (2026-11-16~17 리팩토링)
@@ -209,7 +209,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 ## 채널 감시와 큐
 
 - **중복 정리는 요약까지 끝난 이력에만 적용한다**(`db.has_summary_for_yt_id`). 전사만 남은 반쪽 이력을 중복으로 닫으면 요약이 영영 생기지 않는다.
-- 요약 대기시간은 `MONITOR_SUMM_TIMEOUT`(기본 1800초, 사용자 결정)이고 영상 처리 주기 20분과는 별개다.
+- 요약 대기시간은 `MONITOR_SUMM_TIMEOUT`(기본 1800초, 사용자 결정)이고 영상 처리 주기 10분과는 별개다.
 - **광고 영상은 건너뛴다**: 새 영상 제목에 광고 표기 태그가 있으면 `skipped`(사유 `ad`)로 둔다(`is_ad_title` — 괄호로 감싼 AD·광고·유료광고·Sponsored, 해시태그 `#광고`; 'ADR'·'AD램'은 걸리지 않는다). 수동 큐는 막지 않는다.
 - **라이브는 건너뛴다**: 자동 감지분은 예정·진행 중·끝난 다시보기(`is_live`·`post_live`·`was_live`)를 모두 `skipped`(사유 `live_skip:…`, error_kind `live_skipped`)로 확정 제외한다(`filter_verdict`·`_defer_policy`). 필요한 라이브는 수동 등록한다.
 - 수동 등록분(`channel_id='manual'`)은 방송이 끝나기를 기다렸다가 다시보기를 처리한다. 프리미어는 라이브가 아니라 공개를 기다린 뒤 처리한다.

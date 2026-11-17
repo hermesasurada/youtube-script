@@ -16,7 +16,7 @@
 
   // 자동 > 캡처 > 증류 순서. key = PATCH 필드, 기본값은 NULL일 때의 의미.
   const SWITCHES = [
-    { key: 'enabled', label: '자동', title: '자동 수집 — 새 영상을 20분마다 확인해 전사·요약', dflt: false },
+    { key: 'enabled', label: '자동', title: '자동 수집 — 새 영상을 10분마다 확인해 전사·요약', dflt: false },
     { key: 'capture', label: '캡처', title: '영상 캡처(키프레임) 포함 — 끄면 요약만', dflt: true },
     { key: 'distill', label: '증류', title: '지식증류(옵시디언 볼트) 대상 — 끄면 증류에서 제외', dflt: true },
   ];
@@ -197,7 +197,7 @@
       mount(host, st.data, { countEl: st.countEl });
       const row = st.rows.querySelector(`.chl-row[data-id="${d.channel.id}"]`);
       if (row) { row.classList.add('is-new'); row.scrollIntoView({ block: 'nearest' }); }
-      _msg(st, `${d.channel.title || '@' + d.channel.handle} 추가됨 — 다음 확인(20분 주기)부터 새로 올라오는 영상을 처리합니다.`);
+      _msg(st, `${d.channel.title || '@' + d.channel.handle} 추가됨 — 다음 확인(10분 주기)부터 새로 올라오는 영상을 처리합니다.`);
     } catch (e) {
       _msg(st, `추가 실패: ${e.message}`, true);
     } finally {

@@ -255,7 +255,7 @@ async function refreshQueueModal() {
     const group = (title, count, hint, rows, empty = '') => `<section class="q-group">`
       + `<div class="q-sec"><span>${title} · ${count}건</span>${hint ? `<span class="q-hint">${hint}</span>` : ''}</div>`
       + (rows || `<div class="q-empty">${empty}</div>`) + `</section>`;
-    body.innerHTML = group('본편 대기', main.length, '유휴면 바로, 이후 20분에 1건', mainRows, '대기 중인 영상이 없습니다.')
+    body.innerHTML = group('본편 대기', main.length, '유휴면 바로, 이후 10분에 1건', mainRows, '대기 중인 영상이 없습니다.')
       + (kf.length ? group('캡처 재시도', kf.length, '본편과 별도 슬롯', kfRows) : '')
       + (recent ? group('최근 처리', d.recent.length, '', recent) : '');
   } catch (e) {

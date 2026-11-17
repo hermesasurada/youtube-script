@@ -1610,7 +1610,7 @@ def test_membership_capture_failure_is_not_retried(monkeypatch):
 
 
 def test_retry_delay_is_constant_20min():
-    """재시도 간격은 영상 처리 주기와 같은 20분 고정이다.
+    """재시도 간격은 20분 고정이다(처리 주기 10분과 별개).
 
     예산 5회로 짧은 일시 장애를 빠르게 따라잡되 무한 재시도는 막는다.
     """

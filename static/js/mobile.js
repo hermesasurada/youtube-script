@@ -591,7 +591,7 @@ async function loadQueueM() {
        <button type="button" class="mq-cap-chip on" id="mq-add-distill-btn" role="switch" aria-checked="true"
                onclick="this.classList.toggle('on'); this.setAttribute('aria-checked', this.classList.contains('on'))">증류 포함</button></div>
        <div class="mq-add-pv" id="mq-add-pv"></div></section>`
-      + `<p class="m-utility-note">유휴면 바로 시작하고, 이후 20분마다 본편 1건과 캡처 1건을 처리합니다.</p>`
+      + `<p class="m-utility-note">유휴면 바로 시작하고, 이후 10분마다 본편 1건과 캡처 1건을 처리합니다.</p>`
       + group('본편 대기', main.length, mainRows, '대기 중인 영상이 없습니다.')
       + (kf.length ? group('캡처 재시도', kf.length, kfRows) : '')
       + (recentRows ? group('최근 처리', d.recent.length, recentRows) : '');
@@ -678,7 +678,7 @@ function renderChannelsM(d) {
   const pane = body.querySelector('[data-set-pane="channels"]');
   if (!pane.querySelector('#mobile-channel-list')) {
     pane.innerHTML =
-      `<p class="m-utility-note">등록 채널의 새 영상을 20분마다 확인해 전사·요약·캡처합니다.</p>`
+      `<p class="m-utility-note">등록 채널의 새 영상을 10분마다 확인해 전사·요약·캡처합니다.</p>`
       + `<section class="ch-list-shell chl-shell"><div class="m-utility-section-head"><span>등록 채널</span>`
       + `<small id="mobile-channels-count">${chans.filter(c => c.enabled).length} ON · 전체 ${chans.length}</small></div>`
       + `<div id="mobile-channel-list"></div></section>`;
