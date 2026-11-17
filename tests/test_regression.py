@@ -2924,3 +2924,16 @@ def test_history_uploader_uses_registered_channel_title():
     b = db._apply_channel_title({"uploader": "Other", "channel_url": "https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxx"}, titles)
     assert b["uploader"] == "Other"
     assert db._apply_channel_title({"uploader": "X", "channel_url": ""}, titles)["uploader"] == "X"
+
+
+def test_summary_html_file_export_is_wired_on_both_surfaces():
+    """요약을 HTML 파일 하나로 보내기(2026-11-17) — PC·모바일 버튼과 공용 함수가 이어져 있어야 한다."""
+    root = os.path.dirname(os.path.abspath(app.__file__))
+    common = open(os.path.join(root, "static/js/common.js"), encoding="utf-8").read()
+    assert "exportSummaryFile," in common and "buildSummaryHtmlFile," in common
+    assert "_blobToDataUrl" in common and "ys-kf-style" in common        # 이미지·주입 스타일까지 담는다
+    pc_html = open(os.path.join(root, "templates/index.html"), encoding="utf-8").read()
+    m_html = open(os.path.join(root, "templates/mobile.html"), encoding="utf-8").read()
+    assert 'onclick="exportSummaryHtml(this)"' in pc_html and 'onclick="exportSummaryHtmlM(this)"' in m_html
+    assert "async function exportSummaryHtml(" in _read_src(root, "static/js/index.js")
+    assert "async function exportSummaryHtmlM(" in _read_src(root, "templates/mobile.html")
