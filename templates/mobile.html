@@ -88,11 +88,16 @@
         <span class="read-label">읽음 처리</span>
       </button>
       <button class="summary-action-btn" id="rfm-btn" onclick="refreshItemMeta(this)"
-              title="제목·썸네일 갱신">
+              title="제목·썸네일 갱신" aria-label="메타 갱신">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg>
         <span class="action-label">메타 갱신</span>
       </button>
       <button class="distill-ctrl" id="distill-ctrl" onclick="cycleItemDistill()" aria-label="증류 대상 전환">증류 —</button>
+      <button class="summary-action-btn" id="export-btn" onclick="exportSummaryHtmlM(this)" aria-label="HTML 파일로 보내기"
+              title="이 요약을 HTML 파일 하나로 보내기(캡처 이미지 포함)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>
+        <span class="action-label">HTML 파일</span>
+      </button>
       <button class="summary-action-btn primary" id="pub-btn" onclick="publishToBlog(this)"
               title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>

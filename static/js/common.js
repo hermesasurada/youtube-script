@@ -1540,6 +1540,121 @@
     });
   }
 
+  /* ── 요약을 HTML 파일 하나로 내보내기(2026-11-17 사용자 지시 '상세팝업을 아는 사람에게 html 파일로') ──
+     받는 사람은 이 서버(Tailscale 안)에 들어올 수 없으므로 파일 하나에 모두 담는다: 화면과 같은 렌더러로 본문을
+     만들고(제목 번역·목차 생략 포함), 캡처 이미지는 data URI로 넣고, PC 화면 스타일(index.css)을 그대로 싣는다.
+     화면 전용 버튼·편집기·내 메모·인명 소개는 넣지 않는다. 서버 주소로 가는 링크는 받는 쪽에서 열리지 않으므로 뗀다.
+     전달: 휴대폰 공유 시트가 파일을 받을 수 있으면(https 등 보안 환경) 공유, 아니면 파일로 저장. */
+  function _blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+  }
+
+  async function _exportCss() {
+    const parts = await Promise.all(['/static/css/hermes-theme.css', '/static/css/index.css'].map(async u => {
+      try { const r = await fetch(u, { cache: 'no-cache' }); return r.ok ? await r.text() : ''; } catch (e) { return ''; }
+    }));
+    // 캡처 줄·한눈 요약·메타 칩 스타일은 common.js가 화면에 주입한다(ys-kf-style) — 그것도 싣는다.
+    if (!document.getElementById('ys-kf-style')) _setupKeyframeUI();
+    const injected = (document.getElementById('ys-kf-style') || {}).textContent || '';
+    // 서버 글꼴·외부 import는 받는 쪽에서 못 불러오므로 뺀다(시스템 글꼴로 보인다).
+    return (parts.join('\n') + '\n' + injected).replace(/@font-face\s*{[^}]*}/g, '').replace(/@import[^;]+;/g, '');
+  }
+
+  const _EXPORT_CSS = `
+html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !important; background: var(--surface, #fff); }
+.ys-export { max-width: 860px; margin: 0 auto; padding: 28px 22px 56px; box-sizing: border-box; }
+.ys-export .sum-panel { animation: none !important; position: static !important; display: block !important; max-width: none; max-height: none !important;
+  height: auto !important; width: auto; border: 0 !important; box-shadow: none !important; background: transparent; }
+.ys-export #sum-panel-body { overflow: visible !important; max-height: none !important; padding: 0 !important; }
+.ys-export .sum-head-sticky, .ys-export [class*="sticky"] { position: static !important; }
+.ys-export .sum-md { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif; }
+.ys-export img { max-width: 100%; height: auto; }
+.ys-export .kf-strip img { cursor: default; }
+.ys-export-foot { margin-top: 2.2rem; padding-top: 1rem; border-top: 1px solid var(--border, #e5e5e5);
+  font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; color: var(--text-muted, #777); }
+.ys-export-foot a { color: inherit; }
+@media (max-width: 640px) { .ys-export { padding: 18px 14px 44px; } }
+`;
+
+  function _exportFileName(title) {
+    const base = String(title || '요약').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return (base || '요약') + '.html';
+  }
+
+  /* opts: {md, titleKo, webpageUrl} → {html, filename, title} */
+  async function buildSummaryHtmlFile(opts) {
+    const body = document.createElement('div');
+    body.id = 'sum-panel-body';
+    body.className = 'sum-panel-body sum-md';
+    body.innerHTML = renderMarkdown(opts.md || '');
+    applyTitleTranslation(body, opts.titleKo || '');
+    stripSummaryPopupChrome(body);
+    setupStickySummarySections(body);                    // 팝업과 같은 섹션 구조(고정은 파일에선 끈다)
+    body.querySelectorAll('details.ys-tldr').forEach(d => d.setAttribute('open', ''));   // 받는 사람에겐 한눈 요약을 펼쳐서
+    body.querySelectorAll('button, script, .sec-edit-btn, .sec-edit-box, .term-note-x, .sum-note, .sum-notes')
+        .forEach(el => el.remove());
+    body.querySelectorAll('*').forEach(el => {
+      [...el.attributes].forEach(a => { if (/^on/i.test(a.name)) el.removeAttribute(a.name); });
+    });
+    await Promise.all([...body.querySelectorAll('img')].map(async img => {
+      const src = img.getAttribute('src') || '';
+      img.removeAttribute('loading'); img.removeAttribute('srcset');
+      if (!src || src.startsWith('data:')) return;
+      try {
+        const r = await fetch(new URL(src, location.href));
+        if (!r.ok) throw new Error(String(r.status));
+        img.setAttribute('src', await _blobToDataUrl(await r.blob()));
+      } catch (e) {
+        img.remove();                                   // 못 받은 이미지는 깨진 그림 대신 뺀다
+      }
+    }));
+    body.querySelectorAll('a[href]').forEach(a => {
+      let u;
+      try { u = new URL(a.getAttribute('href'), location.href); } catch (e) { a.removeAttribute('href'); return; }
+      if (u.origin === location.origin) { a.removeAttribute('href'); return; }   // 내 서버 주소 — 받는 쪽에선 안 열린다
+      a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener');
+    });
+    const h1 = body.querySelector('h1');
+    const title = (opts.titleKo || (h1 && h1.textContent) || '요약').trim();
+    const url = String(opts.webpageUrl || '').trim();
+    const made = new Date().toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+    const foot = '<footer class="ys-export-foot">'
+      + (url ? `원본 영상: <a href="${attrEscape(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a><br>` : '')
+      + `요약 파일 만든 때: ${escapeHtml(made)}</footer>`;
+    const css = await _exportCss();
+    const html = '<!doctype html>\n<html lang="ko" data-theme="light">\n<head>\n<meta charset="utf-8">\n'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+      + `<title>${escapeHtml(title)}</title>\n<style>\n${css}\n${_EXPORT_CSS}</style>\n</head>\n<body>\n`
+      + `<main class="ys-export"><div class="sum-panel">${body.outerHTML}</div>${foot}</main>\n</body>\n</html>\n`;
+    return { html, title, filename: _exportFileName(title) };
+  }
+
+  /* 파일을 만들어 공유 시트(가능할 때) 또는 내려받기로 넘긴다. 반환: 'shared' | 'downloaded' | 'cancelled' */
+  async function exportSummaryFile(opts) {
+    const { html, title, filename } = await buildSummaryHtmlFile(opts);
+    const file = new File([html], filename, { type: 'text/html' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title });
+        return 'shared';
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    return 'downloaded';
+  }
+
   /* ── 채널 모니터 모델 선택기(데스크톱·모바일 공용) ─────────────────────
      화면은 공통 렌더러(ModelSelector, static/js/model-selector.js — wm과 같은 파일)가
      그리고, 여기서는 상태·저장만 맡는다.
@@ -1872,6 +1987,8 @@
     renderMarkdown,
     normalizeModelLabel,
     mdToBloggerHtml,
+    buildSummaryHtmlFile,
+    exportSummaryFile,
     blogPeople,
     escapeHtml,
     attrEscape,

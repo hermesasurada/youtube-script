@@ -1121,3 +1121,31 @@ document.addEventListener('visibilitychange', () => {
     loadHistory(false);
   }
 });
+
+/* 요약을 HTML 파일 하나로 내보내기(2026-11-17) — 아는 사람에게 보내는 용도. 만들기는 공용 YS.exportSummaryFile. */
+async function exportSummaryHtmlM(btn) {
+  if (!_summaryMd) return;
+  const label = btn && btn.querySelector('.action-label');
+  const orig = label ? label.textContent : '';
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = '만드는 중…';
+  let done = '';
+  try {
+    const r = await YS.exportSummaryFile({ md: _summaryMd, titleKo: _titleKoM, webpageUrl: $('modal-youtube-link').hidden ? '' : $('modal-youtube-link').href });
+    done = r === 'shared' ? '보냈습니다' : r === 'downloaded' ? '저장했습니다' : '';
+  } catch (e) {
+    console.warn('[export]', e);
+    done = '만들기 실패';
+  }
+  if (btn) btn.disabled = false;
+  if (label) {
+    label.textContent = done || orig;
+    if (done) setTimeout(() => { label.textContent = orig; }, 2200);
+  }
+  // 좁은 폰에선 글자가 숨으므로 색으로도 알린다
+  if (btn && (done === '보냈습니다' || done === '저장했습니다')) {
+    btn.classList.add('done'); setTimeout(() => btn.classList.remove('done'), 2200);
+  } else if (btn && done) {
+    btn.classList.add('err'); setTimeout(() => btn.classList.remove('err'), 2200);
+  }
+}

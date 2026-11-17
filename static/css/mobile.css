@@ -571,6 +571,12 @@
     .summary-action-btn.done { color: var(--highlight); background: var(--highlight-soft); }
     .summary-action-btn.done.stale { color: var(--warn, #b7791f); background: color-mix(in oklab, var(--warn, #b7791f) 12%, var(--surface)); }
     .summary-action-btn.err { color: var(--error, #dc2626); }
+    /* 좁은 폰(≤430px): 버튼 5개가 한 줄에 들도록 '메타 갱신'·'HTML 파일'은 아이콘만(2026-11-17, 이름은 title·aria-label) */
+    @media (max-width: 430px) {
+      .summary-actions { gap: .3rem; padding-left: .6rem; padding-right: .6rem; }
+      .summary-action-btn, .summary-actions .distill-ctrl { padding: 0 .55rem; }
+      #rfm-btn .action-label, #export-btn .action-label { display: none; }
+    }
     :where(button, input, select, textarea, a):focus-visible {
       outline: 2px solid var(--highlight); outline-offset: 2px;
     }
