@@ -835,53 +835,6 @@ async function openSummary(itemId, title) {
   }
 }
 
-/* 제목·썸네일 갱신 — 데스크톱과 같은 엔드포인트. 서버가 실패 시 기존 값을 유지하므로
-   여기서는 결과만 알린다. 제목이 바뀌면 열린 본문의 H1과 번역 병기, 목록 썸네일을
-   즉시 반영한다(썸네일 URL은 그대로라 캐시 우회 쿼리를 붙인다). */
-async function refreshItemMeta(btn) {
-  if (!_summaryItemId) return;
-  const label = btn && btn.querySelector('.action-label');
-  const setLbl = (t) => { if (label) label.textContent = t; };
-  setLbl('…');
-  if (btn) btn.disabled = true;
-  try {
-    const res = await YS.apiRefreshMeta(_summaryItemId);
-    if (res && res.error) throw new Error(res.error);
-    const changed = (res && res.changed) || [];
-    if (changed.includes('title') || changed.includes('title_ko')) {
-      _titleKoM = res.title_ko || '';
-      const body = $('modal-body');
-      const h1 = body.querySelector('h1');
-      if (h1) h1.textContent = res.title || h1.textContent;
-      const orig = body.querySelector('.sum-title-orig');
-      if (orig) orig.remove();
-      YS.applyTitleTranslation(body, res.title_ko || '');
-      const hdrTitle = document.querySelector('.modal-hdr h2');
-      if (hdrTitle) hdrTitle.textContent = res.title_ko || res.title || hdrTitle.textContent;
-    }
-    if (changed.includes('thumbnail')) {
-      document.querySelectorAll('img.hist-thumb').forEach(img => {
-        const base = (img.getAttribute('src') || '').split('?')[0];
-        if (base) img.setAttribute('src', `${base}?v=${Date.now()}`);
-      });
-    }
-    if (changed.length) {
-      setLbl('갱신됨');
-      if (typeof loadHistory === 'function') loadHistory(true);
-    } else if (res && res.notes && res.notes.length) {
-      setLbl('갱신 실패'); console.warn('[refresh-meta]', res.notes.join(' / '));
-    } else {
-      setLbl('변경 없음');
-    }
-  } catch (e) {
-    console.warn('[refresh-meta] 실패', e);
-    setLbl('갱신 실패');
-  } finally {
-    if (btn) btn.disabled = false;
-    setTimeout(() => setLbl('메타 갱신'), 2000);
-  }
-}
-
 let _summaryItemId = 0;  // 현재 열린 요약의 DB ID — 경로를 브라우저에 노출하지 않는다
 
 let _distill = null;   // 현재 영상의 증류 상태 {override, channel, effective}

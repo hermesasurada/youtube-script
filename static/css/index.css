@@ -1812,7 +1812,6 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 /* 이 영상만 따로 지정했을 때 강조(채널 따름은 기본값이라 흐리게 둔다) */
 .sum-distill-ctrl.set { border-color: var(--highlight); background: var(--highlight-soft); color: var(--highlight); font-weight: 600; }
 /* 채널 따름일 때 옆에 붙는 실제 적용값 */
-.sum-distill-ctrl .dist-eff { color: var(--subtle); font-size: 11px; }
 
 .sum-panel-title {
   flex: 1;

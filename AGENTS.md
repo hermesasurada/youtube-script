@@ -27,7 +27,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 - **프런트 공용화**(3단계)
   - 모바일 화면(`/m`)의 스크립트·스타일은 `static/js/mobile.js`·`static/css/mobile.css`다(템플릿 `templates/mobile.html`은 마크업과 자원 목록만, 같은 자리에서 일반 `<script>`/`<link>`로 실어 실행 순서·전역 함수가 예전과 같다).
   - PC(`index.js`)와 모바일에 같은 글로 두 벌 있던 계산·API는 `common.js`의 `YS.fmtUnreadDur`·`YS.hms`·`YS.thumbFallback`·`YS.termSenseTitle`·`YS.uploaderSort`·`YS.queueApi`로 모았고, 양쪽 옛 함수 이름은 한 줄 래퍼로 남아 onclick·템플릿 문자열 호출처가 그대로다.
-  - 같은 이름이어도 상태 배열(`_historyItems`↔`ALL`)·DOM이 다른 함수(toggleRead·deleteCard·refreshItemMeta 등)는 억지로 합치지 않았다.
+  - 같은 이름이어도 상태 배열(`_historyItems`↔`ALL`)·DOM이 다른 함수(toggleRead·deleteCard 등)는 억지로 합치지 않았다.
   - 새 기능이 양쪽에 필요하면 계산·API는 `YS`에, 그리기만 각 화면에 둔다.
   - 문자열 배선 테스트는 모바일을 `tests/test_regression._read_src`(html+mobile.js+mobile.css 합본)로 읽는다.
 - **DB 영역 분리**(4단계)
@@ -251,7 +251,8 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 
 ### 요약 뷰어
 
-- **HTML 파일로 보내기**(2026-11-17 사용자 지시 '상세팝업을 아는 사람에게 html 파일로'): 요약 팝업 하단(PC·모바일) 'HTML 파일' 버튼 → `YS.exportSummaryFile`(`common.js`). 팝업과 같은 렌더러로 본문을 만들고(제목 번역·목차 생략·섹션 구조, 한눈 요약은 펼친 상태), 캡처 이미지는 data URI로, 스타일은 `index.css`·`hermes-theme.css`·주입 스타일(`ys-kf-style`)을 그대로 실어 **파일 하나만으로 열린다** — 받는 사람은 이 서버에 들어올 수 없기 때문이다. 내 메모·편집 버튼·인명 소개·서버 주소 링크·서버 글꼴은 넣지 않는다. 원본 영상 링크와 만든 시각을 맨 아래에 붙인다. 휴대폰 공유 시트가 파일을 받을 수 있으면(보안 연결) 공유, 아니면 내려받기 — Tailscale `http://` 주소에선 공유 시트가 안 떠 파일로 저장된다. 좁은 폰(≤430px)에선 '메타 갱신'·'HTML 파일'이 아이콘만 보인다.
+- **HTML 파일로 보내기**(2026-11-17 사용자 지시 '상세팝업을 아는 사람에게 html 파일로'): 요약 팝업 하단(PC·모바일) 'HTML 파일' 버튼 → `YS.exportSummaryFile`(`common.js`). 팝업과 같은 렌더러로 본문을 만들고(제목 번역·목차 생략·섹션 구조, 한눈 요약은 펼친 상태), 캡처 이미지는 data URI로, 스타일은 `index.css`·`hermes-theme.css`·주입 스타일(`ys-kf-style`)을 그대로 실어 **파일 하나만으로 열린다** — 받는 사람은 이 서버에 들어올 수 없기 때문이다. 내 메모·편집 버튼·인명 소개·서버 주소 링크·서버 글꼴은 넣지 않는다. 원본 영상 링크와 만든 시각을 맨 아래에 붙인다. 휴대폰 공유 시트가 파일을 받을 수 있으면(보안 연결) 공유, 아니면 내려받기 — Tailscale `http://` 주소에선 공유 시트가 안 떠 파일로 저장된다. 좁은 폰(≤430px)에선 'HTML 파일'이 아이콘만 보인다.
+- **요약 팝업 하단 버튼**(2026-11-18 정리): 읽음 처리 · 증류 ↪ 포함/제외 | HTML 파일 · 블로그 발행. '메타 갱신'(제목·썸네일을 유튜브에서 다시 가져오던 ↻ 버튼, `/history/refresh-meta`)은 사용자 지시로 서버 경로·`fetch_localized_title`·`clear_title_ko`·`save_thumbnail(force=)`까지 삭제했다 — 되살리려면 git 이력. 증류 버튼은 PC·모바일 모두 `증류 ↪ 포함`처럼 짧게 쓰고 근거(채널/기본 설정)는 툴팁에 둔다.
 
 - **`###` 소제목**은 해당 섹션 안에서만 sticky다(제목 고정 영역 아래 8px) — 다음 섹션이 올라오면 밀려나야 한다. 저장 마크다운에는 섹션 래퍼를 넣지 않는다.
 - **소제목 ✎ 편집**: 뷰어가 마크다운을 `###` 단위로 잘라(`YS.splitSummarySections`, 코드펜스 안은 제외) 원래 텍스트와 새 텍스트를 `/summary/section`에 보낸다. 서버는 원래 텍스트가 파일에 **정확히 한 번** 나올 때만 갈아 끼우고 재색인한다(아니면 409). 저장 후 각주·메모·sticky를 다시 붙인다.

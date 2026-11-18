@@ -54,7 +54,6 @@ _REMOTE_DATA_ALLOWED = {
     "/history", "/history/text", "/history/mark_read", "/history/item", "/summary/content",
     "/history/distill",   # 영상별 증류 포함/제외(원격에서도 조정 가능)
     "/history/bookmark",  # 영상 북마크 토글(원격에서도 가능)
-    "/history/refresh-meta",  # 제목·썸네일 갱신 — 빠지면 원격 POST가 302로 튕겨 '갱신 실패'로 보인다(2026-09-03)
     "/history/publish-blog",  # 블로그스팟 발행(원격에서도 — 폰에서 읽고 바로 올린다)
     "/history/delete-blog",   # 발행한 블로그 글 삭제(발행 메뉴, 원격에서도)
     "/terms/excluded",        # 각주 제외 용어 — 요약 뷰어 ✕ 버튼(폰에서도 누른다)

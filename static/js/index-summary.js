@@ -38,7 +38,7 @@ function _setDistillUI(d) {
   const srcDesc = reg ? `채널 설정을 따름 → 현재 ${chan}`
                       : `자동수집 채널이 아니라 기본값 적용 → ${chan}`;
   if (!set) {
-    box.innerHTML = `증류 ↪ ${src} <span class="dist-eff">(${chan})</span>`;
+    box.textContent = `증류 ↪ ${chan}`;      // 모바일과 같은 짧은 표기('따름'은 ↪, 근거는 툴팁) — 2026-11-18 하단 버튼 정리
     box.title = `${srcDesc}. 클릭하면 이 영상만 '포함'으로 지정`;
   } else if (ov) {
     box.textContent = '증류 ✓ 포함';
@@ -72,64 +72,6 @@ async function setItemDistill(value) {
     if (it && d.effective !== undefined) { it.distill = !!d.effective; if (_histDistillOnly) applyHistoryFilter(true); }
   } catch (e) {
     alert('증류 설정 실패: ' + e.message);
-  }
-}
-
-/* 제목·썸네일 갱신 — 영상이 공개 뒤 제목을 고치거나 썸네일을 바꾸는 일이 잦은데
-   우리 사본은 전사 시점에 굳는다. 가져오지 못하면 서버가 기존 값을 그대로 두므로
-   여기서는 결과만 알린다. 제목이 바뀌면 열려 있는 요약 본문에도 즉시 반영한다. */
-async function refreshItemMeta(btn) {
-  if (!_summaryItemId) return;
-  const label = btn && btn.querySelector('.rfm-label');
-  const setLbl = (t, color) => {
-    if (label) label.textContent = t;
-    if (btn) btn.style.color = color || '';
-  };
-  setLbl('갱신 중…');
-  if (btn) btn.disabled = true;
-  try {
-    const res = await YS.apiRefreshMeta(_summaryItemId);
-    if (res && res.error) throw new Error(res.error);
-    const changed = (res && res.changed) || [];
-    if (changed.includes('title') || changed.includes('title_ko')) {
-      // 본문 H1은 원제를 담고 있다 — 새 제목으로 바꾼 뒤 번역 병기를 다시 적용한다.
-      // 원제는 그대로고 유튜브의 한국어 제목만 바뀐 경우도 여기로 온다.
-      _titleKo = res.title_ko || '';
-      for (const root of [document.getElementById('sum-panel-body'),
-                          document.querySelector('.imm-text')]) {
-        if (!root) continue;
-        const h1 = root.querySelector('h1');
-        if (h1) h1.textContent = res.title || h1.textContent;
-        const orig = root.querySelector('.sum-title-orig');
-        if (orig) orig.remove();                  // 이전 병기 제거 후 재적용
-        YS.applyTitleTranslation(root, _titleKo);
-      }
-    }
-    if (changed.includes('thumbnail')) {
-      // 사본 URL은 그대로라 브라우저 캐시를 우회해야 새 그림이 보인다.
-      document.querySelectorAll('img.hist-thumb').forEach(img => {
-        const base = (img.getAttribute('src') || '').split('?')[0];
-        if (base) img.setAttribute('src', `${base}?v=${Date.now()}`);
-      });
-    }
-    const what = [changed.includes('title') && '제목',
-                  !changed.includes('title') && changed.includes('title_ko') && '한국어 제목',
-                  changed.includes('thumbnail') && '썸네일'].filter(Boolean).join('·');
-    if (what) {
-      setLbl(`${what} 갱신됨`, 'var(--success)');
-      if (typeof loadHistory === 'function') loadHistory();   // 목록의 제목·썸네일도 갱신
-    } else if (res && res.notes && res.notes.length) {
-      setLbl('갱신 불가(기존 유지)', 'var(--error)');
-      console.warn('[refresh-meta]', res.notes.join(' / '));
-    } else {
-      setLbl('변경 없음');
-    }
-  } catch (e) {
-    console.warn('[refresh-meta] 실패', e);
-    setLbl('갱신 실패(기존 유지)', 'var(--error)');
-  } finally {
-    if (btn) btn.disabled = false;
-    setTimeout(() => setLbl('메타 갱신'), 2200);
   }
 }
 

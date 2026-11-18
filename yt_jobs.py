@@ -3,7 +3,6 @@
 2026-11-16 리팩토링 2단계에서 app.py에서 옮겨 왔다(동작 변경 없음).
 """
 import json
-import html as _htmlmod
 import os
 import re
 import time
@@ -44,55 +43,8 @@ _WATCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 
-def fetch_localized_title(yt_id: str, lang: str = "ko", channel_id: str = "") -> str:
-    """유튜브가 해당 언어 시청자에게 보여주는 제목(현지화 제목). 없으면 "".
-
-    제작자가 언어별 제목을 달아 두면 유튜브는 한국 시청자에게 그 제목을 보여주는데,
-    yt-dlp(lang=ko 포함)·oEmbed·og:title은 전부 원제만 준다. 시청 페이지를
-    Accept-Language: ko 로 받으면 플레이어 메타(videoDetails / primaryInfo)에 현지화
-    제목이 실린다. og:title(원제)과 다른 것만 현지화 제목으로 인정한다.
-    """
-    yt_id = (yt_id or "").strip()
-    if not re.fullmatch(r"[\w-]{5,20}", yt_id):
-        return ""
-    req = urllib.request.Request(
-        f"https://www.youtube.com/watch?v={yt_id}",
-        headers={"User-Agent": _WATCH_UA,
-                 "Accept-Language": f"{lang}-KR,{lang};q=0.9,en;q=0.5"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        page = r.read().decode("utf-8", "replace")
-    og = re.search(r'<meta property="og:title" content="([^"]*)"', page)
-    original = yt_core._nfc(_htmlmod.unescape(og.group(1)).strip()) if og else ""
-    cands: list[str] = []
-    i = page.find("ytInitialPlayerResponse")
-    if i >= 0:
-        j = page.find("{", i)
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(page[j:])
-            cands.append((obj.get("videoDetails") or {}).get("title") or "")
-        except Exception:
-            pass
-    m = re.search(r'"videoPrimaryInfoRenderer":\{"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"', page)
-    if m:
-        try:
-            cands.append(json.loads('"' + m.group(1) + '"'))
-        except Exception:
-            cands.append(m.group(1))
-    for t in cands:
-        t = yt_core._nfc((t or "").strip())
-        if t and t != original:
-            return t
-    # 시청 페이지가 원제만 줄 때가 많다(2026-11-07 실측) — 채널 영상 목록의 한국어 제목으로 보강
-    if channel_id:
-        return yt_core._nfc(yt_listing.korean_title(yt_listing.korean_entries(channel_id).get(yt_id), original))
-    return ""
-
-
-def save_thumbnail(yt_id: str, *, force: bool = False, channel_id: str = "") -> str | None:
+def save_thumbnail(yt_id: str, *, channel_id: str = "") -> str | None:
     """영상 썸네일을 res/thumbs/{yt_id}.jpg 로 내려받는다(이미 있으면 그대로 둔다).
-
-    force=True면 사본이 있어도 다시 받는다(메타 갱신 버튼). 새 사본이 실패하면
-    기존 파일은 건드리지 않는다 — 갱신 실패가 기존 썸네일을 지우면 안 된다.
 
     전사 시점에 한 번만 받아 두고, 이후 조회는 이 사본만 쓴다(외부 재요청 없음).
     나중에 비공개·멤버십 전용으로 바뀌면 원본 URL이 막히므로 그 전에 확보해 둔다.
@@ -102,7 +54,7 @@ def save_thumbnail(yt_id: str, *, force: bool = False, channel_id: str = "") -> 
     if not yt_id or not re.fullmatch(r"[\w-]{5,20}", yt_id):
         return None
     dest = os.path.join(yt_core.THUMB_DIR, f"{yt_id}.jpg")
-    if not force and os.path.exists(dest) and os.path.getsize(dest) > 1024:
+    if os.path.exists(dest) and os.path.getsize(dest) > 1024:
         return dest
     os.makedirs(yt_core.THUMB_DIR, exist_ok=True)
     # 한국어 썸네일이 있으면 그것부터(주소가 서명돼 있어 채널 목록에서만 얻는다, 2026-11-07)

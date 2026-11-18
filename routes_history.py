@@ -2,19 +2,15 @@
 
 2026-11-16 리팩토링 2단계에서 app.py에서 옮겨 왔다(동작 변경 없음).
 """
-import hashlib
 import os
 import re
 import shutil
 import subprocess
 import db
-import document_io
-import yt_listing
 from flask import request
 from yt_web import app
 import yt_core
 import yt_jobs
-import yt_titles
 import yt_blog
 import logging
 
@@ -244,143 +240,6 @@ def video_info():
         })
     except Exception as e:
         return yt_core._json({"error": str(e)}, 400)
-
-
-@app.route("/history/refresh-meta", methods=["POST"])
-def history_refresh_meta():
-    """제목·썸네일을 지금 유튜브 기준으로 다시 가져온다(요약 뷰어의 갱신 버튼).
-
-    영상이 공개 뒤 제목을 고치거나 썸네일을 바꾸는 일이 잦은데, 우리 사본은 전사
-    시점에 굳는다. 가져오지 못하면(비공개·멤버십 전환·네트워크) 기존 값을 그대로
-    둔다 — 갱신 실패가 멀쩡한 제목·썸네일을 지우면 안 된다.
-
-    제목이 바뀌면 세 곳을 함께 고친다: 전사 md의 front matter, 요약 md의 H1,
-    그리고 items(재색인). 번역은 원문이 바뀐 뒤 다시 만든다.
-    """
-    data = request.get_json(force=True) or {}
-    item, err = yt_core._history_item_from_payload(data)
-    if err:
-        return err
-    if not item:
-        return yt_core._json({"error": "item_id 필요"}, 400)
-
-    yt_id = (item.get("yt_id") or "").strip()
-    if not yt_id:
-        return yt_core._json({"error": "영상 id가 없는 항목입니다."}, 400)
-
-    changed, notes = [], []
-
-    # 1) 현재 메타 조회 — 실패해도 썸네일 갱신은 따로 시도한다.
-    new_title = ""
-    try:
-        if yt_jobs.yt_dlp is None:
-            raise RuntimeError("yt-dlp를 사용할 수 없습니다")
-        with yt_jobs.yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-            info = ydl.extract_info(item.get("webpage_url")
-                                    or f"https://www.youtube.com/watch?v={yt_id}",
-                                    download=False)
-        new_title = yt_core._nfc((info.get("title") or "").strip())
-    except Exception as e:
-        notes.append(f"제목 조회 실패: {str(e)[:120]}")
-
-    old_title = (item.get("title") or "").strip()
-
-    # 현지화 제목은 원제가 외국어일 때만 의미가 있다. 원제가 이미 한국어인 영상에
-    # 현지화 제목을 번역 슬롯(title_ko)으로 넣으면, 화면이 그것을 제목으로 올리고
-    # 원제를 '원문'인 양 밑에 병기해 한국어 제목 두 개가 겹쳐 보인다
-    # (2026-09-19 A41EXYozypg). 게다가 그 영상은 제작자가 유튜브 제목 A/B 테스트를
-    # 돌리는 중이라 조회할 때마다 다른 변형이 와서, 제목 자리에 반영하면 갱신할 때마다
-    # 파일명·front matter·요약 H1이 흔들린다. 그래서 한국어 원제 영상에서는
-    # 현지화 제목을 아예 쓰지 않고 원제 하나만 유지한다.
-    korean_source = bool(db._HANGUL_RE.search(new_title or old_title))
-    try:
-        localized = "" if korean_source else yt_jobs.fetch_localized_title(
-            yt_id, channel_id=yt_listing.channel_id_of(item.get("channel_url") or ""))
-    except Exception as e:
-        localized = ""
-        notes.append(f"현지화 제목 조회 실패: {str(e)[:120]}")
-
-    if new_title and new_title != old_title:
-        md_path = item.get("md_path") or ""
-        try:
-            if md_path and os.path.isfile(md_path):
-                meta, body = yt_core._parse_md(md_path)
-                meta["title"] = new_title
-                document_io.atomic_write_text(
-                    md_path,
-                    document_io.render_markdown(meta, body, key_order=yt_core._MD_META_ORDER))
-            # 요약 md의 첫 H1도 함께 — 뷰어가 읽는 제목은 이쪽이다.
-            sm = item.get("summary_path") or ""
-            if sm and os.path.isfile(sm):
-                with open(sm, encoding="utf-8", errors="replace") as f:
-                    text = f.read()
-                new_text, n = re.subn(r"^# .*$", "# " + new_title.replace("\\", "\\\\"),
-                                      text, count=1, flags=re.M)
-                if n:
-                    document_io.atomic_write_text(sm, new_text)
-            for path in (md_path, item.get("summary_path") or ""):
-                if path and os.path.isfile(path):
-                    try:
-                        db.upsert(path)
-                    except Exception:
-                        pass
-            changed.append("title")
-        except Exception as e:
-            notes.append(f"제목 반영 실패: {str(e)[:120]}")
-
-    # 2) 썸네일은 제목과 무관하게 항상 최신본을 시도한다(제목만 그대로인 경우도 있다).
-    try:
-        before = os.path.join(yt_core.THUMB_DIR, f"{yt_id}.jpg")
-        # 크기만 비교하면 같은 크기의 다른 그림을 놓친다 — 내용 해시로 본다.
-        def _digest(path):
-            try:
-                with open(path, "rb") as f:
-                    return hashlib.sha1(f.read()).hexdigest()
-            except OSError:
-                return ""
-        old_sig = _digest(before)
-        if yt_jobs.save_thumbnail(yt_id, force=True,
-                          channel_id=yt_listing.channel_id_of(item.get("channel_url") or "")):
-            if _digest(before) != old_sig:
-                changed.append("thumbnail")
-        else:
-            notes.append("썸네일을 받지 못했습니다(기존 유지)")
-    except Exception as e:
-        notes.append(f"썸네일 갱신 실패: {str(e)[:120]}")
-
-    # 3) 한국어 제목. 유튜브가 한국 시청자에게 보여주는 현지화 제목이 있으면 그걸
-    #    쓴다 — 제작자가 단 제목이 LLM 번역보다 낫고, 사용자가 유튜브에서 보는 것과
-    #    일치한다(2026-09-03 모더나 건: 원제는 그대로인데 한국어 제목만 바뀌어
-    #    '변경 없음'으로 보였다). 없으면 원제가 바뀐 경우에만 LLM으로 다시 번역한다.
-    cur_ko = db.get_title_ko(item.get("summary_path") or item.get("md_path") or "") or ""
-    title_ko = cur_ko
-    final_title = new_title or old_title
-    if korean_source:
-        # 한국어 원제에는 번역이 없어야 한다. 예전 갱신이 남긴 값이 있으면 지운다.
-        if cur_ko:
-            db.set_title_ko(yt_id, "")
-            title_ko = ""
-            changed.append("title_ko")
-    elif localized and localized != final_title:
-        if localized != cur_ko:
-            db.set_title_ko(yt_id, localized)
-            title_ko = localized
-            changed.append("title_ko")
-    elif "title" in changed or not cur_ko:
-        # YouTube 한국어 제목이 없다 — 원제가 바뀌었거나 번역이 비어 있으면 LLM으로 다시
-        # 번역한다(2026-11-10). 비워 두고(NULL) 뒤에서 번역하므로 화면은 다음 조회에 바뀐다.
-        db.clear_title_ko(yt_id)
-        yt_titles._translate_titles_async()
-        if cur_ko:
-            title_ko = ""
-            changed.append("title_ko")
-
-    return yt_core._json({
-        "changed": changed,
-        "title": new_title or old_title,
-        "title_ko": title_ko or "",
-        "notes": notes,
-    })
 
 
 @app.route("/history/publish-blog", methods=["POST"])

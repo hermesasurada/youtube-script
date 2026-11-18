@@ -210,7 +210,6 @@ from db_items import (  # noqa: E402,F401
     clear_blog_publish,
     set_blog_publish,
     set_title_ko,
-    clear_title_ko,
     titles_needing_translation,
     mark_korean_titles,
     set_translation_state,
