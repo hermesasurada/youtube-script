@@ -596,16 +596,18 @@ def test_term_exclusion_ui_is_wired_on_every_surface():
     project = os.path.dirname(os.path.dirname(__file__))
     common_js = open(os.path.join(project, "static/js/common.js"), encoding="utf-8").read()
     assert "function applyTermExclusions(root)" in common_js
-    assert "className = 'term-note-x'" in common_js
-    # 블로그 HTML에서는 화면 전용 버튼을 지운다(구간 편집 버튼과 같은 자리에서 함께 제거)
-    strip = re.search(r"querySelectorAll\('([^']*term-note-x[^']*)'\)[\s\n]*\.?\s*forEach\(b => b\.remove\(\)\)", common_js)
-    assert strip, "블로그 내보내기에서 term-note-x 제거 코드를 찾지 못함"
+    # 2026-11-19 사용자 지시: ✕ 버튼 대신 각주 행의 용어(strong)를 누르면 제외. 본문 단어에는 달지 않는다.
+    assert "term-note-x" not in common_js
+    deco = common_js[common_js.index("function _decorateTermNotes(root)"):][:700]
+    assert "note.querySelector('strong')" in deco and "term-note-word" in deco
+    # 블로그·HTML 파일에서는 클릭 표시만 떼고 용어 글자는 남긴다
+    assert common_js.count("_stripTermNoteWords(") >= 3
     assert "ensureTermExclusions," in common_js
     index_js = _read_src(project, "static/js/index.js")
     mobile = _read_src(project, "templates/mobile.html")
     assert index_js.count("YS.ensureTermExclusions(") >= 2      # 요약 뷰어 + 각주 제외 탭
     assert "YS.ensureTermExclusions()" in mobile
-    assert "if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?" in common_js   # ✕는 확인 후 추가
+    assert "if (!confirm(`'${term}' 각주를 제외 목록에 추가할까요?" in common_js   # 용어 클릭은 확인 후 추가
     index_html = open(os.path.join(project, "templates/index.html"), encoding="utf-8").read()
     assert 'id="term-excl-list"' in index_html and 'id="term-excl-input"' in index_html
     assert 'id="terms-overlay"' not in index_html                  # 별도 팝업은 없다

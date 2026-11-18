@@ -22,7 +22,7 @@ async function loadSavedPrompt() {
 }
 
 // ── 각주 제외 용어(프롬프트 패널 하단 칩) ─────────────────────────────
-// 칩 툴팁: ✕로 뺀 용어는 저장된 뜻(같은 표기의 다른 뜻은 남는다), 직접 입력한 용어는 모든 뜻
+// 칩 툴팁: 각주에서 뺀 용어는 저장된 뜻(같은 표기의 다른 뜻은 남는다), 직접 입력한 용어는 모든 뜻
 function _termSenseTitle(t) { return YS.termSenseTitle(t); }
 async function renderTermExclusions() {
   const list = document.getElementById('term-excl-list');
@@ -31,7 +31,7 @@ async function renderTermExclusions() {
   list.innerHTML = terms.length
     ? terms.map(t => `<span class="term-excl-chip" title="${YS.attrEscape(_termSenseTitle(t))}">${YS.escapeHtml(t)}`
         + `<button type="button" class="term-excl-del" data-term="${YS.attrEscape(t)}" title="목록에서 제거">✕</button></span>`).join('')
-    : '<span class="term-excl-empty">아직 없음 — 요약 각주의 ✕를 누르거나 아래에 입력</span>';
+    : '<span class="term-excl-empty">아직 없음 — 요약 각주의 용어를 누르거나 아래에 입력</span>';
 }
 async function addTermExclusion(ev) {
   if (ev) ev.preventDefault();

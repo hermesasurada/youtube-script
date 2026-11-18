@@ -133,13 +133,13 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
   - **두 번 돌려도 같은 결과여야 한다**(`tests/test_term_marks.py`).
 - **각주 묶음 위치**(`term_marks._relocate_notes`): 각주가 놓인 소제목(제목 포함)에 그 용어가 **한 번도 나오지 않을 때만** 용어가 처음 표식된 단락 뒤로 옮긴다. 소제목 주제가 그 용어이면 자리를 존중한다.
 - **이미지 캡션(alt)은 각주 대상이 아니다**: 비전 판정 지시문이 별표를 금지하고, `_caption_text`가 저장 전에 별표를 지우며, `term_marks`는 `<`로 시작하는 HTML 줄을 건드리지 않는다.
-- **각주 제외**: 뷰어 각주 행의 ✕가 그 용어를 `term_exclusions`에 넣는다. 제외 목록은 화면 렌더(`applyTermExclusions`)·블로그 발행 HTML·새 요약 프롬프트(`yt_summary._inject_term_exclusions`)에 모두 적용된다. API는 `/terms/excluded`(원격 허용).
-- **제외는 뜻 단위다**(사용자 결정 — AI '하네스'를 뺐더니 차량 배선 하네스 각주까지 사라졌다). ✕는 각주 설명문을 `term_exclusions.senses`에 뜻으로 기록하고, 같은 표기의 다른 각주는 로컬 Qwen(`term_senses.py`, Spark→oMLX)이 같은 뜻인지 판정해 `term_sense_checks`에 캐시한다.
+- **각주 제외**: 뷰어 각주 행의 용어(굵은 글자)를 누르면 확인 뒤 그 용어를 `term_exclusions`에 넣는다(2026-11-19 사용자 지시로 ✕ 버튼 삭제 — 단어 클릭 `.term-note-word`, 본문 단어에는 달지 않음, 블로그·HTML 파일에선 `_stripTermNoteWords`로 표시만 뗌). 제외 목록은 화면 렌더(`applyTermExclusions`)·블로그 발행 HTML·새 요약 프롬프트(`yt_summary._inject_term_exclusions`)에 모두 적용된다. API는 `/terms/excluded`(원격 허용).
+- **제외는 뜻 단위다**(사용자 결정 — AI '하네스'를 뺐더니 차량 배선 하네스 각주까지 사라졌다). 용어 클릭은 각주 설명문을 `term_exclusions.senses`에 뜻으로 기록하고, 같은 표기의 다른 각주는 로컬 Qwen(`term_senses.py`, Spark→oMLX)이 같은 뜻인지 판정해 `term_sense_checks`에 캐시한다.
   - 화면은 '다른 뜻' 판정(`keep`)만 남기고 판정 전·실패는 뺀다. 판정은 요약 저장(`_reindex_summary`)·요약 열기·뜻 추가 때 백그라운드로 돈다.
   - 프롬프트에는 `용어(뜻 앞 40자)`로 싣는다. 설정 탭에서 직접 입력한 용어(뜻 없음)는 모든 뜻을 뺀다.
   - **같은 뜻 여부를 글자 유사도로 가리지 않는다.** 전수 판정은 `.venv/bin/python term_senses.py --backfill [--dry-run]`.
 - 제외 용어의 본문 별표는 `_stripExcludedMarks`가 지운다. 원어 병기의 닫는 괄호를 허용하고, 볼드로 노드가 갈려도 그 별표가 든 노드만 고친다. **단어 경계를 지킨다**(`(?<![A-Za-z가-힣])`, 숫자로 시작하지 않는 용어는 앞 숫자 허용) — 없으면 'PR'이 CRISPR\*의 별표를 지운다.
-- 본문 별표는 렌더 마지막(`_supTermMarks`)에 파란 굵은 윗첨자 `<sup class="term-mark">*</sup>`로 감싼다(2026-11-18, sa·td 용어 툴팁·wm과 같은 모양). 앞 단계 규칙은 모두 글자 `*` 기준이라 반드시 맨 마지막에 두고, 감싼 뒤에도 글자는 `*`라 ✕ 직후 `_stripExcludedMarks`가 그대로 통한다. 블로그는 `_BL.mark` 인라인 스타일.
+- 본문 별표는 렌더 마지막(`_supTermMarks`)에 파란 굵은 윗첨자 `<sup class="term-mark">*</sup>`로 감싼다(2026-11-18, sa·td 용어 툴팁·wm과 같은 모양). 앞 단계 규칙은 모두 글자 `*` 기준이라 반드시 맨 마지막에 두고, 감싼 뒤에도 글자는 `*`라 용어 클릭 제외 직후 `_stripExcludedMarks`가 그대로 통한다. 블로그는 `_BL.mark` 인라인 스타일.
 
 ## 요약 후처리와 문자 누출 게이트
 
