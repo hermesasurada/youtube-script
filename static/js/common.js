@@ -735,6 +735,46 @@
     applyTermExclusions(root);      // 사용자 지정 제외 용어(각주 행 + 본문 별표)
     _stripBriefMarks(root);         // 한눈 요약은 각주 대상이 아니다
     _decorateTermNotes(root);       // 남은 각주에 ✕ 버튼
+    _supTermMarks(root);            // 본문 별표를 윗첨자로
+  }
+
+  /**
+   * 본문에 남은 각주 별표를 윗첨자(<sup class="term-mark">)로 감싼다(2026-11-18 사용자 지시,
+   * sa·td 용어 툴팁·wm과 같은 파란 굵은 *). 앞 단계(일반어·제외·한눈 요약 별표 제거)는 글자 '*'를
+   * 기준으로 돌므로 맨 마지막에 한다. 감싼 뒤에도 글자는 '*' 그대로라 ✕ 직후의 별표 제거
+   * (_stripExcludedMarks — 블록 전체 텍스트에서 위치를 찾는다)가 그대로 통한다.
+   * 낱말·괄호·볼드 바로 뒤에 붙은 홑별표만 대상 — 공백 뒤 '*'나 코드 안은 건드리지 않는다.
+   */
+  function _supTermMarks(root) {
+    if (!root || typeof document === 'undefined') return;
+    const walker = document.createTreeWalker(root, 4);
+    const nodes = [];
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (!n.data.includes('*')) continue;
+      const p = n.parentElement;
+      if (!p || p.closest('.term-note, sup, code, pre, script, style, textarea, .kf-strip')) continue;
+      nodes.push(n);
+    }
+    nodes.forEach(n => {
+      const text = n.data;
+      const frag = document.createDocumentFragment();
+      let last = 0, hit = false;
+      for (let i = 0; i < text.length; i++) {
+        if (text[i] !== '*' || text[i + 1] === '*' || text[i - 1] === '*') continue;
+        const before = i > 0 ? text[i - 1] : (n.previousSibling ? '' : ' ');
+        if (/\s/.test(before)) continue;           // 앞이 공백(또는 블록 첫 글자)이면 표식이 아니다
+        frag.appendChild(document.createTextNode(text.slice(last, i)));
+        const sup = document.createElement('sup');
+        sup.className = 'term-mark';
+        sup.textContent = '*';
+        frag.appendChild(sup);
+        last = i + 1; hit = true;
+      }
+      if (!hit) return;
+      frag.appendChild(document.createTextNode(text.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
   }
 
   function _normalizeTermNotesHtml(html) {
@@ -1341,6 +1381,7 @@
     // 줄간격은 '글자 높이(1em) + 줄 사이 여백'이다. 문단 사이 간격(margin)은 그대로 두고
     // 줄 사이 여백만 2/3로 줄였다(0.9em → 0.6em, 2026-09-14 사용자 지시).
     p:    'margin:0 0 1.6em;line-height:1.6;font-weight:400;font-size:15px;',
+    mark: 'font-size:.75em;font-weight:700;line-height:0;color:#3b82f6;',   // 본문 각주 별표(윗첨자, 2026-11-18)
     term: 'margin:-.85em 0 1.45em;padding-left:.4em;border-left:2px solid #d8dadd;'
         + 'font-size:12.5px;line-height:1.55;font-weight:400;color:#7a7f87;',
     termGroup: 'margin:-.85em 0 1.45em;padding:.28em .8em .28em .45em;border-left:2px solid #d8dadd;'
@@ -1439,6 +1480,7 @@
     root.querySelectorAll('h3').forEach(h => h.setAttribute('style', _BL.h3));
     root.querySelectorAll('p').forEach(p => p.setAttribute('style', _BL.p));
     root.querySelectorAll('.term-notes').forEach(box => box.setAttribute('style', _BL.termGroup));
+    root.querySelectorAll('sup.term-mark').forEach(m => m.setAttribute('style', _BL.mark));
     root.querySelectorAll('p.term-note').forEach(p => {
       const grouped = p.parentElement && p.parentElement.classList.contains('term-notes');
       p.setAttribute('style', grouped ? _BL.termRow : _BL.term);
@@ -2141,6 +2183,8 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .summary-memo-text::before{content:"💡";margin-right:.35em;}
 .summary-memo button{font:inherit;font-size:.8rem;white-space:nowrap;padding:7px 12px;margin-right:6px;border:1px solid var(--border,#d9deda);border-radius:6px;background:var(--surface,#fff);color:var(--text,#34443a);cursor:pointer;}
 .summary-memo textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;font:inherit;line-height:1.6;padding:10px;margin:8px 0;border:1px solid var(--border,#ccd5ce);border-radius:6px;background:var(--surface,#fff);color:var(--text,#242424);}
+/* 본문 각주 별표 — sa·td 용어 툴팁·wm과 같은 파란 굵은 윗첨자(2026-11-18). relative 이동이라 줄 간격이 안 벌어진다. */
+.term-mark{position:relative;top:-.45em;vertical-align:baseline;margin-left:1px;font-size:.75em;font-weight:700;line-height:0;color:#3b82f6;}
 /* 섹션별 용어 해설 묶음. 좌측 인용선은 컨테이너 하나에만 두고 각 용어는 행으로 나눈다. */
 .sum-md .term-note,.md-body .term-note,.markdown .term-note{font-size:.82em!important;line-height:1.55;color:var(--muted,#7a7f87)!important;margin:-.28rem 0 1rem!important;padding-left:.4rem;border-left:2px solid var(--border,#d8dadd);}
 .sum-md .term-notes,.md-body .term-notes,.markdown .term-notes{margin:-.2rem 0 1.15rem;padding:.25rem .72rem .25rem .4rem;border-left:2px solid var(--border,#d8dadd);background:color-mix(in oklab,var(--surface2,#f5f5f4) 72%,transparent);}
