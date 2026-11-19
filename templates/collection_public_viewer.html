@@ -1,0 +1,91 @@
+{#- 공개 사본의 영상 요약 페이지 틀(collection_publish._finish_summary_page가 내보내기 파일에 끼운다).
+    yt 모음 보기 화면(collection.html)과 같은 배치: 위 막대 + 왼쪽 영상 목록 + 오른쪽 요약. 폰은 목록이 ☰ 서랍.
+    내보내기 파일은 문서 전체가 스크롤되므로(높이 auto) 막대·목록은 고정(fixed)하고 본문은 여백으로 비켜 놓는다. -#}
+<style>
+  .pv-top { position: fixed; z-index: 30; top: 0; left: 0; right: 0; height: 54px; display: flex; align-items: center; gap: .55rem;
+            padding: 0 1rem; background: var(--surface, #fff); border-bottom: 1px solid var(--border, #e4e4e7); box-sizing: border-box;
+            font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif; }
+  .pv-btn { display: inline-flex; align-items: center; justify-content: center; gap: .3rem; height: 34px; min-width: 34px; padding: 0 .7rem;
+            border-radius: 8px; border: 1px solid var(--border, #e4e4e7); background: var(--surface, #fff); color: var(--text, #18181b);
+            text-decoration: none; font: inherit; font-size: .8rem; cursor: pointer; white-space: nowrap; flex: none; box-sizing: border-box; }
+  .pv-btn:hover { background: var(--surface2, #f1f3f5); }
+  .pv-btn.icon { padding: 0; width: 34px; }
+  .pv-btn.off { opacity: .35; pointer-events: none; }
+  .pv-btn svg { width: 16px; height: 16px; }
+  .pv-ttl { flex: 1; min-width: 0; }
+  .pv-ttl b { display: block; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text, #18181b); }
+  .pv-ttl span { display: block; font-size: .74rem; color: var(--muted, #71717a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #pv-menu { display: none; }
+  .pv-side { position: fixed; z-index: 20; top: 54px; bottom: 0; left: 0; width: 330px; overflow-y: auto; box-sizing: border-box;
+             padding: .3rem 0 1.5rem; background: var(--surface, #fff); border-right: 1px solid var(--border, #e4e4e7);
+             font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif; }
+  .pv-side h3 { all: unset; display: flex; gap: .4rem; font-size: .74rem; font-weight: 700; color: var(--muted, #71717a); padding: .9rem 1rem .35rem; }
+  .pv-side h3 i { font-style: normal; font-weight: 500; }
+  .pv-row { display: flex; gap: .65rem; align-items: center; padding: .45rem 1rem; color: var(--text, #18181b); text-decoration: none;
+            border-left: 3px solid transparent; }
+  .pv-row:hover { background: var(--surface2, #f1f3f5); }
+  .pv-row.on { background: var(--highlight-soft, rgba(184,58,58,.09)); border-left-color: var(--highlight, #b83a3a); }
+  .pv-th { position: relative; width: 104px; aspect-ratio: 16 / 9; flex: none; border-radius: 6px; overflow: hidden; background: var(--surface2, #f1f3f5); }
+  .pv-th img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pv-th em { position: absolute; right: 3px; bottom: 3px; font: 600 .62rem/1.4 inherit; font-style: normal; background: rgba(0,0,0,.75); color: #fff;
+              padding: 0 4px; border-radius: 4px; }
+  .pv-tx { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .pv-tx b { font-size: .8rem; line-height: 1.32; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pv-tx span { font-size: .68rem; color: var(--muted, #71717a); font-variant-numeric: tabular-nums; }
+  .pv-back { display: none; }
+  html body.pv-body { padding-top: 54px !important; padding-left: 330px !important; }
+  .pv-foot { display: flex; gap: .6rem; margin-top: 2rem; }
+  .pv-foot a { flex: 1; min-width: 0; padding: .8rem 1rem; border: 1px solid var(--border, #e4e4e7); border-radius: 10px; color: var(--text, #18181b);
+               text-decoration: none; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; }
+  .pv-foot a:hover { background: var(--surface2, #f1f3f5); }
+  .pv-foot a.next { text-align: right; }
+  .pv-foot small { display: block; color: var(--muted, #71717a); font-size: .74rem; margin-bottom: 2px; }
+  .pv-foot b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .86rem; }
+  @media (max-width: 860px) {
+    .pv-top { padding: 0 .75rem; gap: .45rem; }
+    #pv-menu { display: inline-flex; }
+    .pv-top .pv-yt span, .pv-top .pv-step { display: none; }
+    html body.pv-body { padding-left: 0 !important; }
+    .pv-side { top: 0; z-index: 40; width: min(86vw, 330px); transform: translateX(-102%); transition: transform .2s ease;
+               box-shadow: 0 0 40px rgba(0,0,0,.35); padding-top: env(safe-area-inset-top); }
+    body.pv-open .pv-side { transform: none; }
+    body.pv-open .pv-back { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.35); }
+  }
+</style>
+<header class="pv-top">
+  <a class="pv-btn icon" href="../index.html" aria-label="모음으로" title="모음으로">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </a>
+  <button class="pv-btn icon" id="pv-menu" type="button" aria-label="영상 목록" title="영상 목록">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+  </button>
+  <div class="pv-ttl"><b>{{ collection.title }}</b><span>{{ cur.day_label }}{% if cur.time %} · {{ cur.time }} {{ '업로드' if cur.time_src == 'upload' else '현지' }}{% endif %} · {{ cur.pos }}/{{ count }}</span></div>
+  <a class="pv-btn pv-step{{ '' if prev else ' off' }}" href="{{ prev.yt_id ~ '.html' if prev else '#' }}" title="이전 영상">‹ 이전</a>
+  <a class="pv-btn pv-step{{ '' if next else ' off' }}" href="{{ next.yt_id ~ '.html' if next else '#' }}" title="다음 영상">다음 ›</a>
+  <a class="pv-btn pv-yt" href="{{ cur.url }}" target="_blank" rel="noopener" title="YouTube에서 보기">
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg><span>YouTube</span>
+  </a>
+</header>
+<div class="pv-back" id="pv-back"></div>
+<aside class="pv-side" id="pv-side" aria-label="영상 목록">
+  {% for day in days %}
+  <h3>{{ day.label }} <i>{{ day.date_label }}</i></h3>
+  {% for it in day['items'] %}
+  <a class="pv-row{{ ' on' if it.yt_id == cur.yt_id else '' }}" href="{{ it.yt_id }}.html"{% if it.yt_id == cur.yt_id %} aria-current="page"{% endif %}>
+    <span class="pv-th"><img src="https://i.ytimg.com/vi/{{ it.yt_id }}/mqdefault.jpg" alt="" loading="lazy">{% if it.dur %}<em>{{ it.dur }}</em>{% endif %}</span>
+    <span class="pv-tx"><b>{{ it.short_ko or it.short_title }}</b><span>{% if it.time %}{{ it.time }}{% endif %}</span></span>
+  </a>
+  {% endfor %}
+  {% endfor %}
+</aside>
+<script>
+(function () {
+  // 색은 기기 설정을 따른다(모음 페이지와 같게) — 내보내기 파일은 라이트로 고정돼 나온다
+  try { if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  var b = document.body, side = document.getElementById('pv-side');
+  document.getElementById('pv-menu').onclick = function () { b.classList.toggle('pv-open'); };
+  document.getElementById('pv-back').onclick = function () { b.classList.remove('pv-open'); };
+  var on = side.querySelector('.pv-row.on');
+  if (on) side.scrollTop = Math.max(0, on.offsetTop - side.clientHeight / 3);
+})();
+</script>

@@ -95,10 +95,13 @@ def test_public_summary_page_is_cleaned():
     page = ('<!doctype html><html><head><meta charset="utf-8"><style>/* 작업 메모 */ .a{}</style></head><body>'
             '<main class="ys-export"><div class="sum-panel"><img src="data:image/png;base64,xx"></div>'
             '<footer class="ys-export-foot">원본 영상: x<br>요약 파일 만든 때: 2026. 11. 19.</footer></main></body></html>')
-    out = cp._finish_summary_page(page, "Fortune 500 Innovation Forum 2026")
+    shell = '<header class="pv-top"><img src="https://i.ytimg.com/vi/aaa/mqdefault.jpg"></header>'
+    out = cp._finish_summary_page(page, shell, '<nav class="pv-foot"></nav>')
     assert '<meta name="robots" content="noindex">' in out                      # 검색 색인 끔
-    assert '<a href="../index.html">← Fortune 500 Innovation Forum 2026</a>' in out
-    assert "<img" not in out and "작업 메모" not in out and "만든 때" not in out
+    assert '<body class="pv-body"><header class="pv-top">' in out              # 모음 보기 틀
+    assert '<nav class="pv-foot"></nav></main>' in out                          # 본문 끝 이전·다음
+    assert "data:image" not in out and "i.ytimg.com/vi/aaa/" in out            # 본문 이미지만 지운다
+    assert "작업 메모" not in out and "만든 때" not in out
     assert "AI로 요약·번역한 글" in out
 
 
@@ -124,6 +127,8 @@ def test_public_build_links_and_private_bits(tmp_path, monkeypatch):
     assert 'href="v/aaa.html"' in page and "첫 세션" in page and "ddd" not in page   # 처리 전 영상은 안 싣는다
     assert "읽음" not in page and "/thumb/" not in page and "i.ytimg.com/vi/aaa/" in page
     assert 'href="fortune500-2026/index.html"' in files["c/index.html"].decode()
+    v = files["c/fortune500-2026/v/aaa.html"].decode()
+    assert 'class="pv-row on" href="aaa.html"' in v and 'href="../index.html"' in v   # 왼쪽 목록·모음으로
 
     sent = []
     monkeypatch.setattr("hermes_blogger.r2.put", lambda key, data, *a, **k: sent.append(key) or key)

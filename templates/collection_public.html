@@ -29,29 +29,29 @@
   .stats { font-size:.82rem; color:var(--muted); margin:14px 0 4px; }
   .day h2 { font-size:.92rem; margin:22px 0 8px; display:flex; gap:8px; align-items:baseline; }
   .day h2 .d { color:var(--muted); font-weight:500; font-size:.82rem; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; }
-  .card { display:flex; gap:10px; align-items:stretch; padding:8px; border-radius:10px; border:1px solid var(--border);
-          background:var(--surface); color:inherit; text-decoration:none; min-width:0; }
-  a.card:hover, .list a.coll:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--border)); }
-  .thumb { width:112px; flex:none; aspect-ratio:16/9; border-radius:6px; background:var(--surface2) center/cover no-repeat;
-           position:relative; overflow:hidden; }
-  .thumb .dur { position:absolute; right:4px; bottom:4px; font-size:.7rem; background:rgba(0,0,0,.72); color:#fff;
-                padding:1px 5px; border-radius:4px; }
-  .meta { min-width:0; display:flex; flex-direction:column; gap:4px; }
+  /* 카드 — yt 모음 화면과 같게 한 줄에 2개, 썸네일은 언제나 16:9(넘치는 부분만 자른다). 폰도 2개. */
+  .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
+  .card { display:flex; flex-direction:column; border-radius:12px; border:1px solid var(--border); background:var(--surface);
+          color:inherit; text-decoration:none; overflow:hidden; min-width:0; transition:border-color .12s, transform .12s; }
+  .card:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--border)); transform: translateY(-1px); }
+  .thumb { position:relative; aspect-ratio:16/9; background:var(--surface2); overflow:hidden; flex:none; }
+  .thumb img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb .dur { position:absolute; right:6px; bottom:6px; font-size:.7rem; font-weight:600; background:rgba(0,0,0,.75); color:#fff;
+                padding:1px 6px; border-radius:4px; font-variant-numeric:tabular-nums; }
+  .meta { padding:.7rem .85rem .85rem; display:flex; flex-direction:column; gap:.3rem; min-width:0; }
   .time { font-size:.74rem; color:var(--muted); font-variant-numeric:tabular-nums; }
-  .name { font-size:.88rem; line-height:1.35; font-weight:600; display:-webkit-box; -webkit-line-clamp:3;
+  .name { font-size:.95rem; line-height:1.38; font-weight:700; display:-webkit-box; -webkit-line-clamp:2;
           -webkit-box-orient:vertical; overflow:hidden; }
-  .ko { font-size:.78rem; line-height:1.35; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2;
+  .ko { font-size:.82rem; line-height:1.4; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2;
         -webkit-box-orient:vertical; overflow:hidden; }
-  .list { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:10px; margin-top:6px; }
-  .list a.coll { display:flex; gap:12px; align-items:center; padding:10px; border:1px solid var(--border); border-radius:10px;
-                 background:var(--surface); color:inherit; text-decoration:none; }
-  .list a.coll .thumb { width:132px; }
   footer.note { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.78rem; color:var(--muted); line-height:1.6; }
-  @media (max-width: 600px) {
-    .grid, .list { grid-template-columns: 1fr; }
-    .list a.coll .thumb { width: 112px; }
-    .thumb { width: 104px; }
+  @media (max-width: 860px) {
+    .wrap { padding: 0 12px 40px; }
+    .grid { gap:.6rem; }
+    .meta { padding:.5rem .55rem .65rem; gap:.2rem; }
+    .name { font-size:.82rem; line-height:1.33; -webkit-line-clamp:3; }
+    .ko { font-size:.72rem; }
+    .time { font-size:.66rem; }
   }
 </style>
 </head>
@@ -79,7 +79,7 @@
     <div class="grid">
       {% for it in day['items'] %}
       <a class="card" href="v/{{ it.yt_id }}.html" title="{{ it.title }}">
-        <div class="thumb" style="background-image:url('https://i.ytimg.com/vi/{{ it.yt_id }}/mqdefault.jpg')">{% if it.dur %}<span class="dur">{{ it.dur }}</span>{% endif %}</div>
+        <div class="thumb"><img src="https://i.ytimg.com/vi/{{ it.yt_id }}/hqdefault.jpg" alt="" loading="lazy">{% if it.dur %}<span class="dur">{{ it.dur }}</span>{% endif %}</div>
         <div class="meta">
           {% if it.time %}<div class="time">{{ it.time }} {{ '업로드' if it.time_src == 'upload' else '현지' }}</div>{% endif %}
           <div class="name">{{ it.short_title }}</div>
@@ -92,13 +92,13 @@
   {% endfor %}
   {% else %}
   <p class="stats">행사·시리즈별로 모은 영상 요약입니다. 모음을 고르면 일자별·시간순으로 볼 수 있습니다.</p>
-  <div class="list">
+  <div class="grid">
     {% for c in collections %}
-    <a class="coll" href="{{ c.slug }}/index.html">
-      <div class="thumb"{% if c.cover %} style="background-image:url('https://i.ytimg.com/vi/{{ c.cover }}/mqdefault.jpg')"{% endif %}></div>
+    <a class="card" href="{{ c.slug }}/index.html">
+      <div class="thumb">{% if c.cover %}<img src="https://i.ytimg.com/vi/{{ c.cover }}/hqdefault.jpg" alt="" loading="lazy">{% endif %}</div>
       <div class="meta">
         <div class="name">{{ c.title }}</div>
-        {% if c.subtitle %}<div class="time">{{ c.subtitle }}</div>{% endif %}
+        {% if c.subtitle %}<div class="ko">{{ c.subtitle }}</div>{% endif %}
         <div class="time">요약 {{ c.total }}편</div>
       </div>
     </a>

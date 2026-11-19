@@ -39,10 +39,11 @@ MANIFEST = os.path.join(PUBLIC_DIR, "manifest.json")
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 HTML_CACHE = "public, max-age=300"
 # 결과물 모양을 바꾸면 올린다 — 서명이 바뀌어 다음 주기에 전부 다시 만든다.
-FORMAT_VERSION = "2026-11-19-1"
+FORMAT_VERSION = "2026-11-20-1"
 # 서명에 넣는 화면 코드(바뀌면 요약 페이지 모양이 바뀐다)
 _CODE_FILES = ("static/js/common.js", "static/css/index.css", "static/css/hermes-theme.css",
-               "templates/collection_public.html", "templates/collection_render.html")
+               "templates/collection_public.html", "templates/collection_public_viewer.html",
+               "templates/collection_render.html")
 _KF_STRIP = re.compile(r'<div class="kf-strip">[\s\S]*?</div>\s*')
 
 
@@ -138,19 +139,31 @@ def render_pages(slug: str, timeout: int = 600) -> dict:
     return res["pages"]
 
 
-def _finish_summary_page(page_html: str, collection_title: str) -> str:
-    """내보내기 파일 → 공개 페이지: 색인 끔, 모음으로 돌아가는 줄, 바닥글 안내 문구."""
+def _finish_summary_page(page_html: str, shell: str, foot: str) -> str:
+    """내보내기 파일 → 공개 페이지: 색인 끔, 모음 보기 틀(위 막대·왼쪽 영상 목록), 이전·다음, 바닥글 안내 문구."""
     out = page_html.replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="robots" content="noindex">', 1)
-    nav = ('<style>.pub-nav{margin:0 0 18px;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif}'
-           '.pub-nav a{color:var(--text-muted,#777);text-decoration:none}.pub-nav a:hover{text-decoration:underline}</style>'
-           f'<nav class="pub-nav"><a href="../index.html">← {_html.escape(collection_title)}</a></nav>')
-    out = out.replace('<main class="ys-export">', '<main class="ys-export">' + nav, 1)
+    out = re.sub(r"<body\b[^>]*>", lambda m: '<body class="pv-body">' + shell, out, count=1)
     out = re.sub(r"요약 파일 만든 때: [^<]*", "원본 영상을 AI로 요약·번역한 글입니다.", out, count=1)
-    # 캡처를 뺐으므로 이미지가 남아 있으면 안 된다(남으면 data URI로 들어간 로컬 자원이다)
-    out = re.sub(r"<img\b[^>]*>", "", out)
+    # 캡처를 뺐으므로 이미지가 남아 있으면 안 된다(남으면 data URI로 들어간 로컬 자원이다).
+    # 요약 본문(main)에서만 지운다 — 틀의 영상 목록 썸네일은 YouTube 공개 주소다.
+    head, sep, body = out.partition('<main class="ys-export">')
+    if sep:
+        body = re.sub(r"<img\b[^>]*>", "", body)
+        body = body.replace("</main>", foot + "</main>", 1)
+        out = head + sep + body
     # 화면 CSS의 주석(작업 메모)은 바깥에 실을 이유가 없다 — 지우고 크기도 줄인다
     out = re.sub(r"<style>[\s\S]*?</style>", lambda m: re.sub(r"/\*[\s\S]*?\*/", "", m.group(0)), out)
     return out
+
+
+def _pager(prev: dict | None, nxt: dict | None) -> str:
+    """본문 끝의 이전·다음 영상 칸."""
+    def cell(it, cls, label):
+        if not it:
+            return '<span style="flex:1"></span>'
+        name = _html.escape(it["short_ko"] or it["short_title"])
+        return f'<a class="{cls}" href="{it["yt_id"]}.html"><small>{label}</small><b>{name}</b></a>'
+    return f'<nav class="pv-foot">{cell(prev, "prev", "‹ 이전 영상")}{cell(nxt, "next", "다음 영상 ›")}</nav>'
 
 
 def _render_template(name: str, **ctx) -> str:
@@ -167,21 +180,28 @@ def build(slugs: list[str] | None = None) -> dict[str, bytes]:
         c = collections_view.get(slug)
         data, items = _done_items(slug)
         pages = render_pages(slug) if items else {}
+        url_of = {it["yt_id"]: it["webpage_url"] for it in items}
         days = []
         for day in data.get("days", []):
-            rows = []
-            for it in day["items"]:
-                if it["yt_id"] not in pages:
-                    continue
-                rows.append({"yt_id": it["yt_id"], "title": it["title"], "short_title": it["short_title"],
-                             "short_ko": it["short_ko"],
-                             "time": it["time"], "time_src": it.get("time_src", ""), "dur": _fmt_dur(it["duration"])})
-                files[f"{PREFIX}/{slug}/v/{it['yt_id']}.html"] = _finish_summary_page(
-                    pages[it["yt_id"]]["html"], c["title"]).encode("utf-8")
+            rows = [{"yt_id": it["yt_id"], "title": it["title"], "short_title": it["short_title"],
+                     "short_ko": it["short_ko"], "url": url_of.get(it["yt_id"], ""),
+                     "time": it["time"], "time_src": it.get("time_src", ""), "dur": _fmt_dur(it["duration"])}
+                    for it in day["items"] if it["yt_id"] in pages]
             if rows:
                 days.append({"date": day["date"], "date_label": _day_label(day["date"]), "items": rows})
         for i, d in enumerate(days, 1):
             d["label"] = collections_view.day_label(c, d["date"], i)
+            for r in d["items"]:
+                r["day_label"] = d["label"]
+        flat = [r for d in days for r in d["items"]]
+        # 영상 요약 페이지 — 모음 보기와 같은 틀(위 막대·왼쪽 영상 목록)에 끼운다
+        for n, r in enumerate(flat):
+            prev = flat[n - 1] if n else None
+            nxt = flat[n + 1] if n + 1 < len(flat) else None
+            shell = _render_template("collection_public_viewer.html", collection=c, days=days,
+                                     cur=dict(r, pos=n + 1), count=len(flat), prev=prev, next=nxt)
+            files[f"{PREFIX}/{slug}/v/{r['yt_id']}.html"] = _finish_summary_page(
+                pages[r["yt_id"]]["html"], shell, _pager(prev, nxt)).encode("utf-8")
         total = sum(len(d["items"]) for d in days)
         files[f"{PREFIX}/{slug}/index.html"] = _render_template(
             "collection_public.html", collection=c, days=days, total=total, collections=None).encode("utf-8")
