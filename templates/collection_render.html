@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>렌더 중</title>
+<!-- 공개 사본용 렌더 페이지(collection_publish.py가 헤드리스 크롬으로 연다). 화면과 같은 렌더러
+     (YS.buildSummaryHtmlFile — 'HTML 파일로 내보내기'와 같은 함수)로 요약 페이지를 만들어 #out에 JSON으로 둔다. -->
+<script>window.YS_ASSET_VERSIONS={googleCss:"{{ reader_font_v('google.css') }}",marked:"{{ static_v('vendor/marked.min.js') }}"};</script>
+<script src="/static/vendor/marked.min.js?v={{ static_v('vendor/marked.min.js') }}"></script>
+<script src="/static/js/common.js?v={{ static_v('js/common.js') }}"></script>
+</head>
+<body>
+<script id="payload" type="application/json">{{ payload|tojson }}</script>
+<pre id="out"></pre>
+<script>
+(async function () {
+  const out = document.getElementById('out');
+  try {
+    const items = JSON.parse(document.getElementById('payload').textContent);
+    await Promise.all([YS.ensureReaderAssets(), YS.ensureTermExclusions()]);
+    const pages = {};
+    for (const it of items) {
+      const r = await YS.buildSummaryHtmlFile({ md: it.md, titleKo: it.title_ko, webpageUrl: it.webpage_url });
+      pages[it.yt_id] = { html: r.html, title: r.title };
+    }
+    out.textContent = JSON.stringify({ ok: true, pages });
+  } catch (e) {
+    out.textContent = JSON.stringify({ ok: false, error: String(e && e.stack || e) });
+  }
+  document.title = 'DONE';
+})();
+</script>
+</body>
+</html>

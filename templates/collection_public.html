@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>{{ collection.title if collection else '영상 모음' }}</title>
+<style>
+  /* 공개 사본(collection_publish.py) — 바깥에 올리는 읽기 전용 페이지. 서버 자원(글꼴·테마 스크립트·썸네일 프록시)을
+     쓰지 않고 이 파일 하나로 보인다. 색은 yt 모음 화면(collection.html)과 같은 값, 다크는 기기 설정을 따른다. */
+  :root { --bg:#f6f7f9; --surface:#fff; --surface2:#f1f3f5; --border:#e4e4e7; --text:#18181b; --muted:#71717a; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111214; --surface:#181a1d; --surface2:#22252a; --border:#2c3036; --text:#f4f4f5; --muted:#a1a1aa; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Pretendard','Noto Sans KR','Segoe UI','Malgun Gothic',sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 48px; }
+  header.top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
+               backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  header.top .wrap { display:flex; align-items:center; gap:10px; padding-top:10px; padding-bottom:10px; }
+  .back { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:8px;
+          border:1px solid var(--border); background:var(--surface); color:var(--text); text-decoration:none; flex:none; }
+  .ttl { flex:1; min-width:0; }
+  .ttl h1 { margin:0; font-size:1.05rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ttl .sub { font-size:.78rem; color:var(--muted); margin-top:2px; }
+  .chip { font-size:.8rem; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--surface);
+          color:var(--text); text-decoration:none; white-space:nowrap; flex:none; }
+  .stats { font-size:.82rem; color:var(--muted); margin:14px 0 4px; }
+  .day h2 { font-size:.92rem; margin:22px 0 8px; display:flex; gap:8px; align-items:baseline; }
+  .day h2 .d { color:var(--muted); font-weight:500; font-size:.82rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; }
+  .card { display:flex; gap:10px; align-items:stretch; padding:8px; border-radius:10px; border:1px solid var(--border);
+          background:var(--surface); color:inherit; text-decoration:none; min-width:0; }
+  a.card:hover, .list a.coll:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--border)); }
+  .thumb { width:112px; flex:none; aspect-ratio:16/9; border-radius:6px; background:var(--surface2) center/cover no-repeat;
+           position:relative; overflow:hidden; }
+  .thumb .dur { position:absolute; right:4px; bottom:4px; font-size:.7rem; background:rgba(0,0,0,.72); color:#fff;
+                padding:1px 5px; border-radius:4px; }
+  .meta { min-width:0; display:flex; flex-direction:column; gap:4px; }
+  .time { font-size:.74rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .name { font-size:.88rem; line-height:1.35; font-weight:600; display:-webkit-box; -webkit-line-clamp:3;
+          -webkit-box-orient:vertical; overflow:hidden; }
+  .ko { font-size:.78rem; line-height:1.35; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2;
+        -webkit-box-orient:vertical; overflow:hidden; }
+  .list { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:10px; margin-top:6px; }
+  .list a.coll { display:flex; gap:12px; align-items:center; padding:10px; border:1px solid var(--border); border-radius:10px;
+                 background:var(--surface); color:inherit; text-decoration:none; }
+  .list a.coll .thumb { width:132px; }
+  footer.note { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--border); font-size:.78rem; color:var(--muted); line-height:1.6; }
+  @media (max-width: 600px) {
+    .grid, .list { grid-template-columns: 1fr; }
+    .list a.coll .thumb { width: 112px; }
+    .thumb { width: 104px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    {% if collection %}
+    <a class="back" href="../index.html" aria-label="모음 목록으로" title="모음 목록으로">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </a>
+    {% endif %}
+    <div class="ttl">
+      <h1>{{ collection.title if collection else '영상 모음' }}</h1>
+      {% if collection and collection.subtitle %}<div class="sub">{{ collection.subtitle }}</div>{% endif %}
+    </div>
+    {% if collection and collection.playlist %}<a class="chip" href="{{ collection.playlist }}" target="_blank" rel="noopener">재생목록</a>{% endif %}
+  </div>
+</header>
+<main class="wrap">
+  {% if collection %}
+  <div class="stats">요약 {{ total }}편 · 방송 시각은 현지 기준</div>
+  {% for day in days %}
+  <section class="day">
+    <h2>{{ day.label }} <span class="d">{{ day.date_label }}</span></h2>
+    <div class="grid">
+      {% for it in day['items'] %}
+      <a class="card" href="v/{{ it.yt_id }}.html" title="{{ it.title }}">
+        <div class="thumb" style="background-image:url('https://i.ytimg.com/vi/{{ it.yt_id }}/mqdefault.jpg')">{% if it.dur %}<span class="dur">{{ it.dur }}</span>{% endif %}</div>
+        <div class="meta">
+          {% if it.time %}<div class="time">{{ it.time }} 현지</div>{% endif %}
+          <div class="name">{{ it.short_title }}</div>
+          {% if it.short_ko %}<div class="ko">{{ it.short_ko }}</div>{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  {% else %}
+  <p class="stats">행사·시리즈별로 모은 영상 요약입니다. 모음을 고르면 일자별·시간순으로 볼 수 있습니다.</p>
+  <div class="list">
+    {% for c in collections %}
+    <a class="coll" href="{{ c.slug }}/index.html">
+      <div class="thumb"{% if c.cover %} style="background-image:url('https://i.ytimg.com/vi/{{ c.cover }}/mqdefault.jpg')"{% endif %}></div>
+      <div class="meta">
+        <div class="name">{{ c.title }}</div>
+        {% if c.subtitle %}<div class="time">{{ c.subtitle }}</div>{% endif %}
+        <div class="time">요약 {{ c.total }}편</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <footer class="note">원본 영상을 AI로 요약·번역한 글입니다. 내용의 정확한 확인은 원본 영상을 봐 주세요.</footer>
+</main>
+</body>
+</html>

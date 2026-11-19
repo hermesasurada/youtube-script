@@ -76,3 +76,54 @@ def test_deep_link_wiring_on_both_screens():
     assert "YS.collectionDeepLink()" in mobile and "!_modalPushed && !_collectionReturn" in mobile
     assert 'href="/collections"' in read("templates/index.html") and 'href="/collections"' in read("templates/mobile.html")
     assert 'id="refresh-btn"' not in read("templates/mobile.html")                # 폰 상단 새로고침 버튼은 삭제(당겨서 새로고침)
+
+
+# ── 공개 사본(collection_publish, 2026-11-19) ──
+import collection_publish as cp
+
+
+def test_public_summary_page_is_cleaned():
+    page = ('<!doctype html><html><head><meta charset="utf-8"><style>/* 작업 메모 */ .a{}</style></head><body>'
+            '<main class="ys-export"><div class="sum-panel"><img src="data:image/png;base64,xx"></div>'
+            '<footer class="ys-export-foot">원본 영상: x<br>요약 파일 만든 때: 2026. 11. 19.</footer></main></body></html>')
+    out = cp._finish_summary_page(page, "Fortune 500 Innovation Forum 2026")
+    assert '<meta name="robots" content="noindex">' in out                      # 검색 색인 끔
+    assert '<a href="../index.html">← Fortune 500 Innovation Forum 2026</a>' in out
+    assert "<img" not in out and "작업 메모" not in out and "만든 때" not in out
+    assert "AI로 요약·번역한 글" in out
+
+
+def test_public_build_links_and_private_bits(tmp_path, monkeypatch):
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM items")
+    conn.execute("DELETE FROM watch_queue")
+    m = "Fortune 500 Innovation Forum 2026"
+    sp = tmp_path / "a.sum.md"
+    sp.write_text('# T\n<div class="kf-strip"><img src="/kf/1.jpg"></div>\n본문', encoding="utf-8")
+    _add_item(conn, 911, "aaa", f"First | {m}", "20261116", is_read=1)
+    conn.execute("UPDATE items SET summary_path=?, title_ko=? WHERE rowid=911", (str(sp), f"첫 세션 | {m}"))
+    db.enqueue_video("ddd", "https://youtu.be/ddd", f"Waiting | {m}", "manual")
+    monkeypatch.setattr(cv, "CACHE_DIR", str(tmp_path))
+    assert "kf-strip" not in cp.render_payload("fortune500-2026")[0]["md"]       # 캡처 줄은 렌더 전에 뺀다
+    monkeypatch.setattr(cp, "render_pages", lambda slug: {"aaa": {
+        "html": '<html><head><meta charset="utf-8"></head><body><main class="ys-export">요약</main></body></html>',
+        "title": "첫 세션"}})
+    files = cp.build(["fortune500-2026"])
+    assert set(files) == {"c/index.html", "c/fortune500-2026/index.html", "c/fortune500-2026/v/aaa.html"}
+    page = files["c/fortune500-2026/index.html"].decode()
+    assert 'href="v/aaa.html"' in page and "첫 세션" in page and "ddd" not in page   # 처리 전 영상은 안 싣는다
+    assert "읽음" not in page and "/thumb/" not in page and "i.ytimg.com/vi/aaa/" in page
+    assert 'href="fortune500-2026/index.html"' in files["c/index.html"].decode()
+
+    sent = []
+    monkeypatch.setattr("hermes_blogger.r2.put", lambda key, data, *a, **k: sent.append(key) or key)
+    manifest = {}
+    assert len(cp.upload(files, manifest)) == 3
+    assert cp.upload(files, manifest) == []                                      # 안 바뀐 파일은 다시 안 올린다
+
+
+def test_public_render_route_only_for_public_collections(monkeypatch):
+    client = app.app.test_client()
+    monkeypatch.setattr(cp, "public_slugs", lambda: [])
+    assert client.get("/collection/fortune500-2026/public-render").status_code == 404

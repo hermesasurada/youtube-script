@@ -5,6 +5,7 @@
 """
 from flask import abort, render_template
 from yt_web import app
+import collection_publish
 import collections_view
 import yt_core
 
@@ -29,3 +30,11 @@ def collection_items(slug):
     if data is None:
         return yt_core._json({"error": "없는 모음입니다"}, 404)
     return yt_core._json(data)
+
+
+@app.route("/collection/<slug>/public-render")
+def collection_public_render(slug):
+    # 공개 사본용(collection_publish.py가 헤드리스 크롬으로 연다) — 공개로 지정한 모음만
+    if slug not in collection_publish.public_slugs():
+        abort(404)
+    return render_template("collection_render.html", payload=collection_publish.render_payload(slug))

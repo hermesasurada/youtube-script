@@ -26,6 +26,7 @@ COLLECTIONS = {
         "match": "Fortune 500 Innovation Forum 2026",
         "playlist": "https://www.youtube.com/playlist?list=PLSzQpLyHTG60",
         "tz": "America/Detroit",
+        "public": True,       # 공개 사본(collection_publish.py)을 만들어 R2에 올린다(2026-11-19 사용자 지시)
     },
 }
 

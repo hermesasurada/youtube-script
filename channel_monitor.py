@@ -448,6 +448,9 @@ def main() -> int:
         if not args.poll_only:
             drain()
             log(f"[drain] 완료, 큐: {db.queue_counts()}")
+        # 공개 영상 모음 사본(R2) — 요약이 바뀐 모음만 다시 만들어 올린다. 실패는 로그만(본업 무관)
+        import collection_publish
+        collection_publish.sync_if_changed(log=log)
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
