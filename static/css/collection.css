@@ -1,0 +1,112 @@
+/* 영상 모음 화면(templates/collection.html) — 모음 목록 · 모음(2열 카드) · 보기(왼쪽 영상 목록 + 오른쪽 요약).
+   색·글꼴·요약 본문 모양은 이력 화면의 index.css를 그대로 쓰고(요약 창과 같은 .sum-md), 여기서는 배치만 정한다.
+   2026-11-19 사용자 지시: 한 줄에 2개·썸네일 16:9, 요약은 이력 화면 팝업이 아니라 이 페이지 안에서. */
+
+.col-top { flex: none; display: flex; align-items: center; gap: .6rem; padding: .6rem 1rem;
+           border-bottom: 1px solid var(--border); background: var(--surface); min-height: 54px; }
+.col-iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none;
+               border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text);
+               text-decoration: none; cursor: pointer; padding: 0; }
+.col-iconbtn:hover { background: var(--surface2); }
+.col-iconbtn[hidden] { display: none; }
+.col-iconbtn svg { width: 16px; height: 16px; }
+.col-ttl { flex: 1; min-width: 0; }
+.col-ttl h1 { font-size: 1rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col-ttl .sub { font-size: .76rem; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col-tools { display: flex; gap: .4rem; align-items: center; flex: none; }
+.col-chip { font: inherit; font-size: .78rem; height: 32px; padding: 0 .75rem; border-radius: 999px; border: 1px solid var(--border);
+            background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; text-decoration: none;
+            display: inline-flex; align-items: center; }
+.col-chip:hover { background: var(--surface2); }
+.col-chip[hidden] { display: none; }
+.col-chip[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.col-tools .theme-btn, .col-tools .sq { width: 34px; height: 34px; }
+
+/* ── 모음 목록 · 모음(카드) — 페이지 안쪽만 스크롤 ── */
+.col-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.col-wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.25rem 3rem; }
+.col-stats { font-size: .8rem; color: var(--muted); margin: 1rem 0 .2rem; }
+.col-day h2 { font-size: .95rem; font-weight: 700; margin: 1.6rem 0 .7rem; display: flex; gap: .5rem; align-items: baseline; }
+.col-day h2 .d { color: var(--muted); font-weight: 500; font-size: .8rem; }
+.col-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.col-card { display: flex; flex-direction: column; border-radius: var(--radius-lg); border: 1px solid var(--border);
+            background: var(--surface); color: inherit; text-decoration: none; overflow: hidden; min-width: 0; cursor: pointer;
+            transition: border-color .12s, transform .12s; }
+.col-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.col-card.read { opacity: .55; }
+.col-card.wait { cursor: default; border-style: dashed; }
+.col-card.wait:hover { transform: none; border-color: var(--border); }
+/* 썸네일은 언제나 16:9 — 이미지는 상자를 채우고 넘치는 부분만 자른다 */
+.col-thumb { position: relative; aspect-ratio: 16 / 9; background: var(--surface2); overflow: hidden; flex: none; }
+.col-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.col-thumb .dur { position: absolute; right: 6px; bottom: 6px; font-size: .7rem; font-weight: 600; background: rgba(0,0,0,.75);
+                  color: #fff; padding: 1px 6px; border-radius: 4px; font-variant-numeric: tabular-nums; }
+.col-meta { padding: .7rem .85rem .85rem; display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.col-line { display: flex; align-items: center; gap: .4rem; font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.col-name { font-size: .95rem; line-height: 1.38; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical; overflow: hidden; }
+.col-ko { font-size: .82rem; line-height: 1.4; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical; overflow: hidden; }
+.col-badge { font-size: .68rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--surface2); color: var(--muted); }
+.col-badge.unread { background: var(--highlight-soft); color: var(--highlight); }
+.col-empty, .col-note { color: var(--muted); font-size: .85rem; margin: 1rem 0; }
+.col-list-card .col-meta { gap: .35rem; }
+
+/* ── 보기: 왼쪽 영상 목록 + 오른쪽 요약(페이지 안) ── */
+.col-viewer { flex: 1 1 auto; min-height: 0; display: flex; }
+.col-viewer[hidden] { display: none; }
+.col-side { width: 340px; flex: none; border-right: 1px solid var(--border); background: var(--surface);
+            overflow-y: auto; padding: .4rem 0 1.5rem; }
+.col-side h3 { font-size: .74rem; font-weight: 700; color: var(--muted); padding: .9rem 1rem .35rem; display: flex; gap: .4rem; }
+.col-side h3 .d { font-weight: 500; }
+.col-row { display: flex; gap: .65rem; align-items: center; padding: .45rem 1rem; cursor: pointer; color: inherit;
+           text-decoration: none; border-left: 3px solid transparent; }
+.col-row:hover { background: var(--surface2); }
+.col-row.active { background: var(--highlight-soft); border-left-color: var(--highlight); }
+.col-row.read:not(.active) .col-row-txt { opacity: .55; }
+.col-row.wait { cursor: default; opacity: .5; }
+.col-row .col-thumb { width: 104px; border-radius: 6px; }
+.col-row .col-thumb .dur { right: 3px; bottom: 3px; font-size: .62rem; padding: 0 4px; }
+.col-row-txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.col-row-txt .col-name { font-size: .8rem; line-height: 1.32; font-weight: 600; }
+.col-row-txt .col-line { font-size: .68rem; }
+.col-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--highlight); flex: none; }
+
+.col-reader { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; background: var(--surface); position: relative; }
+.col-reader .sum-progress { top: 0; }
+.col-reader-bar { flex: none; display: flex; align-items: center; gap: .4rem; padding: .55rem 1.25rem;
+                  border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.col-reader-bar .spacer { flex: 1; }
+.col-reader-bar .sum-action-btn, .col-reader-bar .sum-youtube-btn, .col-reader-bar .sum-fs-ctrl,
+.col-reader-bar .sum-font-ctrl { border-color: transparent; background: var(--surface2); }
+.col-nav { display: inline-flex; gap: .3rem; }
+/* 요약 본문 — 요약 창과 같은 .sum-panel-body/.sum-md, 넓은 화면에서도 읽기 폭(약 820px)을 가운데에 */
+.col-reader #sum-panel-body { padding-left: max(2rem, calc((100% - 820px) / 2)); padding-right: max(2rem, calc((100% - 820px) / 2)); }
+.col-reader #sum-panel-body > .sum-head-sticky { margin-left: calc(-1 * max(2rem, calc((100% - 820px) / 2)));
+                                                 margin-right: calc(-1 * max(2rem, calc((100% - 820px) / 2)));
+                                                 padding-left: max(2rem, calc((100% - 820px) / 2));
+                                                 padding-right: max(2rem, calc((100% - 820px) / 2)); }
+.col-placeholder { margin: 3rem auto; color: var(--muted); font-size: .9rem; text-align: center; }
+.col-side-backdrop { display: none; }
+
+/* ── 좁은 화면(폰): 카드는 그대로 2열, 보기는 요약만 — 목록은 ☰로 여는 서랍 ── */
+@media (max-width: 860px) {
+  .col-top { padding: .5rem .75rem; gap: .45rem; }
+  .col-wrap { padding: 0 .75rem 2.5rem; }
+  .col-grid { gap: .6rem; }
+  .col-meta { padding: .5rem .55rem .65rem; gap: .2rem; }
+  .col-name { font-size: .82rem; line-height: 1.33; -webkit-line-clamp: 3; }
+  .col-ko { font-size: .72rem; }
+  .col-line { font-size: .66rem; }
+  .col-tools .col-chip.pl { display: none; }
+  .col-side { position: fixed; z-index: 40; top: 0; bottom: 0; left: 0; width: min(86vw, 340px);
+              transform: translateX(-102%); transition: transform .2s ease; box-shadow: 0 0 40px rgba(0,0,0,.35);
+              padding-top: env(safe-area-inset-top); }
+  .col-viewer.side-open .col-side { transform: none; }
+  .col-viewer.side-open .col-side-backdrop { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.35); }
+  .col-reader-bar { padding: .45rem .75rem; }
+  .col-reader-bar .sum-youtube-label, .col-reader-bar .sum-font-ctrl { display: none; }
+  .col-reader #sum-panel-body { padding-left: 1.1rem; padding-right: 1.1rem; }
+  .col-reader #sum-panel-body > .sum-head-sticky { margin-left: -1.1rem; margin-right: -1.1rem; padding-left: 1.1rem; padding-right: 1.1rem; }
+}
+@media (min-width: 861px) { #col-side-toggle { display: none; } }

@@ -57,7 +57,7 @@ def test_collection_routes_and_remote_access():
     assert r.status_code == 200 and 'href="/collection/fortune500-2026"' in r.get_data(as_text=True)
     assert client.get("/collection/없는모음").status_code == 404
     assert client.get("/collection/없는모음/items").status_code == 404
-    # 원격(폰)에서도 모음 페이지가 열리고, 이력 화면으로 돌려보낼 때 ?open=…은 그대로 넘긴다
+    # 원격(폰)에서도 모음 페이지가 열리고, 서버가 이력 화면을 기기에 맞게 돌려보낼 때 질의 문자열은 그대로 넘긴다
     remote = {"REMOTE_ADDR": "100.64.0.9"}
     phone = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile"}
     assert client.get("/collection/fortune500-2026", environ_base=remote).status_code == 200
@@ -65,17 +65,26 @@ def test_collection_routes_and_remote_access():
     assert r.status_code == 302 and r.headers["Location"].endswith("/m?open=5&from=fortune500-2026")
 
 
-def test_deep_link_wiring_on_both_screens():
+def test_collection_page_opens_summaries_in_page():
+    """카드를 누르면 이력 화면 팝업이 아니라 모음 페이지 안(왼쪽 목록 + 오른쪽 요약)에서 연다(2026-11-19 사용자 지시)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     read = lambda p: open(os.path.join(root, p), encoding="utf-8").read()
-    common = read("static/js/common.js")
-    assert "function collectionDeepLink()" in common and "collectionDeepLink," in common
-    assert "YS.collectionDeepLink()" in read("static/js/index-boot.js")
-    assert "if (_collectionReturn) { _collectionReturn = false; history.back(); }" in read("static/js/index-summary.js")
-    mobile = read("static/js/mobile.js")
-    assert "YS.collectionDeepLink()" in mobile and "!_modalPushed && !_collectionReturn" in mobile
+    js = read("static/js/collection.js")
+    assert 'href="?v=${it.item_id}"' in js and "history.pushState({colView: 1}" in js   # 카드 → 보기(뒤로가기로 카드 화면)
+    for call in ("YS.apiSummaryContent", "YS.renderMarkdown", "YS.applyTitleTranslation", "YS.stripSummaryPopupChrome",
+                 "YS.setupStickySummarySections", "YS.decoratePeople", "YS.attachSummaryNotes", "YS.apiMarkRead"):
+        assert call in js                                                         # 요약 창과 같은 렌더·읽음 처리
+    assert "i.ytimg.com/vi/${yt}/hqdefault.jpg" in js                             # 생중계 영상의 서버 썸네일은 방송 전 그림
+    css = read("static/css/collection.css")
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css and "aspect-ratio: 16 / 9" in css
+    page = app.app.test_client().get("/collection/fortune500-2026").get_data(as_text=True)
+    assert 'id="col-side"' in page and 'id="sum-panel-body"' in page and "/static/js/collection.js" in page
+    # 이력 화면으로 넘겨 팝업을 띄우던 옛 배선은 지웠다
+    for p in ("static/js/common.js", "static/js/index-boot.js", "static/js/index-summary.js", "static/js/mobile.js"):
+        assert "collectionDeepLink" not in read(p) and "_collectionReturn" not in read(p)
     assert 'href="/collections"' in read("templates/index.html") and 'href="/collections"' in read("templates/mobile.html")
     assert 'id="refresh-btn"' not in read("templates/mobile.html")                # 폰 상단 새로고침 버튼은 삭제(당겨서 새로고침)
+
 
 
 # ── 공개 사본(collection_publish, 2026-11-19) ──

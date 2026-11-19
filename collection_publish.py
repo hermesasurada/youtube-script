@@ -79,11 +79,11 @@ def _done_items(slug: str) -> tuple[dict, list[dict]]:
         for it in day["items"]:
             if it["state"] != "done" or not it["item_id"] or not it["has_summary"]:
                 continue
-            r = conn.execute("SELECT summary_path, title_ko, webpage_url FROM items WHERE rowid=?",
+            r = conn.execute("SELECT summary_path, webpage_url FROM items WHERE rowid=?",
                              (it["item_id"],)).fetchone()
             if not r or not r["summary_path"] or not os.path.isfile(r["summary_path"]):
                 continue
-            out.append(dict(it, summary_path=r["summary_path"], title_ko=(r["title_ko"] or "").strip(),
+            out.append(dict(it, summary_path=r["summary_path"],
                             webpage_url=r["webpage_url"] or f"https://www.youtube.com/watch?v={it['yt_id']}"))
     return data, out
 
@@ -167,16 +167,14 @@ def build(slugs: list[str] | None = None) -> dict[str, bytes]:
         c = collections_view.get(slug)
         data, items = _done_items(slug)
         pages = render_pages(slug) if items else {}
-        ko = {it["yt_id"]: it["title_ko"] for it in items}
         days = []
         for day in data.get("days", []):
             rows = []
             for it in day["items"]:
                 if it["yt_id"] not in pages:
                     continue
-                short_ko = collections_view.short_title(ko.get(it["yt_id"], ""), c["match"])
                 rows.append({"yt_id": it["yt_id"], "title": it["title"], "short_title": it["short_title"],
-                             "short_ko": short_ko if short_ko and short_ko != it["short_title"] else "",
+                             "short_ko": it["short_ko"],
                              "time": it["time"], "time_src": it.get("time_src", ""), "dur": _fmt_dur(it["duration"])})
                 files[f"{PREFIX}/{slug}/v/{it['yt_id']}.html"] = _finish_summary_page(
                     pages[it["yt_id"]]["html"], c["title"]).encode("utf-8")

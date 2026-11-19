@@ -156,7 +156,7 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
     conn = db._conn()
     like = _like(c["match"])
     rows = conn.execute(
-        "SELECT rowid AS item_id, yt_id, title, duration, upload_date, is_read, bookmark,"
+        "SELECT rowid AS item_id, yt_id, title, title_ko, duration, upload_date, is_read, bookmark,"
         " summary_path IS NOT NULL AS has_summary FROM items"
         " WHERE title LIKE ? ESCAPE '\\'", (like,)).fetchall()
     seen, out = set(), []
@@ -165,6 +165,7 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
             continue
         seen.add(r["yt_id"])
         out.append({"item_id": r["item_id"], "yt_id": r["yt_id"], "title": r["title"] or "",
+                    "title_ko": (r["title_ko"] or "").strip(),
                     "duration": float(r["duration"] or 0), "upload_date": r["upload_date"] or "",
                     "is_read": bool(r["is_read"]), "bookmark": bool(r["bookmark"]),
                     "has_summary": bool(r["has_summary"]), "state": "done"})
@@ -174,7 +175,7 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
         if q["yt_id"] in seen:
             continue
         seen.add(q["yt_id"])
-        out.append({"item_id": None, "yt_id": q["yt_id"], "title": q["title"] or "", "duration": 0.0,
+        out.append({"item_id": None, "yt_id": q["yt_id"], "title": q["title"] or "", "title_ko": "", "duration": 0.0,
                     "upload_date": "", "is_read": False, "bookmark": False, "has_summary": False,
                     "state": q["status"]})
 
@@ -183,6 +184,10 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
     schedule = c.get("schedule") or {}
     for it in out:
         it["short_title"] = short_title(it["title"], c["match"])
+        ko = short_title(it["title_ko"], c["match"]) if it["title_ko"] else ""
+        if ko and it["short_title"] != it["title"].strip():   # 원제에서 행사 이름을 뗐으면 번역 제목도 마지막 '| …'를 뗀다
+            ko = re.sub(r"\s*[|｜][^|｜]*$", "", ko).strip() or ko
+        it["short_ko"] = ko if ko != it["short_title"] else ""     # 번역 제목(원제와 같으면 비움)
         it["time_src"] = ""
         fixed = schedule.get(it["yt_id"])
         ts = cache.get(it["yt_id"])
