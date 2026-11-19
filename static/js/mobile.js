@@ -559,8 +559,11 @@ async function loadQueueM() {
       const waitingRow = ['pending', 'kf_retry', 'deferred'].includes(v.status);
       const capOn = v.capture !== 0;
       const capBtn = waitingRow && v.status !== 'kf_retry'
-        ? `<button class="mq-cap-row ${capOn ? 'on' : ''}" onclick="mqToggleCapture(${v.id}, ${capOn ? 'false' : 'true'})">캡처</button>` : '';
-      const ctl = (movable || capBtn || extraCtl) ? `<span class="mq-ctl">${capBtn}${extraCtl}${movable ? `
+        ? `<button class="mq-cap-row ${capOn ? 'on' : ''}" role="switch" aria-checked="${capOn}" onclick="mqToggleCapture(${v.id}, ${capOn ? 'false' : 'true'})">캡처</button>` : '';
+      const dsOn = v.distill !== 0;       // NULL=채널/기본 따름(포함 취급), 0=제외 — PC 큐와 같은 규칙
+      const dsBtn = waitingRow && v.status !== 'kf_retry'
+        ? `<button class="mq-cap-row ${dsOn ? 'on' : ''}" role="switch" aria-checked="${dsOn}" onclick="mqToggleDistill(${v.id}, ${dsOn ? 'false' : 'true'})">증류</button>` : '';
+      const ctl = (movable || capBtn || dsBtn || extraCtl) ? `<span class="mq-ctl">${capBtn}${dsBtn}${extraCtl}${movable ? `
           <button onclick="mqMove(${v.id},'up')">↑</button>
           <button onclick="mqMove(${v.id},'down')">↓</button>
           <button class="mq-del" onclick="mqCancel(${v.id})">×</button>` : ''}</span>` : '';
@@ -606,6 +609,10 @@ async function mqRequeue(id) {
 }
 async function mqToggleCapture(id, enable) {
   await YS.queueApi.setFlags(id, {capture: enable});
+  loadQueueM();
+}
+async function mqToggleDistill(id, enable) {
+  await YS.queueApi.setFlags(id, {distill: enable});
   loadQueueM();
 }
 async function mqMove(id, direction) {
