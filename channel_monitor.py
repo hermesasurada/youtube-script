@@ -249,7 +249,7 @@ def _drain_kf_retry_one() -> None:
         kf = process_capture_only(txt_path, v["url"])
         if kf.get("ok"):
             db.queue_set_status(v["id"], "done", reason="캡처 재시도 성공")
-            cm_notify.notify(f"📸 캡처 재시도 성공\n{head}\n{v['url']}")
+            # 성공은 텔레그램으로 알리지 않는다(2026-11-19 사용자 지시) — 로그만
             log(f"[kf-retry] 성공: {title} (n_frames={kf.get('n_frames')})")
         else:
             rz = str(kf.get("reason") or "실패")
@@ -320,12 +320,16 @@ def _drain_main_one() -> None:
                      and not res.get("kf_permanent"))
         if retryable and res.get("txt_path"):
             db.queue_mark_kf_retry(v["id"], res["txt_path"], reason=f"캡처 실패: {kf_note}")
-            cm_notify.notify(f"✅ 자동 요약 완료 — 캡처 실패, 다음 주기 재시도 예약\n{head}\n{v['url']}")
+            # 요약은 끝났고 캡처는 다음 주기에 다시 한다 — 최종 결과(포기)만 알린다
             log(f"[drain] 캡처 재시도 예약: {title} ({kf_note})")
         else:
             db.queue_set_status(v["id"], "done")
-            suffix = "(캡처 실패)" if kf_note else ("(캡처 제외)" if res.get("kf_skipped") else "")
-            cm_notify.notify(f"✅ 자동 요약 완료{suffix}\n{head}\n{v['url']}")
+            # 성공은 텔레그램으로 알리지 않는다(2026-11-19 사용자 지시). 캡처가 다시 해 볼 수 없게
+            # 실패한 경우만 알린다(요약은 완료).
+            if kf_note:
+                cm_notify.notify(f"⚠️ 캡처 실패 — 요약은 완료\n{head}\n{kf_note}\n{v['url']}")
+            else:
+                log(f"[drain] 자동 요약 완료{'(캡처 제외)' if res.get('kf_skipped') else ''}: {title}")
     except cm_health.ClaudeUnavailable as e:
         # 지정된 요약 모델이 모두 실패한 경우(폴백까지 소진)
         db.queue_defer(

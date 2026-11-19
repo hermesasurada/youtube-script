@@ -51,6 +51,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
   - 캡처 설정은 `kf_base` 한 곳이고 테스트는 `monkeypatch.setattr(kf_base, "FRAME_WIDTH", …)`처럼 거기 값을 바꾼다.
 - **채널 감시는 `cm_*` 네 모듈 + 진입점**(11-17)
   - `cm_base`(설정값·알림용 환경 파일 읽기·재시도 간격) / `cm_health`(요약 모델 상태 점검 `summarizer_gate`) / `cm_notify`(텔레그램 알림) / `cm_detect`(신규 영상 감지·걸러내기·큐 적재 `poll_channels`, `_defer_policy`).
+  - **텔레그램은 실패·경고만 보낸다**(2026-11-19 사용자 지시): 자동 요약 완료·캡처 재시도 성공·캡처 재시도 예약은 알리지 않고 로그(`youtube-monitor.out.log`)에만 남긴다. 캡처가 다시 해 볼 수 없게 실패하면 '⚠️ 캡처 실패 — 요약은 완료'로 알린다. 성공 알림을 되살리지 말 것.
   - `channel_monitor.py`에는 영상 처리(`process_video`)·큐 비우기(`drain`)·`main`만 남는다. launchd가 부르는 파일 이름은 그대로다.
   - **`cm_base`가 환경 파일을 읽은 뒤에 토큰·기본값을 잡는다** — 감시기의 다른 모듈은 `cm_base`를 먼저 불러온다. 서버(`routes_channels`)는 채널 ID 확인에 `cm_detect`만 불러온다.
 - **전사 번역**(11-17)

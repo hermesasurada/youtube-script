@@ -1637,8 +1637,7 @@ def test_keyframe_retry_success_does_not_reference_missing_exception(monkeypatch
     monkeypatch.setattr(cm_notify, "notify", notices.append)
 
     channel_monitor.drain()
-    assert any("캡처 재시도 성공" in notice for notice in notices)
-    assert not any("자동 처리 실패" in notice for notice in notices)
+    assert notices == []                     # 성공은 텔레그램으로 알리지 않는다(2026-11-19 사용자 지시)
 
 
 def test_process_video_resumes_from_saved_transcript(monkeypatch):
