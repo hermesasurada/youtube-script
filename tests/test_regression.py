@@ -71,7 +71,7 @@ def test_desktop_scripts_load_in_order_with_boot_last():
     assert [a for a, b in loaded] == _DESKTOP_JS and all(a == b for a, b in loaded)
     import glob
     assert sorted(os.path.basename(p) for p in glob.glob(os.path.join(root, "static/js/index*.js"))) == sorted(_DESKTOP_JS)
-    kicks = ("loadHistory();", "renderQueue();", "_applyReaderFont();", "if (!IS_REMOTE) loadSavedPrompt();")
+    kicks = ("loadHistory()", "renderQueue();", "_applyReaderFont();", "if (!IS_REMOTE) loadSavedPrompt();")
     for name in _DESKTOP_JS[:-1]:
         lines = open(os.path.join(root, "static/js", name), encoding="utf-8").read().split("\n")
         assert not [l for l in lines if l.startswith(kicks)], name

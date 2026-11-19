@@ -6,7 +6,7 @@
   yt_transcribe whisper 전사·붕괴 판정                   yt_jobs     URL/파일 전사 작업·썸네일·오디오 보관
   yt_models   요약 모델 설정·라벨·_llm_text              yt_summary  요약 생성·다듬기·한눈 요약·각주 제외 주입
   yt_titles   제목 한국어 표기                           yt_queue    처리 큐 도우미       yt_blog  블로그 발행 도우미
-  llm_runners 계열별 LLM 실행기                          routes_*    HTTP 라우트(main·summary·queue·channels·history·media)
+  llm_runners 계열별 LLM 실행기                          routes_*    HTTP 라우트(main·summary·queue·channels·history·media·collections)
 """
 import logging
 import os
@@ -29,8 +29,10 @@ import routes_queue
 import routes_channels
 import routes_history
 import routes_media
+import routes_collections
 
-ROUTE_MODULES = (routes_main, routes_summary, routes_queue, routes_channels, routes_history, routes_media)
+ROUTE_MODULES = (routes_main, routes_summary, routes_queue, routes_channels, routes_history, routes_media,
+                 routes_collections)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),

@@ -8,7 +8,14 @@ if ('requestIdleCallback' in window) requestIdleCallback(_prefetchChannels, {tim
 else setTimeout(_prefetchChannels, 700);
 if (!IS_REMOTE) loadSavedPrompt();   // /prompt 는 원격 비허용
 if (!IS_REMOTE) { _pollKfStatus(); setInterval(_pollKfStatus, 4000); }
-loadHistory();
+// 영상 모음에서 왔으면(?open=<id>) 목록을 받은 뒤 그 요약을 바로 연다 — 닫으면 모음으로(closeSummaryModal)
+const _deepOpen = YS.collectionDeepLink();
+loadHistory().then(() => {
+  if (!_deepOpen) return;
+  const it = _historyItems.find(i => Number(i.item_id) === _deepOpen.id);
+  _collectionReturn = _deepOpen.returnable;
+  openSummaryModal(_deepOpen.id, it ? it.title : '');
+});
 renderQueue();
 
 /* ── 색상 모드(시스템·라이트·다크) — 공용 hermes-theme(2026-10-24, 예전 2단 토글 대체) ── */

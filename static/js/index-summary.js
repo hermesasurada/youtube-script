@@ -398,10 +398,12 @@ function _setImmersive(on) {
 }
 
 
+let _collectionReturn = false;   // 영상 모음에서 바로 연 요약이면 닫을 때 모음으로 돌아간다(index-boot)
 function closeSummaryModal() {
   document.getElementById('sum-overlay').hidden = true;
   document.body.style.overflow = '';
   _setImmersive(false);                                  // 다음 열림을 위해 초기화
+  if (_collectionReturn) { _collectionReturn = false; history.back(); }
 }
 
 function handleSumOverlayClick(e) {

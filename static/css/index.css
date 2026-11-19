@@ -141,6 +141,12 @@ header h1 em {
 }
 .theme-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface2); }
 .theme-slot { margin-left: auto; display: inline-flex; }
+/* 영상 모음 버튼(2026-11-19) — 색상 모드 버튼 바로 왼쪽 */
+.hdr-coll-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 12.5px;
+  text-decoration: none; transition: color .15s, border-color .15s, background .15s; flex-shrink: 0; }
+.hdr-coll-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface2); }
+.hdr-coll-btn + .theme-slot { margin-left: 0; }
 .theme-btn .ui-icon { width: 15px; height: 15px; }
 /* 공용 hermes-theme 메뉴가 쓰는 --ui-* 토큰을 yt 색으로 잇는다(hermes-theme.css의 다크 값보다 뒤에 와서 덮는다) */
 :root, :root[data-theme="dark"], :root[data-theme="light"] {

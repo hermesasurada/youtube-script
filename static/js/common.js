@@ -463,6 +463,20 @@
   }
   /* 목록 카드 삭제: 화면에서 바로 빼고, 6초 뒤(또는 다음 동작·페이지 이탈 때) 서버에 삭제를 보낸다.
      대기 중인 항목은 목록을 다시 받아도 숨긴다(isPendingDelete). */
+  /* 영상 모음(/collection/<slug>, 2026-11-19)에서 '/?open=<id>&from=<slug>'로 들어온 경우 — 그 요약을 바로 열고,
+     닫으면 모음으로 돌아간다. 돌아가기는 모음 페이지에서 직접 왔을 때만(주소를 붙여 넣어 열었으면 그냥 닫는다).
+     주소의 질의는 지워 새로고침해도 다시 열리지 않게 한다. */
+  function collectionDeepLink() {
+    if (typeof location === 'undefined') return null;
+    const p = new URLSearchParams(location.search);
+    const id = Number(p.get('open'));
+    if (!id) return null;
+    const from = p.get('from') || '';
+    let returnable = false;
+    try { returnable = !!from && new URL(document.referrer).pathname === '/collection/' + from; } catch (_) {}
+    try { history.replaceState(history.state, '', location.pathname); } catch (_) {}
+    return { id, from, returnable };
+  }
   function deleteWithUndo(itemId, { hide, restore, committed, failed }) {
     _pendingDeletes.add(itemId);
     hide?.();
@@ -2031,6 +2045,7 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
   };
 
   global.YS = {
+    collectionDeepLink,
     fmtUnreadDur, hms, thumbFallback, termSenseTitle, uploaderSort, queueApi,
     monitorModels: { load: mmLoad, mount: mmMount, fields: mmFields },
     withinRecentDays,

@@ -107,6 +107,7 @@ def _restrict_remote_access():
             or p.startswith("/channels")   # 채널 자동 모니터 조회/토글(모바일 원격 관리)
             or p.startswith("/queue/")     # 처리 큐 조회/추가/순서변경(원격 관리 허용)
             or p.startswith("/m/")
+            or p == "/collections" or p.startswith("/collection/")   # 영상 모음(2026-11-19, 폰에서도 본다)
             or p.startswith("/static/")
             or p.startswith("/reader-fonts/")  # 공용 본문 글꼴 — 빠지면 폰에서 글꼴이 전부 대체 글꼴로 나온다(2026-10-30)
             or p.startswith("/sframe/")
@@ -115,10 +116,12 @@ def _restrict_remote_access():
     is_mobile = _is_phone_ua(request.headers.get("User-Agent", ""))
     # 이력 페이지: 디바이스에 맞는 쪽으로 정규화
     if p in ("/", "/m"):
+        # 질의 문자열은 그대로 넘긴다 — 모음에서 '/?open=<id>&from=<모음>'으로 요약을 바로 연다(2026-11-19)
+        qs = ("?" + request.query_string.decode("utf-8", "replace")) if request.query_string else ""
         if p == "/" and is_mobile:
-            return redirect("/m", 302)
+            return redirect("/m" + qs, 302)
         if p == "/m" and not is_mobile:
-            return redirect("/", 302)
+            return redirect("/" + qs, 302)
         return  # 디바이스에 맞는 페이지 → 통과
     # 그 외 모든 경로 → 403 문구 없이 이력 페이지로 이동
     return redirect("/m" if is_mobile else "/", 302)

@@ -392,6 +392,7 @@ function deleteCard(btn) {
 
 /* ── 모달 ── */
 let _modalPushed = false;
+let _collectionReturn = false;   // 영상 모음(?open=<id>&from=<모음>)에서 바로 연 요약 — 닫으면 모음으로
 
 function _updateReadProgress() {
   const el = $('modal-body');
@@ -413,7 +414,8 @@ function openModal(title, kind = 'content') {
   $('modal-bd').classList.add('open');
   $('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
-  if (!_modalPushed) {
+  // 영상 모음에서 바로 연 요약은 기록을 쌓지 않는다 — 뒤로가기가 곧장 모음으로 간다
+  if (!_modalPushed && !_collectionReturn) {
     history.pushState({ modal: true }, '');
     _modalPushed = true;
   }
@@ -427,6 +429,7 @@ function _closeModalUI() {
 
 function closeModal() {
   _closeModalUI();
+  if (_collectionReturn) { _collectionReturn = false; history.back(); return; }
   if (_modalPushed) {
     _modalPushed = false;
     history.back(); // 열 때 push한 state를 다시 pop
@@ -1064,7 +1067,14 @@ window.addEventListener('touchend', () => {
 window.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 /* ── 진입 시 자동 fetch ── */
-loadHistory();
+// 영상 모음에서 왔으면 목록을 받은 뒤 그 요약을 바로 연다
+const _deepOpenM = YS.collectionDeepLink();
+loadHistory().then(() => {
+  if (!_deepOpenM) return;
+  const it = ALL.find(i => Number(i.item_id) === _deepOpenM.id);
+  _collectionReturn = _deepOpenM.returnable;
+  openSummary(_deepOpenM.id, it ? it.title : '');
+});
 
 /* ── 페이지 가시화 시 자동 새로고침 (다른 탭에서 돌아올 때) ── */
 let lastRefresh = Date.now();

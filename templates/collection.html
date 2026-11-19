@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <script src="/static/js/hermes-theme.js?v={{ static_v('js/hermes-theme.js') }}"></script>
+  <link rel="stylesheet" href="/static/css/hermes-theme.css?v={{ static_v('css/hermes-theme.css') }}">
+  <link rel="stylesheet" href="/reader-fonts/core.css?v={{ reader_font_v('core.css') }}">
+  <title>{{ collection.title if collection else '영상 모음' }}</title>
+  <style>
+    /* 영상 모음(2026-11-19) — PC·폰 공용 한 장. 색은 yt 이력 화면(index.css)과 같은 값. */
+    :root { --bg:#f6f7f9; --surface:#fff; --surface2:#f1f3f5; --border:#e4e4e7; --text:#18181b; --muted:#71717a;
+            --accent:#d8655d; --read:.5; }
+    :root[data-theme="dark"] { --bg:#111214; --surface:#181a1d; --surface2:#22252a; --border:#2c3036; --text:#f4f4f5;
+            --muted:#a1a1aa; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font-family:'Pretendard Variable','Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 48px; }
+    header.top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
+                 backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+    header.top .wrap { display:flex; align-items:center; gap:10px; padding-top:10px; padding-bottom:10px; }
+    .back, .sq { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:8px;
+            border:1px solid var(--border); background:var(--surface); color:var(--text); text-decoration:none; flex:none;
+            padding:0; cursor:pointer; }
+    .sq .ui-icon, .sq svg { width:16px; height:16px; }
+    .ttl { flex:1; min-width:0; }
+    .ttl h1 { margin:0; font-size:1.05rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ttl .sub { font-size:.78rem; color:var(--muted); margin-top:2px; }
+    .tools { display:flex; gap:6px; align-items:center; flex:none; }
+    .chip { font:inherit; font-size:.8rem; padding:6px 10px; border-radius:999px; border:1px solid var(--border);
+            background:var(--surface); color:var(--text); cursor:pointer; white-space:nowrap; }
+    .chip[aria-pressed="true"] { background:var(--text); color:var(--bg); border-color:var(--text); }
+    .stats { font-size:.82rem; color:var(--muted); margin:14px 0 4px; }
+    .day h2 { font-size:.92rem; margin:22px 0 8px; display:flex; gap:8px; align-items:baseline; }
+    .day h2 .d { color:var(--muted); font-weight:500; font-size:.82rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; }
+    .card { display:flex; gap:10px; align-items:stretch; padding:8px; border-radius:10px; border:1px solid var(--border);
+            background:var(--surface); color:inherit; text-decoration:none; position:relative; min-width:0; }
+    a.card:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--border)); }
+    .card.read { opacity: var(--read); }
+    .card.wait { cursor: default; border-style: dashed; }
+    .thumb { width:112px; flex:none; aspect-ratio:16/9; border-radius:6px; background:var(--surface2) center/cover no-repeat;
+             position:relative; overflow:hidden; }
+    .thumb .dur { position:absolute; right:4px; bottom:4px; font-size:.7rem; background:rgba(0,0,0,.72); color:#fff;
+                  padding:1px 5px; border-radius:4px; }
+    .meta { min-width:0; display:flex; flex-direction:column; gap:4px; }
+    .time { font-size:.74rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .name { font-size:.88rem; line-height:1.35; font-weight:600; display:-webkit-box; -webkit-line-clamp:3;
+            -webkit-box-orient:vertical; overflow:hidden; }
+    .badge { align-self:flex-start; font-size:.7rem; padding:1px 6px; border-radius:4px; background:var(--surface2);
+             color:var(--muted); }
+    .badge.unread { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+    .empty, .note { color:var(--muted); font-size:.85rem; margin:16px 0; }
+    .list a.coll { display:block; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--surface);
+                   color:inherit; text-decoration:none; margin-top:10px; }
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: 1fr; }
+      .thumb { width: 104px; }
+      .tools .chip.pl { display:none; }
+    }
+  </style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="back" id="back" href="/" aria-label="이력으로" title="이력으로">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </a>
+    <div class="ttl">
+      <h1>{{ collection.title if collection else '영상 모음' }}</h1>
+      <div class="sub" id="sub">{{ collection.subtitle if collection else '' }}</div>
+    </div>
+    <div class="tools">
+      {% if collection %}
+      <button class="chip" id="unread" type="button" aria-pressed="false">안읽음만</button>
+      <a class="chip pl" href="{{ collection.playlist }}" target="_blank" rel="noopener">재생목록</a>
+      {% endif %}
+      <span id="theme-slot" style="display:contents"></span>
+    </div>
+  </div>
+</header>
+<main class="wrap">
+  {% if collection %}
+  <div class="stats" id="stats">불러오는 중…</div>
+  <div id="days"></div>
+  <p class="note" id="note" hidden></p>
+  {% else %}
+  <div class="list">
+    {% for c in collections %}
+    <a class="coll" href="/collection/{{ c.slug }}"><b>{{ c.title }}</b><div class="sub">{{ c.subtitle }} · {{ c.counts.done or 0 }}편</div></a>
+    {% else %}
+    <p class="empty">모음이 없습니다.</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+</main>
+<script>
+HermesTheme.mount(document.getElementById('theme-slot'), { className: 'sq' });
+(function () {
+  const SLUG = {{ slug|tojson }};
+  // 이력 화면: 폰은 /m. 서버도 기기에 맞게 돌려보내지만(질의 보존), 한 번 덜 돌게 여기서 고른다.
+  const PHONE = /iPhone|iPod|Windows Phone/i.test(navigator.userAgent)
+    || (/Android/i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent));
+  const HOME = PHONE ? '/m' : '/';
+  document.getElementById('back').href = HOME;
+  if (!SLUG) return;
+  const KEY = 'ytCollectionUnread';
+  const btn = document.getElementById('unread');
+  let unreadOnly = false;
+  try { unreadOnly = localStorage.getItem(KEY) === '1'; } catch (_) {}
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtDur = s => { s = Math.round(s || 0); if (!s) return ''; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return h ? `${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}` : `${m}:${String(x).padStart(2,'0')}`; };
+  const fmtDay = d => { if (!d) return ''; const t = new Date(d + 'T12:00:00'); return `${t.getMonth() + 1}월 ${t.getDate()}일(${'일월화수목금토'[t.getDay()]})`; };
+  const STATE = {pending: '처리 대기', processing: '처리 중', deferred: '재시도 대기', failed: '처리 실패', kf_retry: '캡처 재시도'};
+  let data = null, tries = 0;
+
+  function card(it) {
+    const thumb = `<div class="thumb" style="background-image:url('/thumb/${encodeURIComponent(it.yt_id)}')">`
+      + (it.duration ? `<span class="dur">${fmtDur(it.duration)}</span>` : '') + '</div>';
+    const time = it.time ? `<div class="time">${esc(it.time)} 현지</div>` : '';
+    if (it.state !== 'done' || !it.item_id) {
+      return `<div class="card wait" title="${esc(it.title)}">${thumb}<div class="meta">${time}`
+        + `<div class="name">${esc(it.short_title)}</div><span class="badge">${esc(STATE[it.state] || it.state)}</span></div></div>`;
+    }
+    const href = `${HOME}?open=${it.item_id}&from=${encodeURIComponent(SLUG)}`;
+    const badge = it.is_read ? '<span class="badge">읽음</span>' : '<span class="badge unread">안읽음</span>';
+    return `<a class="card${it.is_read ? ' read' : ''}" href="${href}" title="${esc(it.title)}">${thumb}<div class="meta">${time}`
+      + `<div class="name">${esc(it.short_title)}</div>${badge}</div></a>`;
+  }
+  function render() {
+    btn.setAttribute('aria-pressed', unreadOnly ? 'true' : 'false');
+    const c = data.counts;
+    document.getElementById('stats').textContent =
+      `요약 ${c.done}편 · 읽음 ${c.read}편` + (c.waiting ? ` · 처리 전 ${c.waiting}편` : '');
+    const html = data.days.map(day => {
+      const list = day.items.filter(it => !unreadOnly || (it.state === 'done' && !it.is_read));
+      if (!list.length) return '';
+      return `<section class="day"><h2>${esc(day.label)} <span class="d">${esc(fmtDay(day.date))}</span></h2>`
+        + `<div class="grid">${list.map(card).join('')}</div></section>`;
+    }).join('');
+    document.getElementById('days').innerHTML = html || '<p class="empty">보여 줄 영상이 없습니다.</p>';
+    const note = document.getElementById('note');
+    note.hidden = !data.filling;
+    note.textContent = '일부 영상의 방송 시각을 받는 중이라 그날 맨 뒤에 두었습니다. 잠시 뒤 순서가 맞춰집니다.';
+  }
+  async function load() {
+    try {
+      const r = await fetch(`/collection/${encodeURIComponent(SLUG)}/items`, {cache: 'no-store'});
+      data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.status);
+      render();
+      if (data.filling && ++tries <= 6) setTimeout(load, 15000);   // 시각을 받는 동안만 몇 번 다시 묻는다
+    } catch (e) {
+      document.getElementById('stats').textContent = '불러오지 못했습니다: ' + e.message;
+    }
+  }
+  btn.addEventListener('click', () => {
+    unreadOnly = !unreadOnly;
+    try { localStorage.setItem(KEY, unreadOnly ? '1' : '0'); } catch (_) {}
+    if (data) render();
+  });
+  // 요약을 보고 뒤로 돌아오면(bfcache 포함) 읽음 상태를 다시 받는다
+  window.addEventListener('pageshow', e => { if (e.persisted) load(); });
+  load();
+})();
+</script>
+</body>
+</html>
