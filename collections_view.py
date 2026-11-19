@@ -36,6 +36,7 @@ COLLECTIONS = {
         "playlist": "https://www.youtube.com/playlist?list=PLVfiEuj8EJp8",
         "tz": "America/Chicago",
         "start": "2026-11-17",
+        "public": True,       # 공개 사본(2026-11-20 사용자 지시 "투모로x도 공개해줘")
         # 편집본이 행사 뒤 며칠에 걸쳐 올라와 업로드 시각으로는 일차가 틀린다 — 공식 일정표(tomorrowxsummit.com)의
         # 무대 시각(현지)을 적는다. 여기 없는 영상은 업로드 시각으로 두고 카드에 '업로드'라고 표시한다.
         "schedule": {
