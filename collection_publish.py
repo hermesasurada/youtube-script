@@ -177,13 +177,13 @@ def build(slugs: list[str] | None = None) -> dict[str, bytes]:
                 short_ko = collections_view.short_title(ko.get(it["yt_id"], ""), c["match"])
                 rows.append({"yt_id": it["yt_id"], "title": it["title"], "short_title": it["short_title"],
                              "short_ko": short_ko if short_ko and short_ko != it["short_title"] else "",
-                             "time": it["time"], "dur": _fmt_dur(it["duration"])})
+                             "time": it["time"], "time_src": it.get("time_src", ""), "dur": _fmt_dur(it["duration"])})
                 files[f"{PREFIX}/{slug}/v/{it['yt_id']}.html"] = _finish_summary_page(
                     pages[it["yt_id"]]["html"], c["title"]).encode("utf-8")
             if rows:
                 days.append({"date": day["date"], "date_label": _day_label(day["date"]), "items": rows})
         for i, d in enumerate(days, 1):
-            d["label"] = f"{i}일차" if d["date"] else "날짜 미상"
+            d["label"] = collections_view.day_label(c, d["date"], i)
         total = sum(len(d["items"]) for d in days)
         files[f"{PREFIX}/{slug}/index.html"] = _render_template(
             "collection_public.html", collection=c, days=days, total=total, collections=None).encode("utf-8")

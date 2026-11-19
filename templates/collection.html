@@ -130,7 +130,7 @@ HermesTheme.mount(document.getElementById('theme-slot'), { className: 'sq' });
   function card(it) {
     const thumb = `<div class="thumb" style="background-image:url('/thumb/${encodeURIComponent(it.yt_id)}')">`
       + (it.duration ? `<span class="dur">${fmtDur(it.duration)}</span>` : '') + '</div>';
-    const time = it.time ? `<div class="time">${esc(it.time)} 현지</div>` : '';
+    const time = it.time ? `<div class="time">${esc(it.time)} ${it.time_src === 'upload' ? '업로드' : '현지'}</div>` : '';
     if (it.state !== 'done' || !it.item_id) {
       return `<div class="card wait" title="${esc(it.title)}">${thumb}<div class="meta">${time}`
         + `<div class="name">${esc(it.short_title)}</div><span class="badge">${esc(STATE[it.state] || it.state)}</span></div></div>`;

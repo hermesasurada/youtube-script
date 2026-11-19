@@ -127,3 +127,27 @@ def test_public_render_route_only_for_public_collections(monkeypatch):
     client = app.app.test_client()
     monkeypatch.setattr(cp, "public_slugs", lambda: [])
     assert client.get("/collection/fortune500-2026/public-render").status_code == 404
+
+
+def test_schedule_overrides_upload_time_and_days_count_from_start(tmp_path, monkeypatch):
+    db.init()
+    conn = db._conn()
+    conn.execute("DELETE FROM items")
+    conn.execute("DELETE FROM watch_queue")
+    m = "TomorrowX Summit"
+    db.enqueue_video("MtFNcfB4JEU", "https://youtu.be/x", f"Lisa Su on Nvidia | {m}", "manual")
+    db.enqueue_video("paMsNoG_hi8", "https://youtu.be/y", f"Travis Kalanick | {m}", "manual")
+    db.enqueue_video("newone", "https://youtu.be/z", f"Later Upload | {m} Day 2", "manual")
+    monkeypatch.setattr(cv, "CACHE_DIR", str(tmp_path))
+    # 새 영상은 업로드 시각만 안다: 2026-11-19 10:00 CST
+    (tmp_path / "tomorrowx-2026.json").write_text(json.dumps({"newone": 1795104000}), encoding="utf-8")
+    monkeypatch.setattr(cv, "_schedule_fill", lambda slug, ids: bool(ids))
+    days = cv.items("tomorrowx-2026")["days"]
+    assert [(d["label"], d["date"]) for d in days] == [("1일차", "2026-11-17"), ("2일차", "2026-11-18"), ("3일차", "2026-11-19")]
+    lisa = days[0]["items"][0]
+    assert lisa["time"] == "09:40" and lisa["time_src"] == ""                     # 일정표 무대 시각(현지)
+    assert days[2]["items"][0]["time_src"] == "upload"                           # 일정표에 없으면 업로드 시각
+    assert days[2]["items"][0]["short_title"] == "Later Upload"                  # 행사 이름 뒤 꼬리까지 뗀다
+    # 시작일 기준이라 1일차 영상이 없어도 2일차는 2일차
+    only_day2 = {"start": "2026-11-17"}
+    assert cv.day_label(only_day2, "2026-11-18", 1) == "2일차"

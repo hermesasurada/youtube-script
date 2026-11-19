@@ -13,7 +13,7 @@ import json
 import os
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 import db
@@ -27,6 +27,31 @@ COLLECTIONS = {
         "playlist": "https://www.youtube.com/playlist?list=PLSzQpLyHTG60",
         "tz": "America/Detroit",
         "public": True,       # 공개 사본(collection_publish.py)을 만들어 R2에 올린다(2026-11-19 사용자 지시)
+        "start": "2026-11-16",
+    },
+    "tomorrowx-2026": {
+        "title": "TomorrowX Summit 2026",
+        "subtitle": "오스틴 Moody Center · 2026년 11월 17~18일",
+        "match": "TomorrowX Summit",
+        "playlist": "https://www.youtube.com/playlist?list=PLVfiEuj8EJp8",
+        "tz": "America/Chicago",
+        "start": "2026-11-17",
+        # 편집본이 행사 뒤 며칠에 걸쳐 올라와 업로드 시각으로는 일차가 틀린다 — 공식 일정표(tomorrowxsummit.com)의
+        # 무대 시각(현지)을 적는다. 여기 없는 영상은 업로드 시각으로 두고 카드에 '업로드'라고 표시한다.
+        "schedule": {
+            "OmEfHDQ3B6c": "2026-11-17 08:30",   # 오프닝(Gavin Baker·Ron Biscardi·Antonio Gracias)
+            "DXhcN9aaUFw": "2026-11-17 08:45",   # Brad Gerstner
+            "_SFAGMYj1JE": "2026-11-17 09:10",   # David Solomon
+            "MtFNcfB4JEU": "2026-11-17 09:40",   # Lisa Su
+            "9RFkGYaa1nI": "2026-11-17 10:10",   # Matthew McConaughey × Guy Oseary
+            "6r3D-CMJkuI": "2026-11-17 10:35",   # Stan Druckenmiller
+            "mwqV1Gpgcyg": "2026-11-17 11:00",   # Michael Dell
+            "V-Hqi1DNzbE": "2026-11-17 11:25",   # Dina Powell McCormick
+            "Ed1V9Xz89Ic": "2026-11-17 12:20",   # Guillermo Rauch
+            "UTueSKjzdto": "2026-11-17 13:10",   # Bret Johnsen
+            "paMsNoG_hi8": "2026-11-18 13:40",   # Travis Kalanick
+            "DY8clym2-jQ": "2026-11-18 17:30",   # Elon Musk(화상)
+        },
     },
 }
 
@@ -40,9 +65,22 @@ def get(slug: str) -> dict | None:
     return dict(c, slug=slug) if c else None
 
 
+def day_label(c: dict, day: str, index: int) -> str:
+    """'N일차' — 행사 시작일(`start`)이 있으면 그날부터 센다(1일차 영상이 아직 없어도 2일차는 2일차)."""
+    if not day:
+        return "날짜 미상"
+    start = c.get("start")
+    if start:
+        try:
+            return f"{(date.fromisoformat(day) - date.fromisoformat(start)).days + 1}일차"
+        except ValueError:
+            pass
+    return f"{index}일차"
+
+
 def short_title(title: str, match: str) -> str:
-    """'세션 제목 | 행사 이름' → '세션 제목'(행사 이름은 페이지 머리에 이미 있다)."""
-    t = re.sub(r"\s*[|｜]\s*" + re.escape(match) + r"\s*$", "", title or "").strip()
+    """'세션 제목 | 행사 이름[ 뒷말]' → '세션 제목'(행사 이름은 페이지 머리에 이미 있다)."""
+    t = re.sub(r"\s*[|｜]\s*" + re.escape(match) + r"\b.*$", "", title or "").strip()
     return t or (title or "")
 
 
@@ -142,18 +180,26 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
 
     cache = _load_cache(slug)
     tz = ZoneInfo(c.get("tz") or "UTC")
+    schedule = c.get("schedule") or {}
     for it in out:
         it["short_title"] = short_title(it["title"], c["match"])
+        it["time_src"] = ""
+        fixed = schedule.get(it["yt_id"])
         ts = cache.get(it["yt_id"])
-        if ts:
+        if fixed:                       # 공식 일정표의 무대 시각(현지)이 업로드 시각보다 우선
+            local = datetime.strptime(fixed, "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+            it["day"], it["time"], it["ts"] = local.strftime("%Y-%m-%d"), local.strftime("%H:%M"), int(local.timestamp())
+        elif ts:
             local = datetime.fromtimestamp(int(ts), timezone.utc).astimezone(tz)
             it["day"], it["time"], it["ts"] = local.strftime("%Y-%m-%d"), local.strftime("%H:%M"), int(ts)
+            if schedule:                # 일정표를 쓰는 모음에서 일정표에 없는 영상 — 무대 시각이 아니다
+                it["time_src"] = "upload"
         else:
             d = it["upload_date"]
             it["day"] = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 else ""
             it["time"], it["ts"] = "", None
 
-    missing = [it["yt_id"] for it in out if it["ts"] is None]
+    missing = [it["yt_id"] for it in out if it["ts"] is None and it["yt_id"] not in schedule]
     filling = _schedule_fill(slug, missing) if fill else False
 
     def key(it):
@@ -165,7 +211,7 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
             days.append({"date": it["day"], "items": []})
         days[-1]["items"].append(it)
     for i, d in enumerate(days, 1):
-        d["label"] = f"{i}일차" if d["date"] else "날짜 미상"
+        d["label"] = day_label(c, d["date"], i)
     done = [it for it in out if it["state"] == "done"]
     return {
         "collection": {k: c[k] for k in ("slug", "title", "subtitle", "playlist", "tz") if k in c},

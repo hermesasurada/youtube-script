@@ -81,7 +81,7 @@
       <a class="card" href="v/{{ it.yt_id }}.html" title="{{ it.title }}">
         <div class="thumb" style="background-image:url('https://i.ytimg.com/vi/{{ it.yt_id }}/mqdefault.jpg')">{% if it.dur %}<span class="dur">{{ it.dur }}</span>{% endif %}</div>
         <div class="meta">
-          {% if it.time %}<div class="time">{{ it.time }} 현지</div>{% endif %}
+          {% if it.time %}<div class="time">{{ it.time }} {{ '업로드' if it.time_src == 'upload' else '현지' }}</div>{% endif %}
           <div class="name">{{ it.short_title }}</div>
           {% if it.short_ko %}<div class="ko">{{ it.short_ko }}</div>{% endif %}
         </div>
