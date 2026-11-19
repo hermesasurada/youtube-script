@@ -176,10 +176,12 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
 
 
 def summaries() -> list[dict]:
-    """모음 목록(모음 고르기 화면·버튼용) — 이름과 편수만."""
+    """모음 목록(모음 고르기 화면) — 이름·편수·표지 썸네일."""
     out = []
     for slug in COLLECTIONS:
         data = items(slug, fill=False) or {}
+        first = next((it for d in data.get("days", []) for it in d["items"]), None)   # 맨 앞 영상 썸네일을 표지로
         out.append({"slug": slug, "title": COLLECTIONS[slug]["title"],
-                    "subtitle": COLLECTIONS[slug].get("subtitle", ""), "counts": data.get("counts", {})})
+                    "subtitle": COLLECTIONS[slug].get("subtitle", ""), "counts": data.get("counts", {}),
+                    "cover": first["yt_id"] if first else ""})
     return out

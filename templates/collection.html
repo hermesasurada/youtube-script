@@ -52,10 +52,14 @@
              color:var(--muted); }
     .badge.unread { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
     .empty, .note { color:var(--muted); font-size:.85rem; margin:16px 0; }
-    .list a.coll { display:block; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--surface);
-                   color:inherit; text-decoration:none; margin-top:10px; }
+    .list { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:10px; margin-top:6px; }
+    .list a.coll { display:flex; gap:12px; align-items:center; padding:10px; border:1px solid var(--border); border-radius:10px;
+                   background:var(--surface); color:inherit; text-decoration:none; }
+    .list a.coll:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--border)); }
+    .list a.coll .thumb { width:132px; }
     @media (max-width: 600px) {
-      .grid { grid-template-columns: 1fr; }
+      .grid, .list { grid-template-columns: 1fr; }
+      .list a.coll .thumb { width: 112px; }
       .thumb { width: 104px; }
       .tools .chip.pl { display:none; }
     }
@@ -64,7 +68,7 @@
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="back" id="back" href="/" aria-label="이력으로" title="이력으로">
+    <a class="back" id="back" href="{{ '/collections' if collection else '/' }}" aria-label="{{ '모음 목록으로' if collection else '이력으로' }}" title="{{ '모음 목록으로' if collection else '이력으로' }}">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
     </a>
     <div class="ttl">
@@ -86,9 +90,17 @@
   <div id="days"></div>
   <p class="note" id="note" hidden></p>
   {% else %}
+  <p class="stats">행사·시리즈별로 모은 영상입니다. 모음을 고르면 일자별·시간순으로 볼 수 있습니다.</p>
   <div class="list">
     {% for c in collections %}
-    <a class="coll" href="/collection/{{ c.slug }}"><b>{{ c.title }}</b><div class="sub">{{ c.subtitle }} · {{ c.counts.done or 0 }}편</div></a>
+    <a class="coll" href="/collection/{{ c.slug }}">
+      <div class="thumb"{% if c.cover %} style="background-image:url('/thumb/{{ c.cover }}')"{% endif %}></div>
+      <div class="meta">
+        <div class="name">{{ c.title }}</div>
+        {% if c.subtitle %}<div class="time">{{ c.subtitle }}</div>{% endif %}
+        <div class="time">요약 {{ c.counts.done or 0 }}편{% if c.counts.done %} · 안읽음 {{ (c.counts.done or 0) - (c.counts.read or 0) }}편{% endif %}{% if c.counts.waiting %} · 처리 전 {{ c.counts.waiting }}편{% endif %}</div>
+      </div>
+    </a>
     {% else %}
     <p class="empty">모음이 없습니다.</p>
     {% endfor %}
@@ -103,8 +115,7 @@ HermesTheme.mount(document.getElementById('theme-slot'), { className: 'sq' });
   const PHONE = /iPhone|iPod|Windows Phone/i.test(navigator.userAgent)
     || (/Android/i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent));
   const HOME = PHONE ? '/m' : '/';
-  document.getElementById('back').href = HOME;
-  if (!SLUG) return;
+  if (!SLUG) { document.getElementById('back').href = HOME; return; }   // 모음 페이지의 뒤로는 모음 목록(/collections)
   const KEY = 'ytCollectionUnread';
   const btn = document.getElementById('unread');
   let unreadOnly = false;

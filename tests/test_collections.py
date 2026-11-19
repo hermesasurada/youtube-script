@@ -53,7 +53,8 @@ def test_short_title_strips_event_name():
 
 def test_collection_routes_and_remote_access():
     client = app.app.test_client()
-    assert client.get("/collections").status_code == 302                         # 모음이 하나면 바로 연다
+    r = client.get("/collections")                                               # 모음이 하나여도 고르는 화면을 거친다
+    assert r.status_code == 200 and 'href="/collection/fortune500-2026"' in r.get_data(as_text=True)
     assert client.get("/collection/없는모음").status_code == 404
     assert client.get("/collection/없는모음/items").status_code == 404
     # 원격(폰)에서도 모음 페이지가 열리고, 이력 화면으로 돌려보낼 때 ?open=…은 그대로 넘긴다
@@ -74,3 +75,4 @@ def test_deep_link_wiring_on_both_screens():
     mobile = read("static/js/mobile.js")
     assert "YS.collectionDeepLink()" in mobile and "!_modalPushed && !_collectionReturn" in mobile
     assert 'href="/collections"' in read("templates/index.html") and 'href="/collections"' in read("templates/mobile.html")
+    assert 'id="refresh-btn"' not in read("templates/mobile.html")                # 폰 상단 새로고침 버튼은 삭제(당겨서 새로고침)

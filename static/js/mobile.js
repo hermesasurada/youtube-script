@@ -59,8 +59,6 @@ function fmtDurBadge(secs) {
 }
 
 async function loadHistory(force) {
-  const btn = $('refresh-btn');
-  btn.classList.add('spin');
   $('state').textContent = '로드 중…';
   try {
     const url = (!force && HISTORY_REVISION)
@@ -71,10 +69,8 @@ async function loadHistory(force) {
     if (d.revision) HISTORY_REVISION = d.revision;
   } catch (e) {
     $('state').textContent = '오류: ' + e.message;
-    btn.classList.remove('spin');
     return;
   }
-  btn.classList.remove('spin');
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
   $('unread-filter-btn').classList.toggle('active', _unreadOnly);
   $('unread-filter-btn').setAttribute('aria-pressed', String(_unreadOnly));   // 저장된 미읽음 상태 반영
