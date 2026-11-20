@@ -187,7 +187,8 @@ function applyHistoryFilter(keepPage = false) {
   _historyFiltered = _historyItems.filter(item => {
     if (YS.isPendingDelete(item.item_id)) return false;   // 되돌리기 대기 중인 삭제
     if (uploader && item.uploader !== uploader)  return false;
-    if (titleQ   && !item.title.toLowerCase().includes(titleQ)) return false;
+    if (titleQ   && !item.title.toLowerCase().includes(titleQ)
+                 && !(item.title_ko || '').toLowerCase().includes(titleQ)) return false;
     if (_histUnreadOnly && item.is_read) return false;
     if (_histBookmarkOnly && !item.bookmark) return false;
     // 증류만 = 증류 대상이면서 영상 게시일 7일 이내(2026-11-07 사용자 지시)
@@ -377,6 +378,20 @@ function deleteCard(btn) {
   });
 }
 
+/* 카드 ⋯ 메뉴 — 전사 보기 · YouTube에서 열기 · 삭제(2026-11-20 사용자 승인: 삭제를 자주 누르는 버튼 옆에서 뗀다) */
+function openHistCardMenu(btn, ev) {
+  if (ev) ev.stopPropagation();
+  const id = Number(btn.dataset.id);
+  const item = _historyItems.find(i => i.item_id === id);
+  if (!item) return;
+  YS.openCardMenu(btn, [
+    { label: '전사 보기', disabled: !item.has_txt, onClick: () => openTranscriptModal(id, item.title) },
+    { label: 'YouTube에서 열기', disabled: !item.webpage_url,
+      onClick: () => window.open(item.webpage_url, '_blank', 'noopener') },
+    { label: '삭제', danger: true, onClick: () => deleteCard({ dataset: { id: String(id) } }) },
+  ]);
+}
+
 /* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg.com)로
    나가는 요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
 function _thumbFallback(img) { YS.thumbFallback(img); }
@@ -441,10 +456,7 @@ function resetHistoryFilter() {
 function _ytVideoId(url) { return YS.ytVideoId(url); }
 function _attrEsc(s) { return YS.attrEscape(s); }
 
-const ICON_SUMMARY  = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3V2z"/><path d="M10 2v3h3"/><path d="M5.5 8h5M5.5 10.5h5M5.5 6h2.5"/></svg>';
-const ICON_TRANSCRIPT = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7"/></svg>';
-const ICON_YOUTUBE = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>';
-const ICON_DELETE  = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+const ICON_MORE    = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 const ICON_BOOKMARK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
 const ICON_EYE     = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_EYE_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
@@ -491,7 +503,7 @@ function _renderHistoryList() {
       ? `<img class="hist-thumb" src="${_attrEsc(thumbUrl)}" alt="" loading="lazy" data-vid="${_attrEsc(vid)}" onerror="_thumbFallback(this)">`
       : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
     const durBadge  = item.duration
-      ? `<span class="hist-thumb-dur">${fmtDurKo(item.duration)}</span>` : '';
+      ? `<span class="hist-thumb-dur">${YS.fmtClock(item.duration)}</span>` : '';
 
     const bmBtn = `<button class="hist-bm-btn${item.bookmark ? ' on' : ''}"
       data-id="${item.item_id}" data-on="${item.bookmark ? '1' : '0'}"
@@ -508,25 +520,16 @@ function _renderHistoryList() {
       : `<span class="hist-card-uploader" title="${_attrEsc(item.uploader || '')}">${esc(item.uploader || '')}</span>`;
 
     const titleAttr = _attrEsc(item.title);
-    const titleHtml = `<h3 class="hist-card-title" title="${titleAttr}">${esc(item.title)}</h3>`;
+    const T = YS.cardTitles(item);       // 번역 제목을 크게, 원제는 아래 작게(2026-11-20)
 
-    const sumBtn  = item.has_summary
-      ? `<button class="hist-icon-btn hist-icon-btn-summary" data-id="${item.item_id}" data-title="${titleAttr}" onclick="openSummaryModal(Number(this.dataset.id),this.dataset.title)" title="요약 보기">${ICON_SUMMARY}</button>`
-      : `<button class="hist-icon-btn hist-icon-btn-summary" disabled title="요약 없음">${ICON_SUMMARY}</button>`;
-    const txtBtn  = item.has_txt
-      ? `<button class="hist-icon-btn" data-id="${item.item_id}" data-title="${titleAttr}" onclick="openTranscriptModal(Number(this.dataset.id),this.dataset.title)" title="전사 보기">${ICON_TRANSCRIPT}</button>`
-      : `<button class="hist-icon-btn" disabled title="전사 없음">${ICON_TRANSCRIPT}</button>`;
-    const ytBtn   = item.webpage_url
-      ? `<a class="hist-icon-btn hist-icon-btn-youtube" href="${_attrEsc(item.webpage_url)}" target="_blank" rel="noopener" title="YouTube에서 열기">${ICON_YOUTUBE}</a>`
-      : `<button class="hist-icon-btn hist-icon-btn-youtube" disabled title="URL 없음">${ICON_YOUTUBE}</button>`;
     const readBtn = `<button class="hist-icon-btn hist-icon-btn-read${item.is_read ? ' is-read' : ''}"
       data-id="${item.item_id}" data-read="${item.is_read ? '1' : '0'}"
       onclick="toggleRead(this)" title="${item.is_read ? '읽음 (클릭 시 안읽음으로)' : '안읽음 (클릭 시 읽음으로)'}"
       >${item.is_read ? ICON_EYE_OFF : ICON_EYE}</button>`;
-    const delBtn  = `<button class="hist-icon-btn hist-icon-btn-delete"
-      data-id="${item.item_id}" data-title="${titleAttr}"
-      onclick="deleteCard(this)" title="삭제"
-      >${ICON_DELETE}</button>`;
+    // 덜 쓰는 동작(전사·YouTube·삭제)은 ⋯ 메뉴로(2026-11-20) — 요약 보기는 카드 클릭과 같아 뺐다
+    const moreBtn = `<button class="hist-icon-btn hist-icon-btn-more" data-id="${item.item_id}"
+      onclick="openHistCardMenu(this, event)" title="더 보기 — 전사 · YouTube · 삭제" aria-haspopup="menu"
+      >${ICON_MORE}</button>`;
 
     const unreadDot = !item.is_read ? '<span class="hist-unread-dot"></span>' : '';
     const clickable = item.has_summary ? ' hist-card-clickable" onclick="_onHistCardClick(event)' : '';
@@ -537,11 +540,12 @@ function _renderHistoryList() {
     return `<div class="hist-card${unreadClass}${clickable}"${cardData}>
       ${thumbBlock}
       <div class="hist-card-body">
-        <h3 class="hist-card-title" title="${titleAttr}">${unreadDot}${esc(item.title)}</h3>
+        <h3 class="hist-card-title" title="${titleAttr}">${unreadDot}${esc(T.main)}</h3>
+        ${T.orig ? `<div class="hist-card-orig">${esc(T.orig)}</div>` : ''}
         <div class="hist-card-meta">${uploaderHtml}</div>
         <div class="hist-card-footer">
-          <span class="hist-card-left"><span class="hist-card-date" title="${_histSortKey === 'upload' ? '영상 게시일' : '전사 처리일'}">${fmtDate(histDisplayDate(item))}</span><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span></span>
-          <div class="hist-card-actions">${readBtn}${sumBtn}${txtBtn}${ytBtn}${delBtn}</div>
+          <span class="hist-card-left"><span class="hist-card-date" title="${_histSortKey === 'upload' ? '영상 게시일' : '전사 처리일'}">${YS.fmtDateShort(histDisplayDate(item))}</span><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span></span>
+          <div class="hist-card-actions">${readBtn}${moreBtn}</div>
         </div>
       </div>
     </div>`;

@@ -142,11 +142,12 @@ header h1 em {
 .theme-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface2); }
 .theme-slot { margin-left: auto; display: inline-flex; }
 /* 영상 모음 버튼(2026-11-19) — 색상 모드 버튼 바로 왼쪽 */
-.hdr-coll-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+.hdr-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.hdr-coll-btn { background: none; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 12.5px;
   text-decoration: none; transition: color .15s, border-color .15s, background .15s; flex-shrink: 0; }
 .hdr-coll-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface2); }
-.hdr-coll-btn + .theme-slot { margin-left: 0; }
+.hdr-tools + .theme-slot { margin-left: 0; }
 .theme-btn .ui-icon { width: 15px; height: 15px; }
 /* 공용 hermes-theme 메뉴가 쓰는 --ui-* 토큰을 yt 색으로 잇는다(hermes-theme.css의 다크 값보다 뒤에 와서 덮는다) */
 :root, :root[data-theme="dark"], :root[data-theme="light"] {
@@ -1460,12 +1461,11 @@ select option { background: var(--surface); color: var(--text); }
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   color: #fff;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;   /* 고정폭 글꼴 대신 본문 글꼴(2026-11-20) */
+  font-size: 10.5px;
   font-weight: 600;
-  padding: .14rem .5rem;
+  padding: .14rem .45rem;
   border-radius: 2px;
-  letter-spacing: .03em;
   line-height: 1.3;
 }
 .hist-card-body {
@@ -1527,16 +1527,15 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   padding-top: .25rem;
 }
 .hist-card-date {
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--muted);
-  letter-spacing: .01em;
 }
 /* 좌하단 #id(내부 DB item_id) — 클릭하면 복사(2026-10-10, sa·td·wm과 같은 기능) */
 /* 두 줄: 날짜 위, id 아래(2026-10-10 사용자 지시) */
 .hist-card-left { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; line-height: 1.25; }
 .hist-card-id {
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--muted);
   cursor: pointer;
@@ -1571,24 +1570,6 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   transform: translateY(-1px);
 }
 .hist-icon-btn svg { display: block; }
-.hist-icon-btn-summary {
-  color: var(--highlight);
-  border-color: var(--highlight);
-  background: var(--highlight-soft);
-}
-.hist-icon-btn-summary:hover {
-  background: oklch(from var(--highlight) l c h / .25);
-  color: var(--highlight);
-}
-.hist-icon-btn-youtube {
-  color: #c00;
-}
-[data-theme="dark"] .hist-icon-btn-youtube { color: #ff4d4d; }
-.hist-icon-btn-youtube:hover {
-  color: #fff;
-  background: #c00;
-  border-color: #c00;
-}
 .hist-icon-btn:disabled {
   opacity: .3;
   cursor: not-allowed;
@@ -1597,6 +1578,20 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 /* ── 읽음 여부 ── */
 .hist-card-unread {
   border-left: 3px solid var(--highlight);
+}
+/* 읽은 카드는 흐리게(2026-11-20 — 전엔 빨간 점만 달랐다). 올려놓으면 원래대로 */
+.hist-card:not(.hist-card-unread) .hist-thumb { opacity: .55; }
+.hist-card:not(.hist-card-unread) .hist-card-title { color: var(--muted); font-weight: 500; }
+.hist-card:not(.hist-card-unread):hover .hist-thumb { opacity: 1; }
+.hist-card:not(.hist-card-unread):hover .hist-card-title { color: var(--text); }
+/* 번역 제목 아래 원제 한 줄 */
+.hist-card-orig {
+  margin-top: -.3rem;
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hist-unread-dot {
   width: 7px; height: 7px;
@@ -1624,14 +1619,6 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   background: oklch(0.5 0.2 22 / .08);
   border-color: #fca5a5;
   opacity: 1;
-}
-.hist-icon-btn-delete {
-  color: var(--muted);
-}
-.hist-icon-btn-delete:hover {
-  color: #dc2626;
-  background: oklch(0.5 0.2 22 / .08);
-  border-color: #fca5a5;
 }
 .hf-unread-btn {
   height: 28px;
@@ -2339,10 +2326,10 @@ header h1 { font-size: 15px; }
 .history-filter-primary { flex: 1 1 620px; }
 .history-filter-primary .hf-title-wrap { min-width: 140px; }
 .history-filter-state,
-.history-filter-manage {
+.history-filter-count {
   flex: 0 0 auto; padding-left: .75rem; border-left: 1px solid var(--border);
 }
-.history-filter-manage .history-count { min-width: 38px; }
+.history-filter-count .history-count { min-width: 38px; }
 .history-filter-row .btn-sm,
 .history-filter-row .hf-uploader,
 .history-filter-row .hf-sort-toggle,
@@ -2352,6 +2339,14 @@ header h1 { font-size: 15px; }
   background: var(--surface);
 }
 .history-filter-row .hf-title { border-color: var(--border); }
+/* 켜진 필터는 색을 채운다(2026-11-20) — 위 규칙이 바탕색을 덮어 글자색만 달라 보였다 */
+.history-filter-row .hf-unread-btn.active {
+  background: var(--highlight); border-color: var(--highlight); color: #fff; font-weight: 600;
+}
+.history-filter-row .hf-unread-btn.active:hover { border-color: var(--highlight); filter: brightness(.95); }
+.history-filter-row .hf-uploader-btn.active {
+  background: var(--highlight-soft); border-color: var(--highlight); font-weight: 600;
+}
 .history-filter-row button:hover,
 .history-filter-row select:hover { border-color: var(--border-strong); }
 
@@ -2372,9 +2367,6 @@ header h1 { font-size: 15px; }
 .hist-icon-btn {
   width: 30px; height: 30px; border-color: transparent;
   border-radius: var(--radius-sm); background: var(--surface2);
-}
-.hist-icon-btn-summary {
-  color: var(--highlight); border-color: transparent; background: var(--highlight-soft);
 }
 .hist-bm-btn { border-radius: var(--radius); }
 .hist-thumb-dur { border-radius: 5px; }
@@ -2568,7 +2560,7 @@ header h1 { font-size: 15px; }
   .history-filter-row { flex-wrap: wrap; }
   .history-filter-primary { flex-basis: 100%; }
   .history-filter-state { padding-left: 0; border-left: 0; }
-  .history-filter-manage { margin-left: auto; }
+  .history-filter-count { margin-left: auto; }
 }
 @media (max-width: 980px) {
   .sum-panel-hdr { flex-wrap: wrap; }
@@ -2634,8 +2626,6 @@ header h1 { font-size: 15px; }
 .term-excl-add { padding: 6px 12px; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; background: var(--surface, #fff); cursor: pointer; font: inherit; font-size: .85rem; }
 
 /* 텍스트 버튼 안의 선 아이콘(채널 모니터 톱니 — wm 설정 버튼과 같은 그림) */
-.btn-with-icon { display: inline-flex; align-items: center; gap: 5px; }
-.btn-with-icon .btn-icon { flex: 0 0 auto; }
 
 /* 설정 > 채널 탭: 목록은 channel-list.js(공용)가 그린다 — 옛 ul 목록 상자 규칙을 걷어낸다 */
 #channels-list.chl { display: flex; gap: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }

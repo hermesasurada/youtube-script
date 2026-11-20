@@ -859,6 +859,14 @@ def test_history_api_uses_lightweight_ids_and_revision(tmp_path, monkeypatch):
     assert marked["ok"] is True and marked["revision"] != payload["revision"]
     assert client.post("/summary/content", json={"item_id": item["item_id"]}).get_json()["is_read"] is True
 
+    # 이력 카드는 번역 제목을 크게 보인다(2026-11-20) — 목록에 title_ko가 실리고, 번역이 붙으면 revision이 바뀐다
+    assert item["title_ko"] == ""
+    before = client.get("/history").get_json()["revision"]
+    assert db.set_title_ko("LIGHTAPI01", "가벼운 이력")
+    after = client.get("/history").get_json()
+    assert after["revision"] != before
+    assert next(i for i in after["items"] if i["item_id"] == item["item_id"])["title_ko"] == "가벼운 이력"
+
 
 def test_history_read_update_does_not_rebuild_fts():
     db.init()

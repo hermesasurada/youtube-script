@@ -1075,6 +1075,73 @@
     return m ? `${m[1]}-${m[2]}-${m[3]}` : s;
   }
 
+  /* ── 이력 카드 공용 표기(2026-11-20 사용자 승인 디자인 개선 — PC·폰·요약 메타가 서로 달랐다) ── */
+  /** YYYYMMDD·YYYY-MM-DD·YYYY/MM/DD → "YY.MM.DD"(요약 메타와 같은 표기). 그 외는 원본. */
+  function fmtDateShort(d) {
+    const m = String(d || '').match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
+    return m ? `${m[1].slice(2)}.${m[2]}.${m[3]}` : String(d || '');
+  }
+  /** 초 → "12:24"·"1:02:03"(영상 길이 배지 — PC·폰·영상 모음 공통). */
+  function fmtClock(secs) {
+    if (!secs || secs <= 0) return '';
+    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), x = Math.floor(secs % 60);
+    const ss = String(x).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+  }
+  /** 카드 제목 — 번역 제목이 있으면 그것을 크게, 원제를 아래 작게. 반환 {main, orig}(orig는 없으면 ''). */
+  function cardTitles(item) {
+    const ko = (item.title_ko || '').trim(), t = item.title || '';
+    return ko && ko !== t ? { main: ko, orig: t } : { main: t, orig: '' };
+  }
+  /** 카드 ⋯ 메뉴 — 덜 쓰는 동작(전사·YouTube·삭제)을 한 곳에(블로그 발행 메뉴와 같은 모양).
+   *  items: [{label, onClick, danger, disabled}] */
+  function openCardMenu(anchorEl, items) {
+    if (typeof document === 'undefined') return;
+    const had = anchorEl._cardMenu && anchorEl._cardMenu.isConnected;
+    document.querySelectorAll('.ys-blog-menu').forEach(m => m.remove());
+    if (had) { anchorEl._cardMenu = null; return; }          // 같은 버튼을 다시 누르면 닫기
+    const menu = document.createElement('div');
+    menu.className = 'ys-blog-menu ys-card-menu';
+    menu.setAttribute('role', 'menu');
+    function close() {
+      menu.remove();
+      anchorEl._cardMenu = null;
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onOut, true);
+      window.removeEventListener('scroll', close, true);
+    }
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); anchorEl.focus(); } }
+    function onOut(e) { if (!menu.contains(e.target) && !anchorEl.contains(e.target)) close(); }
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ys-blog-menu-item' + (it.danger ? ' danger' : '');
+      b.setAttribute('role', 'menuitem');
+      b.disabled = !!it.disabled;
+      const t = document.createElement('span');
+      t.className = 'ys-blog-menu-label';
+      t.textContent = it.label;
+      b.appendChild(t);
+      if (!it.disabled) b.onclick = e => { e.stopPropagation(); close(); it.onClick(); };
+      menu.appendChild(b);
+    }
+    menu.addEventListener('click', e => e.stopPropagation());   // 카드 클릭(요약 열기)으로 번지지 않게
+    document.body.appendChild(menu);
+    anchorEl._cardMenu = menu;
+    const r = anchorEl.getBoundingClientRect();
+    const h = menu.offsetHeight, w = menu.offsetWidth;
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = r.top - h - 6;
+    menu.style.top = Math.max(8, top) + 'px';
+    menu.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + 'px';
+    setTimeout(() => {
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('pointerdown', onOut, true);
+      window.addEventListener('scroll', close, true);
+    }, 0);
+    return menu;
+  }
+
   /** YouTube URL → videoId ('' if 추출 실패). */
   function ytVideoId(url) {
     if (!url) return '';
@@ -2043,6 +2110,10 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
     escapeHtml,
     attrEscape,
     fmtDate,
+    fmtDateShort,
+    fmtClock,
+    cardTitles,
+    openCardMenu,
     ytVideoId,
     apiMarkRead,
     apiBookmark,

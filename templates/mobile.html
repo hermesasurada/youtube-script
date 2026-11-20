@@ -16,7 +16,6 @@
 <body>
   <header class="topbar">
     <h1>유튜브 전사내역</h1>
-    <span class="count" id="count">—</span>
     <a class="icon-btn" id="collections-btn" href="/collections" aria-label="영상 모음" title="영상 모음"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M10 8.5v4l3.5-2z"/><path d="M6 20h12"/></svg></a>
     <button class="icon-btn" id="queue-btn" onclick="openQueueM()" aria-label="처리 큐">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -48,6 +47,16 @@
             aria-pressed="false" aria-label="안 읽은 영상만 보기" title="미읽음만">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
+  </div>
+
+  <!-- 건수 · 켜진 필터(눌러서 해제) · 보기 전환(카드/목록) — 2026-11-20 -->
+  <div class="list-bar">
+    <span class="count" id="count">—</span>
+    <span class="filter-chips" id="filter-chips"></span>
+    <div class="view-toggle" role="group" aria-label="보기 방식">
+      <button type="button" id="view-card-btn" onclick="setListView('card')" aria-pressed="true" aria-label="카드로 보기" title="카드로 보기"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/></svg></button>
+      <button type="button" id="view-list-btn" onclick="setListView('list')" aria-pressed="false" aria-label="목록으로 보기" title="목록으로 보기"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="4" rx="1"/><path d="M12 6h9"/><rect x="3" y="10" width="6" height="4" rx="1"/><path d="M12 12h9"/><rect x="3" y="16" width="6" height="4" rx="1"/><path d="M12 18h9"/></svg></button>
+    </div>
   </div>
 
   <div class="ptr" id="ptr"><span id="ptr-text">아래로 당겨 새로고침</span></div>

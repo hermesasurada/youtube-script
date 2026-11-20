@@ -1,12 +1,9 @@
 // 모바일 이력 화면(/m) 로직 — 2026-11-16 리팩토링 3단계에서 templates/mobile.html 인라인 <script>를 옮겼다.
 // 공용 기능은 common.js(window.YS). 이 파일은 일반 <script>로 실려 전역 함수(onclick 등)를 그대로 쓴다.
 const SVG = {
-  summary:    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3V2z"/><path d="M10 2v3h3"/><path d="M5.5 8h5M5.5 10.5h5M5.5 6h2.5"/></svg>',
-  transcript: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7"/></svg>',
-  youtube:    '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14.7 4.4a1.85 1.85 0 0 0-1.3-1.3C12.2 2.8 8 2.8 8 2.8s-4.2 0-5.4.3A1.85 1.85 0 0 0 1.3 4.4 19.4 19.4 0 0 0 1 8a19.4 19.4 0 0 0 .3 3.6 1.85 1.85 0 0 0 1.3 1.3c1.2.3 5.4.3 5.4.3s4.2 0 5.4-.3a1.85 1.85 0 0 0 1.3-1.3A19.4 19.4 0 0 0 15 8a19.4 19.4 0 0 0-.3-3.6zM6.6 10.4V5.6L10.7 8z"/></svg>',
+  more:       '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>',
   eye:        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
   eye_off:    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
-  delete:     '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>',
 };
 
 const PAGE = 20;
@@ -42,21 +39,6 @@ const $ = id => document.getElementById(id);
 const esc = s => YS.escapeHtml(s);
 const attrEsc = s => YS.attrEscape(s);
 const ytVideoId = url => YS.ytVideoId(url);
-const fmtDate = d => YS.fmtDate(d);
-
-function fmtDur(secs) {
-  if (!secs || secs <= 0) return '';
-  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);
-  if (h) return `${h}시간 ${m}분`;
-  if (m) return s ? `${m}분 ${s}초` : `${m}분`;
-  return `${s}초`;
-}
-function fmtDurBadge(secs) {
-  if (!secs || secs <= 0) return '';
-  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);
-  const mm = String(m).padStart(2,'0'), ss = String(s).padStart(2,'0');
-  return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
-}
 
 async function loadHistory(force) {
   $('state').textContent = '로드 중…';
@@ -86,7 +68,8 @@ function applyFilter() {
   FILTERED = ALL.filter(i => {
     if (YS.isPendingDelete(i.item_id)) return false;   // 되돌리기 대기 중인 삭제
     if (_uploader && i.uploader !== _uploader) return false;
-    if (q && !(i.title||'').toLowerCase().includes(q) && !(i.uploader||'').toLowerCase().includes(q)) return false;
+    if (q && !(i.title||'').toLowerCase().includes(q) && !(i.title_ko||'').toLowerCase().includes(q)
+          && !(i.uploader||'').toLowerCase().includes(q)) return false;
     if (_unreadOnly && i.is_read) return false;
     if (_bookmarkOnly && !i.bookmark) return false;
     if (_distillOnly && !(i.distill && YS.withinRecentDays(i, 7))) return false;   // 증류 대상 + 게시일 7일 이내
@@ -103,7 +86,42 @@ function applyFilter() {
   appendPage();
   $('count').textContent = `${FILTERED.length}건`;
   _paintUploaderBtnM();
+  _paintFilterChips();
 }
+
+/* 켜진 필터를 글자 칩으로(2026-11-20) — 검색 줄 버튼은 아이콘뿐이라 무엇이 켜졌는지 알기 어려웠다. 누르면 해제 */
+function _paintFilterChips() {
+  const chips = [];
+  if (_uploader)     chips.push(['uploader', _uploader]);
+  if (_unreadOnly)   chips.push(['unread', '미읽음만']);
+  if (_bookmarkOnly) chips.push(['bookmark', '북마크만']);
+  if (_distillOnly)  chips.push(['distill', '증류만']);
+  $('filter-chips').innerHTML = chips.map(([k, label]) =>
+    `<button type="button" class="filter-chip" data-filter="${k}" aria-label="${attrEsc(label)} 필터 끄기"><span>${esc(label)}</span><b aria-hidden="true">✕</b></button>`).join('');
+}
+document.getElementById('filter-chips').addEventListener('click', e => {
+  const b = e.target.closest('.filter-chip');
+  if (!b) return;
+  const k = b.dataset.filter;
+  if (k === 'uploader') { _uploader = ''; _saveUnread(); applyFilter(); }
+  else if (k === 'unread') toggleUnreadFilter();
+  else if (k === 'bookmark') toggleBookmarkFilter();
+  else if (k === 'distill') toggleDistillFilter();
+});
+
+/* 보기 방식 — 카드(썸네일 크게) / 목록(썸네일 작게, 한 화면에 여러 개). 저장은 localStorage ytMobileView */
+let _listView = localStorage.getItem('ytMobileView') === 'list' ? 'list' : 'card';
+function setListView(v) {
+  _listView = v === 'list' ? 'list' : 'card';
+  try { localStorage.setItem('ytMobileView', _listView); } catch { /* 저장 불가 — 이번 화면에만 적용 */ }
+  _paintListView();
+}
+function _paintListView() {
+  $('grid').classList.toggle('compact', _listView === 'list');
+  $('view-card-btn').setAttribute('aria-pressed', String(_listView === 'card'));
+  $('view-list-btn').setAttribute('aria-pressed', String(_listView === 'list'));
+}
+_paintListView();
 
 /* ── 채널 선택(2026-10-11 사용자 지시, 데스크톱 팝업과 같은 내용): 채널마다 미읽음·전체 건수 ── */
 function _paintUploaderBtnM() {
@@ -275,7 +293,7 @@ function renderCard(item) {
     ? `<img class="hist-thumb" src="/thumb/${encodeURIComponent(vid)}" alt="" loading="lazy" data-vid="${attrEsc(vid)}" onerror="_thumbFallback(this)">`
     : `<div class="hist-thumb-placeholder">썸네일 없음</div>`;
   const dur = item.duration
-    ? `<span class="hist-thumb-dur">${fmtDurBadge(item.duration)}</span>` : '';
+    ? `<span class="hist-thumb-dur">${YS.fmtClock(item.duration)}</span>` : '';
   // 채널명 클릭 = 같은 채널로 좁히기. 모바일은 검색창이 하나뿐이라 거기에 채널명을 넣는다
   // (미읽음·북마크 필터는 그대로 유지된다).
   const uploader = item.uploader && item.uploader !== '—'
@@ -288,20 +306,14 @@ function renderCard(item) {
     data-id="${item.item_id}" data-on="${item.bookmark ? '1' : '0'}"
     onclick="event.stopPropagation();toggleBookmark(this)"
     aria-label="${item.bookmark ? '북마크 해제' : '북마크'}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>`;
-  const txtBtn = item.has_txt
-    ? `<button class="hist-icon-btn" data-id="${item.item_id}" data-title="${attrEsc(item.title)}" onclick="event.stopPropagation();openTranscript(Number(this.dataset.id),this.dataset.title)" aria-label="전사">${SVG.transcript}</button>`
-    : `<button class="hist-icon-btn" disabled aria-label="전사 없음">${SVG.transcript}</button>`;
-  const ytBtn = item.webpage_url
-    ? `<a class="hist-icon-btn hist-icon-btn-youtube" href="${attrEsc(item.webpage_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" aria-label="YouTube">${SVG.youtube}</a>`
-    : `<button class="hist-icon-btn hist-icon-btn-youtube" disabled aria-label="URL 없음">${SVG.youtube}</button>`;
   const readBtn = `<button class="hist-icon-btn hist-icon-btn-read${item.is_read ? ' is-read' : ''}"
     data-id="${item.item_id}" data-read="${item.is_read ? '1' : '0'}"
     onclick="event.stopPropagation();toggleRead(this)"
     aria-label="${item.is_read ? '읽음' : '안읽음'}">${item.is_read ? SVG.eye_off : SVG.eye}</button>`;
-  const delBtn = `<button class="hist-icon-btn hist-icon-btn-delete"
-    data-id="${item.item_id}" data-title="${attrEsc(item.title)}"
-    onclick="event.stopPropagation();deleteCard(this)"
-    aria-label="삭제">${SVG.delete}</button>`;
+  // 덜 쓰는 동작(전사·YouTube·삭제)은 ⋯ 메뉴로(2026-11-20) — 삭제를 자주 누르는 버튼 옆에서 뗀다
+  const moreBtn = `<button class="hist-icon-btn hist-icon-btn-more" data-id="${item.item_id}"
+    onclick="event.stopPropagation();openCardMenuM(this)" aria-label="더 보기 — 전사 · YouTube · 삭제" aria-haspopup="menu">${SVG.more}</button>`;
+  const T = YS.cardTitles(item);       // 번역 제목을 크게, 원제는 아래 작게
 
   const unreadDot = !item.is_read ? '<span class="hist-unread-dot"></span>' : '';
   const unreadClass = !item.is_read ? ' hist-card-unread' : '';
@@ -311,14 +323,33 @@ function renderCard(item) {
   return `<article class="hist-card${unreadClass}${clickable}">
     <div class="hist-thumb-wrap">${thumb}${dur}</div>
     <div class="hist-card-body">
-      <h3 class="hist-card-title">${unreadDot}${esc(item.title)}</h3>
+      <h3 class="hist-card-title">${unreadDot}${esc(T.main)}</h3>
+      ${T.orig ? `<div class="hist-card-orig">${esc(T.orig)}</div>` : ''}
       <div class="hist-card-meta">${uploader}</div>
       <div class="hist-card-footer">
-        <span class="hist-card-left"><span class="hist-card-date">${fmtDate(histDisplayDate(item))}</span><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span></span>
-        <div class="hist-card-actions">${readBtn}${bmBtn}${txtBtn}${ytBtn}${delBtn}</div>
+        <span class="hist-card-left"><span class="hist-card-date">${YS.fmtDateShort(histDisplayDate(item))}</span><span class="hist-card-id" data-id="${item.item_id}" title="클릭하면 id 복사">#${item.item_id}</span></span>
+        <div class="hist-card-actions">${readBtn}${bmBtn}${moreBtn}</div>
       </div>
     </div>
   </article>`;
+}
+
+/* 카드 ⋯ 메뉴 — 목록 보기에서는 북마크 버튼이 숨겨져 있어 메뉴에 함께 넣는다 */
+function openCardMenuM(btn) {
+  const id = Number(btn.dataset.id);
+  const item = ALL.find(i => i.item_id === id);
+  if (!item) return;
+  const items = [
+    { label: '전사 보기', disabled: !item.has_txt, onClick: () => openTranscript(id, item.title) },
+    { label: 'YouTube에서 열기', disabled: !item.webpage_url,
+      onClick: () => window.open(item.webpage_url, '_blank', 'noopener') },
+    { label: '삭제', danger: true, onClick: () => deleteCard({ dataset: { id: String(id) } }) },
+  ];
+  if (_listView === 'list') {
+    const bm = btn.closest('.hist-card').querySelector('.hist-icon-btn-bm');
+    items.unshift({ label: item.bookmark ? '북마크 해제' : '북마크', onClick: () => toggleBookmark(bm) });
+  }
+  YS.openCardMenu(btn, items);
 }
 
 async function toggleRead(btn) {
@@ -396,6 +427,24 @@ function _updateReadProgress() {
 }
 document.getElementById('modal-body').addEventListener('scroll', _updateReadProgress, { passive: true });
 
+/* 요약을 아래로 읽어 내려갈 때는 하단 버튼 줄을 숨기고 제목의 원제 줄을 접는다(2026-11-20 — 고정 영역이
+   화면의 4분의 1이었다). 위로 올리거나 맨 위·맨 끝에 닿으면 다시 보인다. 접고 펴면 본문 높이가 달라져
+   브라우저가 스크롤 위치를 보정하면서 반대 방향 이벤트가 한 번 올 수 있어, 바꾼 직후 0.3초는 판정을 쉰다. */
+let _readLastTop = 0, _readLockUntil = 0;
+function _updateReadingChrome() {
+  const el = $('modal-body'), m = $('modal');
+  const top = el.scrollTop, d = top - _readLastTop;
+  _readLastTop = top;
+  if (!el.classList.contains('markdown')) { m.classList.remove('reading'); return; }
+  if (performance.now() < _readLockUntil) return;
+  const was = m.classList.contains('reading');
+  let next = was;
+  if (top < 60 || d < -8 || top + el.clientHeight >= el.scrollHeight - 40) next = false;
+  else if (d > 8) next = true;
+  if (next !== was) { m.classList.toggle('reading', next); _readLockUntil = performance.now() + 300; }
+}
+document.getElementById('modal-body').addEventListener('scroll', _updateReadingChrome, { passive: true });
+
 function openModal(title, kind = 'content') {
   $('modal-body').textContent = '로드 중…';
   $('modal-body').className = 'modal-body';
@@ -406,6 +455,8 @@ function openModal(title, kind = 'content') {
   $('modal-title').textContent = title || '';
   $('modal').classList.toggle('utility', kind === 'utility');
   $('read-progress').style.width = '0%';   // 열 때 진행바 초기화
+  $('modal').classList.remove('reading');
+  _readLastTop = 0;
   $('modal-bd').classList.add('open');
   $('modal').classList.add('open');
   document.body.style.overflow = 'hidden';

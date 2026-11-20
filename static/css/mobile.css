@@ -51,7 +51,6 @@
       border-bottom: 1px solid var(--border);
     }
     .topbar h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.01em; flex: 1; }
-    .topbar .count { font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); }
     .icon-btn {
       width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
       border: 1px solid transparent; border-radius: var(--radius); background: var(--surface2);
@@ -129,16 +128,32 @@
       .search .icon-toggle { width: 34px; }
       .search .sort-toggle { padding: 0 .45rem; }
     }
+    /* 켜진 필터는 색을 채운다(2026-11-20) — 옅은 바탕만으로는 켜졌는지 알기 어려웠다 */
     .icon-toggle.active {
-      color: var(--highlight);
+      color: #fff;
       border-color: var(--highlight);
-      background: var(--highlight-soft);
+      background: var(--highlight);
     }
-    .icon-toggle.active svg { fill: currentColor; fill-opacity: .2; }
+    .icon-toggle.active svg { fill: currentColor; fill-opacity: .25; }
+    #m-sort-btn.active { color: var(--highlight); background: var(--highlight-soft); }
     /* 정렬 방향은 항상 켜져 있는 상태라 채우지 않는다(방향만 바뀜) */
     #m-sort-btn.active svg { fill: none; }
     /* 정렬 기준이 기본값(전사처리일)이 아닐 때 강조 */
     .sort-toggle.active { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
+
+    /* 건수 · 켜진 필터 칩 · 보기 전환(2026-11-20) */
+    .list-bar { display: flex; align-items: center; gap: .5rem; padding: .5rem .9rem 0; min-height: 36px; }
+    .list-bar .count { flex-shrink: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .filter-chips { flex: 1; min-width: 0; display: flex; gap: .3rem; overflow-x: auto; scrollbar-width: none; }
+    .filter-chips::-webkit-scrollbar { display: none; }
+    .filter-chip { flex: 0 0 auto; max-width: 11rem; height: 26px; padding: 0 .35rem 0 .6rem; display: inline-flex; align-items: center; gap: .3rem;
+      border: 0; border-radius: 999px; background: var(--highlight); color: #fff; font: inherit; font-size: 12px; font-weight: 600; }
+    .filter-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .filter-chip b { font-weight: 400; font-size: 10px; opacity: .8; padding: 0 .2rem; }
+    .view-toggle { flex-shrink: 0; margin-left: auto; display: inline-flex; padding: 2px; border-radius: var(--radius-sm); background: var(--surface2); }
+    .view-toggle button { width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 4px; background: none; color: var(--muted); }
+    .view-toggle button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 
     /* PTR */
     .ptr {
@@ -179,8 +194,8 @@
     .hist-thumb-dur {
       position: absolute; right: .45rem; bottom: .45rem;
       background: rgba(0,0,0,.78); color: #fff;
-      font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
-      padding: .12rem .4rem; border-radius: 2px; letter-spacing: .02em;
+      font-variant-numeric: tabular-nums; font-size: 10.5px; font-weight: 600;
+      padding: .12rem .4rem; border-radius: 2px;
     }
     .hist-card-body { display: flex; flex-direction: column; gap: .5rem; padding: .8rem .9rem .85rem; flex: 1; }
     .hist-card-title {
@@ -195,9 +210,9 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
     }
     .hist-card-footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .15rem; }
-    .hist-card-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+    .hist-card-date { font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--muted); }
     .hist-card-left { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; line-height: 1.25; }
-    .hist-card-id { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+    .hist-card-id { font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
     .hist-card-id.copied { color: var(--accent, #16a34a); }
     .hist-card-actions { display: flex; gap: .35rem; }
     .hist-icon-btn {
@@ -209,9 +224,6 @@
     }
     .hist-icon-btn:active { background: var(--surface2); color: var(--text); }
     .hist-icon-btn svg { display: block; }
-    .hist-icon-btn-summary { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
-    .hist-icon-btn-youtube { color: #c00; }
-    :root[data-theme="dark"] .hist-icon-btn-youtube { color: #ff4d4d; }
     .hist-icon-btn:disabled, .hist-icon-btn[disabled] { opacity: .3; pointer-events: none; }
 
     /* 읽음 여부 */
@@ -227,8 +239,27 @@
     }
     .hist-icon-btn-read { color: var(--muted); }
     .hist-icon-btn-read.is-read { opacity: .45; }
-    .hist-icon-btn-delete { color: var(--muted); }
-    .hist-icon-btn-delete:active { color: #dc2626; background: oklch(0.5 0.2 22 / .08); }
+    /* 읽은 카드는 흐리게(2026-11-20 — 전엔 빨간 점만 달랐다) */
+    .hist-card:not(.hist-card-unread) .hist-thumb { opacity: .55; }
+    .hist-card:not(.hist-card-unread) .hist-card-title { color: var(--muted); font-weight: 500; }
+    /* 번역 제목 아래 원제 한 줄 */
+    .hist-card-orig { margin-top: -.3rem; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* 목록 보기(2026-11-20): 썸네일을 왼쪽에 작게 — 한 화면에 6~7개 */
+    .hist-grid.compact { gap: .5rem; }
+    .hist-grid.compact .hist-card { flex-direction: row; align-items: stretch; }
+    .hist-grid.compact .hist-thumb-wrap { flex: 0 0 124px; align-self: flex-start; aspect-ratio: 16/9; margin: .5rem 0 .5rem .5rem; border-radius: 6px; }
+    .hist-grid.compact .hist-thumb-dur { right: .25rem; bottom: .25rem; font-size: 10px; padding: .05rem .3rem; }
+    .hist-grid.compact .hist-card-body { min-width: 0; gap: .2rem; padding: .5rem .6rem .45rem; }
+    .hist-grid.compact .hist-card-title { font-size: 13.5px; line-height: 1.35; }
+    .hist-grid.compact .hist-card-orig,
+    .hist-grid.compact .hist-card-id,
+    .hist-grid.compact .hist-icon-btn-bm { display: none; }
+    .hist-grid.compact .hist-card-meta { font-size: 11.5px; min-width: 0; flex-wrap: nowrap; }
+    .hist-grid.compact .hist-card-footer { margin-top: auto; }
+    .hist-grid.compact .hist-card-date { font-size: 11px; }
+    .hist-grid.compact .hist-card-actions { gap: .25rem; }
+    .hist-grid.compact .hist-icon-btn { width: 30px; height: 28px; }
 
     /* 미읽음 필터 버튼 */
     .unread-filter-btn {
@@ -481,7 +512,6 @@
     /* Neutral Editorial: 반복 테두리를 줄이고 상태/주요 행동에만 강조색을 쓴다. */
     .hist-card { border-radius: 10px; }
     .hist-icon-btn { border-color: transparent; background: var(--surface2); }
-    .hist-icon-btn-summary { border-color: transparent; }
     .modal-hdr { padding: .65rem .85rem; }
     .ch-queue { border: 0; background: var(--surface2); }
     /* 관리 화면: 큐·채널 모니터를 본문 리더와 분리한 간결한 유틸리티 UI */
@@ -553,6 +583,9 @@
     }
     .summary-actions::-webkit-scrollbar { display: none; }
     .summary-actions[hidden] { display: none; }
+    /* 아래로 읽는 중: 하단 버튼 줄 숨김 + 제목의 원제 줄 접기(mobile.js _updateReadingChrome) */
+    .modal.reading .summary-actions { display: none; }
+    .modal.reading .modal-body.markdown > .sum-head-sticky .sum-title-orig { display: none; }
     .summary-action-btn,
     .summary-actions .distill-ctrl {
       flex: 0 0 auto; height: 34px; padding: 0 .65rem;

@@ -430,7 +430,7 @@ _ITEM_COLUMNS = """
 """
 
 _HISTORY_COLUMNS = """
-    rowid AS item_id, date, upload_date, stem, title, uploader, channel,
+    rowid AS item_id, date, upload_date, stem, title, title_ko, uploader, channel,
     duration, webpage_url, channel_url, has_txt,
     CASE WHEN summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
     is_read, bookmark, distill
@@ -463,6 +463,8 @@ def _row_to_history_item(r: sqlite3.Row) -> dict:
         "upload_date":   r["upload_date"] or "",
         "stem":          r["stem"],
         "title":         r["title"] or r["stem"],
+        # 번역 제목(없으면 빈 문자열) — 이력 카드가 번역 제목을 크게, 원제를 작게 보인다(2026-11-20)
+        "title_ko":      (r["title_ko"] or "").strip(),
         "uploader":      r["uploader"] or r["channel"] or "—",
         "duration":      float(r["duration"] or 0),
         "webpage_url":   r["webpage_url"] or "",
@@ -540,6 +542,7 @@ def history_revision() -> str:
                   COALESCE(SUM(CASE WHEN bookmark != 0 THEN rowid ELSE 0 END), 0) AS marks,
                   COALESCE(SUM(CASE WHEN summary_path IS NOT NULL THEN rowid ELSE 0 END), 0) AS summaries,
                   COALESCE(SUM(CASE WHEN distill IS NOT NULL THEN rowid * (distill + 1) ELSE 0 END), 0) AS ds,
+                  COALESCE(SUM(LENGTH(COALESCE(title_ko, ''))), 0) AS tko,
                   (SELECT COALESCE(SUM(CASE WHEN COALESCE(distill, 1) = 0 THEN id ELSE 0 END), 0)
                           || '.' || COALESCE(SUM(id * LENGTH(COALESCE(title, ''))), 0)
                      FROM channels) AS chds
@@ -547,7 +550,7 @@ def history_revision() -> str:
     ).fetchone()
     # 증류 대상 필터(2026-11-07)가 쓰는 값 — 영상 오버라이드·채널 증류 설정이 바뀌어도 목록을 다시 받는다
     return (f'{r["n"]}:{float(r["indexed"]):.6f}:{r["ids"]}:{r["reads"]}'
-            f':{r["marks"]}:{r["summaries"]}:{r["ds"]}:{r["chds"]}')
+            f':{r["marks"]}:{r["summaries"]}:{r["ds"]}:{r["chds"]}:{r["tko"]}')
 
 
 def get_history_item(item_id: int) -> dict | None:
@@ -583,7 +586,7 @@ def search(q: str, limit: int = 500, unread_only: bool = False) -> list[dict]:
     unread_clause = "AND i.is_read = 0" if unread_only else ""
     rows = db._conn().execute(
         f"""
-        SELECT i.rowid AS item_id, i.date, i.upload_date, i.stem, i.title,
+        SELECT i.rowid AS item_id, i.date, i.upload_date, i.stem, i.title, i.title_ko,
                i.uploader, i.channel, i.duration, i.webpage_url, i.channel_url,
                i.has_txt,
                CASE WHEN i.summary_path IS NOT NULL THEN 1 ELSE 0 END AS has_summary,
