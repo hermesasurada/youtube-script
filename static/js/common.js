@@ -2152,6 +2152,10 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
 .kf-strip figure{margin:0;flex:0 0 auto;width:280px;border:1px solid var(--border,#e5e5e5);border-radius: 2px;overflow:hidden;background:var(--surface,#fff);box-shadow:0 1px 3px rgba(0,0,0,.07);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;}
 .kf-strip figure:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.16);border-color:var(--border-strong,var(--border,#ccc));}
 .kf-strip img{display:block;width:100%;height:158px;object-fit:cover;cursor:zoom-in;}
+/* 세로 영상(쇼츠 등) 캡처는 비율을 유지한다(2026-11-20 사용자 지시, yt 2076) — 16:9 상자에 넣으면 위아래가 잘렸다.
+   figure.kf-portrait는 이미지가 실린 뒤 _markPortraitKf가 붙인다. 높이를 정하고 폭은 비율대로. */
+.kf-strip figure.kf-portrait{width:auto;}
+.kf-strip figure.kf-portrait img{width:auto;height:min(420px,62vh);aspect-ratio:auto;object-fit:contain;}
 /* 캡처 아래 캡션은 보이지 않는다(2026-10-24 사용자 지시) — 예전 요약 md에 남은 figcaption도 화면에서 숨긴다 */
 .kf-strip figcaption{display:none;}
 .kf-strip figcaption b{color:var(--highlight,var(--accent,#2563eb));font-family:ui-monospace,monospace;font-size:.68rem;font-weight:600;flex-shrink:0;background:var(--highlight-soft,rgba(99,102,241,.1));padding:.06rem .38rem;border-radius: 2px;}
@@ -2331,6 +2335,18 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
     });
     lbPrev.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx - 1); });
     lbNext.addEventListener("click", (e) => { e.stopPropagation(); lbShow(lbIdx + 1); });
+
+    // 세로 캡처 표시 — load는 거품이 안 올라와 캡처 단계에서 받는다(어느 화면에서 그린 요약이든 한 곳에서)
+    const _markPortraitKf = (im) => {
+      if (!im.naturalWidth) return;
+      const fig = im.closest(".kf-strip figure");
+      if (fig) fig.classList.toggle("kf-portrait", im.naturalHeight > im.naturalWidth * 1.05);
+    };
+    document.addEventListener("load", (e) => {
+      const im = e.target;
+      if (im && im.tagName === "IMG" && im.closest && im.closest(".kf-strip")) _markPortraitKf(im);
+    }, true);
+    document.querySelectorAll(".kf-strip img").forEach((im) => { if (im.complete) _markPortraitKf(im); });
 
     // 이벤트 위임: 스트립 이미지 클릭 → 같은 섹션 이미지들로 라이트박스 구성
     document.addEventListener("click", (e) => {

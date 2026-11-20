@@ -1961,6 +1961,8 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .imm-gallery .kf-strip { display: flex; flex-direction: column; gap: 1rem; overflow: visible; margin: 0; padding: 0; }
 .imm-gallery .kf-strip figure { width: 100%; }
 .imm-gallery .kf-strip img { width: 100%; height: auto; }
+.imm-gallery .kf-strip figure.kf-portrait { width: 100%; }
+.imm-gallery .kf-strip figure.kf-portrait img { width: 100%; height: auto; max-height: none; }
 .imm-gallery .kf-strip figcaption { font-size: .8rem; padding: .5rem .75rem .55rem; }
 .imm-empty { color: var(--muted); font-size: .875rem; padding: 1rem; }
 /* PC라도 폭이 좁으면(2단 무리) 몰입 버튼 숨김 */
@@ -1987,6 +1989,8 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 #sum-panel-body .kf-strip { gap: .55rem; padding-left: 0; padding-right: 0; }
 #sum-panel-body .kf-strip figure { width: calc((100% - .55rem) / 2); }
 #sum-panel-body .kf-strip img { height: auto; aspect-ratio: 16 / 9; }
+#sum-panel-body .kf-strip figure.kf-portrait { width: auto; }
+#sum-panel-body .kf-strip figure.kf-portrait img { width: auto; height: min(420px, 62vh); aspect-ratio: auto; }
 .sum-md table { width: 100%; border-collapse: collapse; margin: .75rem 0 1.25rem; font-size: .875rem; }
 .sum-md th { background: var(--surface2); font-weight: 600; padding: .45rem .75rem; text-align: left; border: 1px solid var(--border); font-size: .8125rem; }
 .sum-md td { padding: .4rem .75rem; border: 1px solid var(--border); line-height: 1.55; vertical-align: top; }
