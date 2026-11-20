@@ -162,6 +162,12 @@ def test_schedule_overrides_upload_time_and_days_count_from_start(tmp_path, monk
     assert lisa["time"] == "09:40" and lisa["time_src"] == ""                     # 일정표 무대 시각(현지)
     assert days[2]["items"][0]["time_src"] == "upload"                           # 일정표에 없으면 업로드 시각
     assert days[2]["items"][0]["short_title"] == "Later Upload"                  # 행사 이름 뒤 꼬리까지 뗀다
+    # 2026-11-20: 제목에 행사 이름이 없거나 '| TomorrowX'로만 끝나는 강연은 include로 지정해 모은다
+    db.enqueue_video("2gdr2rt77l0", "https://youtu.be/r", "Apollo CEO Marc Rowan: The AI Build-Out | TomorrowX", "manual")
+    db.enqueue_video("dTA7PUyKTCA", "https://youtu.be/a", "Astera Labs CEO Jitendra Mohan: AI and Healthcare", "manual")
+    day1 = {it["yt_id"]: it for it in cv.items("tomorrowx-2026")["days"][0]["items"]}
+    assert day1["2gdr2rt77l0"]["short_title"] == "Apollo CEO Marc Rowan: The AI Build-Out" and day1["2gdr2rt77l0"]["time"] == "13:40"
+    assert day1["dTA7PUyKTCA"]["time"] == "11:55"
     # 시작일 기준이라 1일차 영상이 없어도 2일차는 2일차
     only_day2 = {"start": "2026-11-17"}
     assert cv.day_label(only_day2, "2026-11-18", 1) == "2일차"

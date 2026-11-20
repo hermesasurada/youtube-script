@@ -33,6 +33,9 @@ COLLECTIONS = {
         "title": "TomorrowX Summit 2026",
         "subtitle": "오스틴 Moody Center · 2026년 11월 17~18일",
         "match": "TomorrowX Summit",
+        "tail": "TomorrowX",        # 짧은 제목에서 떼는 꼬리 — '| TomorrowX'로만 끝나는 제목도 있다(Marc Rowan)
+        # 제목에 행사 이름이 없거나 다른 영상(공식 재생목록에 있는 강연) — 2026-11-20 사용자 지시 "투모로x 큐에 넣어"
+        "include": ("dTA7PUyKTCA", "2gdr2rt77l0"),   # Astera Labs Jitendra Mohan, Apollo Marc Rowan
         "playlist": "https://www.youtube.com/playlist?list=PLVfiEuj8EJp8",
         "tz": "America/Chicago",
         "start": "2026-11-17",
@@ -48,8 +51,19 @@ COLLECTIONS = {
             "6r3D-CMJkuI": "2026-11-17 10:35",   # Stan Druckenmiller
             "mwqV1Gpgcyg": "2026-11-17 11:00",   # Michael Dell
             "V-Hqi1DNzbE": "2026-11-17 11:25",   # Dina Powell McCormick
+            "dTA7PUyKTCA": "2026-11-17 11:55",   # Jitendra Mohan(Astera Labs)
             "Ed1V9Xz89Ic": "2026-11-17 12:20",   # Guillermo Rauch
+            "ufMUsXzT7qc": "2026-11-17 12:40",   # Lin Qiao(Fireworks)
             "UTueSKjzdto": "2026-11-17 13:10",   # Bret Johnsen
+            "2gdr2rt77l0": "2026-11-17 13:40",   # Marc Rowan(Apollo)
+            "AzJE-JfSVDQ": "2026-11-17 14:05",   # Andrew Feldman(Cerebras)
+            "4xDFP2V9WDA": "2026-11-17 14:30",   # Vibhav Altekar(Saronic)
+            "81WSxaPfxSA": "2026-11-17 14:50",   # Brian Armstrong(Coinbase)
+            "5Q7ZWzznzb8": "2026-11-17 15:35",   # Keller Rinaudo Cliffton(Zipline)
+            "aQJdIuVB6AU": "2026-11-17 16:15",   # Dylan Field(Figma)
+            "qtrgNfXVm7Y": "2026-11-17 17:05",   # Chase Lochmiller(Crusoe)
+            "vxcX6kMpB1Q": "2026-11-18 08:45",   # Laura Harrison(Valor) '20 Watts: Lessons from SpaceX and Tesla'
+            "tSpz-Fq_yNc": "2026-11-18 09:10",   # Jon Gray(Blackstone)
             "paMsNoG_hi8": "2026-11-18 13:40",   # Travis Kalanick
             "DY8clym2-jQ": "2026-11-18 17:30",   # Elon Musk(화상)
         },
@@ -156,10 +170,12 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
         return None
     conn = db._conn()
     like = _like(c["match"])
+    inc = tuple(c.get("include") or ())                # 제목에 행사 이름이 없는 영상은 yt_id로 지정
+    inc_sql = (" OR yt_id IN (%s)" % ",".join("?" * len(inc))) if inc else ""
     rows = conn.execute(
         "SELECT rowid AS item_id, yt_id, title, title_ko, duration, upload_date, is_read, bookmark,"
         " summary_path IS NOT NULL AS has_summary FROM items"
-        " WHERE title LIKE ? ESCAPE '\\'", (like,)).fetchall()
+        " WHERE (title LIKE ? ESCAPE '\\'" + inc_sql + ")", (like, *inc)).fetchall()
     seen, out = set(), []
     for r in rows:
         if not r["yt_id"] or r["yt_id"] in seen:
@@ -171,8 +187,8 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
                     "is_read": bool(r["is_read"]), "bookmark": bool(r["bookmark"]),
                     "has_summary": bool(r["has_summary"]), "state": "done"})
     for q in conn.execute(
-            "SELECT yt_id, title, status FROM watch_queue WHERE title LIKE ? ESCAPE '\\'"
-            " AND status IN ('pending','processing','deferred','failed','kf_retry')", (like,)).fetchall():
+            "SELECT yt_id, title, status FROM watch_queue WHERE (title LIKE ? ESCAPE '\\'" + inc_sql + ")"
+            " AND status IN ('pending','processing','deferred','failed','kf_retry')", (like, *inc)).fetchall():
         if q["yt_id"] in seen:
             continue
         seen.add(q["yt_id"])
@@ -184,8 +200,8 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
     tz = ZoneInfo(c.get("tz") or "UTC")
     schedule = c.get("schedule") or {}
     for it in out:
-        it["short_title"] = short_title(it["title"], c["match"])
-        ko = short_title(it["title_ko"], c["match"]) if it["title_ko"] else ""
+        it["short_title"] = short_title(it["title"], c.get("tail") or c["match"])
+        ko = short_title(it["title_ko"], c.get("tail") or c["match"]) if it["title_ko"] else ""
         if ko and it["short_title"] != it["title"].strip():   # 원제에서 행사 이름을 뗐으면 번역 제목도 마지막 '| …'를 뗀다
             ko = re.sub(r"\s*[|｜][^|｜]*$", "", ko).strip() or ko
         it["short_ko"] = ko if ko != it["short_title"] else ""     # 번역 제목(원제와 같으면 비움)
