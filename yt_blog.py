@@ -17,6 +17,30 @@ import logging
 
 log = logging.getLogger("yt-script")
 
+# 블로그로 내보내는 yt 요약에는 반드시 '유튜브' 태그(2026-11-20 사용자 지시) — 맨 앞에 두고 중복은 뺀다
+BLOG_REQUIRED_TAG = "유튜브"
+
+
+def _with_blog_tag(labels) -> list[str]:
+    out: list[str] = []
+    for l in (BLOG_REQUIRED_TAG, *(labels or [])):
+        l = str(l).strip()
+        if l and l not in out:
+            out.append(l)
+    return out[:20]
+
+
+def _blog_labels_for_update(blogger, post_id):
+    """다시 올릴 때 기존 태그에 '유튜브'가 없으면 붙인 목록, 이미 있으면 None(태그 그대로).
+    기존 태그를 못 읽으면 None — 태그 때문에 본문 갱신을 막지 않는다."""
+    try:
+        cur = list((blogger.get_post(post_id) or {}).get("labels") or [])
+    except Exception as e:  # noqa: BLE001
+        log.warning("blog labels read failed post=%s: %s", post_id, e)
+        return None
+    return None if BLOG_REQUIRED_TAG in cur else _with_blog_tag(cur)
+
+
 # 블로그 본문 생성 방식의 버전. 표시 형식을 바꾸면(각주 배치, 메모 모양 등) 이 값을 올려
 # 이미 발행된 글이 '수정 필요'로 잡히게 한다. 발행 시 items.blog_render_ver에 기록한다.
 BLOG_RENDER_VERSION = "2026-11-07-memo-card-2"

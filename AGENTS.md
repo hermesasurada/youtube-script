@@ -229,6 +229,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 
 - **발행 메뉴**(`YS.openBlogMenu`): 발행된 요약의 버튼은 `발행됨`이다. 머리 한 줄 `MM.DD HH:MM 게시`, 항목은 '블로그에서 보기', '지금 내용으로 수정'(꼬리표 `MM.DD HH:MM 변경`·`형식 변경`, 바뀐 것이 없으면 비활성), '삭제'(빨간 글씨).
 - **수정 활성 조건**(`yt_blog._blog_state`): 발행 이후 내용이 바뀌었거나(요약 파일 mtime·`summary_notes.updated_at`) 발행 당시 렌더 버전(`items.blog_render_ver`)이 현재 `BLOG_RENDER_VERSION`과 다를 때. 발행시각 기록이 없는 옛 글은 수정 가능으로 본다.
+- **태그 `유튜브` 필수**(2026-11-20 사용자 지시): 새 발행은 채널명 태그 앞에 `유튜브`를 붙이고(`yt_blog._with_blog_tag`), 수정 때는 기존 태그에 없을 때만 붙인다(`_blog_labels_for_update`, 태그를 못 읽어도 본문 수정은 진행). wm은 `뉴스`.
 - 수정은 `/history/publish-blog`에 `mode="update"`로 기존 `blog_post_id`의 제목·본문을 덮어쓴다(URL 유지, `blog_published_at` 갱신). 이미 발행된 글을 자동으로 갱신하지 않는다.
 - **블로그 본문 표시 형식을 바꾸면 `yt_blog.BLOG_RENDER_VERSION`을 올리고 서버를 재기동한다.** 안 올리면 발행된 글이 옛 모양으로 남고 수정 버튼도 비활성이라 되돌릴 방법이 없다.
 - **삭제**: `POST /history/delete-blog`가 `hermes_blogger.delete_post` 후 `db.clear_blog_publish`로 발행 기록을 비운다. 블로거에서 이미 지워진 글(404)과 post id 없는 옛 기록은 기록만 비우고, 그 밖의 실패는 기록을 둔다(앱과 블로그가 어긋나지 않게).

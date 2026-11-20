@@ -225,6 +225,7 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
     monkeypatch.setattr(db, "get_history_item", lambda i: item if int(i) == 6 else None)
     monkeypatch.setattr(db, "set_blog_publish", lambda *a: True)
     calls = []
+    cur_labels = ["채널"]
 
     class FakeBlogger:
         BloggerError = RuntimeError
@@ -240,8 +241,12 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
 
         @staticmethod
         def update_post(post_id, *, title=None, content=None, labels=None):
-            calls.append(("update", post_id, title))
+            calls.append(("update", post_id, title, labels))
             return {"url": "https://blog.example/p", "id": post_id}
+
+        @staticmethod
+        def get_post(post_id):
+            return {"labels": cur_labels}
 
     monkeypatch.setitem(sys.modules, "hermes_blogger", FakeBlogger)
     client = app.app.test_client()
@@ -253,7 +258,12 @@ def test_publish_endpoint_updates_existing_post_only_in_update_mode(tmp_path, mo
 
     d = client.post("/history/publish-blog", json={**body, "mode": "update"}).get_json()
     assert d["status"] == "updated" and d["url"] == "https://blog.example/p"
-    assert calls == [("update", "42", "제목")]
+    # 다시 올릴 때 기존 태그에 '유튜브'가 없으면 붙이고(2026-11-20), 이미 있으면 태그는 건드리지 않는다
+    assert calls == [("update", "42", "제목", ["유튜브", "채널"])]
+    cur_labels[:] = ["유튜브", "채널"]
+    calls.clear()
+    client.post("/history/publish-blog", json={**body, "mode": "update"})
+    assert calls == [("update", "42", "제목", None)]
 
     # 미발행 항목에 update를 걸면 거절한다
     item2 = dict(item, item_id=7, blog_url="", blog_post_id="")
@@ -1349,6 +1359,7 @@ def test_publish_blog_route_publishes_once_and_records(monkeypatch):
     assert saved == {"i": 7, "u": "https://x.blogspot.com/p1.html", "p": "p1",
                      "v": yt_blog.BLOG_RENDER_VERSION}   # 발행 시 렌더 버전도 기록한다
     assert published["title"] == "OpenAI와 연구"
+    assert published["labels"] == ["유튜브", "a16z"]   # '유튜브' 태그 필수(2026-11-20 사용자 지시)
     assert 'data-ys-original-title="1"' in published["html"]
     assert "원제 : OpenAI &amp; Research" in published["html"]
     assert published["html"].index("원제 :") < published["html"].index(">x<")

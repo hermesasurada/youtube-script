@@ -285,9 +285,10 @@ def history_publish_blog():
     try:
         if updating:
             # 제목도 함께 맞춘다(번역 제목이 바뀐 경우). URL·발행 상태는 그대로 유지된다.
-            res = bl.update_post(post_id, title=title, content=html)
+            res = bl.update_post(post_id, title=title, content=html,
+                                 labels=yt_blog._blog_labels_for_update(bl, post_id))
         else:
-            res = bl.publish(title, html, labels)
+            res = bl.publish(title, html, yt_blog._with_blog_tag(labels))
     except bl.BloggerError as e:
         log.warning("blog %s failed item=%s: %s",
                     "update" if updating else "publish", item["item_id"], e)
