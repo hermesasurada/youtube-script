@@ -421,8 +421,19 @@
                    background: var(--surface2); color: var(--muted); margin: -.1rem 0 .4rem; }
     .mq-cap-chip.on { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); }
     .mq-ctl .mq-requeue { width: auto; padding: 0 .5rem; font-size: var(--fs-sm); }
-    .mq-ctl .mq-cap-row { width: auto; padding: 0 .45rem; font-size: var(--fs-2xs); font-weight: 700; color: var(--muted); }
-    .mq-ctl .mq-cap-row.on { color: var(--highlight); border-color: var(--highlight); }
+/* 큐 캡처·증류 칩(2026-11-21) — 켜짐은 채운 칩, 꺼짐은 옅은 취소선, '캡처 없음'은 점선 */
+    .q-flag { display: inline-flex; align-items: center; height: 22px; padding: 0 .45rem; border-radius: 999px; border: 1px solid transparent;
+      font: inherit; font-size: var(--fs-2xs); font-weight: 700; white-space: nowrap; line-height: 1; }
+    .q-flag.on { background: var(--highlight-soft); color: var(--highlight); border-color: color-mix(in oklab, var(--highlight) 45%, transparent); }
+    .q-flag.off { background: transparent; color: var(--muted); border-color: var(--border); text-decoration: line-through; opacity: .8; }
+    .q-flag.none { background: transparent; color: var(--muted); border: 1px dashed var(--border); }
+    button.q-flag { cursor: pointer; }
+    button.q-flag:hover { filter: brightness(.96); }
+    .q-result { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-top: .3rem; }
+    .q-when { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .15rem; }
+    .mq-ctl .q-flag { width: auto; height: 28px; padding: 0 .55rem; border-radius: 999px; font-size: var(--fs-2xs); }
+    .mq-ctl .q-flag.on { background: var(--highlight-soft); border-color: color-mix(in oklab, var(--highlight) 45%, transparent); }
+    .mq-ctl .q-flag.off { border-color: var(--border); }
     .mq-cap { display: flex; align-items: center; gap: .35rem; font-size: var(--fs-sm);
               color: var(--muted); margin: -.1rem 0 .4rem; }
     .mq-add-pv { min-height: 1em; margin-bottom: .6rem; font-size: var(--fs-sm); }

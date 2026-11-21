@@ -181,6 +181,8 @@
     <div class="sum-progress" id="sum-progress"></div>
     <div class="sum-panel-hdr">
       <span class="sum-panel-badge">요약</span>
+      <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
+      <!-- 글자 크기·글꼴은 오른쪽 'YouTube에서 보기' 옆(2026-11-21 사용자 지시) -->
       <div class="sum-tool-group sum-reading-tools" aria-label="읽기 설정">
         <span class="sum-fs-ctrl" title="본문 글자크기 조절">
           <button class="sum-fs-btn" onclick="adjustReaderFs(-1)" aria-label="글자 작게">−</button>
@@ -189,7 +191,6 @@
         <label class="sum-font-ctrl" title="본문 글꼴">
           <select id="sum-font-select" onchange="setReaderFont(this.value)" aria-label="본문 글꼴"></select>
         </label>
-        <button class="sum-immersive-btn" id="sum-immersive-btn" onclick="toggleImmersive()" title="몰입형 읽기 — 이미지와 텍스트를 좌우로 동시에" hidden>⊟ 몰입형 읽기</button>
       </div>
       <a class="sum-youtube-btn" id="sum-youtube-link" href="#" target="_blank" rel="noopener noreferrer"
          title="YouTube에서 보기" hidden>

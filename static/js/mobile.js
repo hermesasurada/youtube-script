@@ -600,25 +600,27 @@ async function loadQueueM() {
       if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
       if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
       if (v.start_sec) bits.push(`${mqHms(v.start_sec)}부터`);
-      if (v.capture === 0) bits.push('캡처 제외');
-      if (v.distill === 0) bits.push('증류 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.join(' · ');
       const waitingRow = ['pending', 'kf_retry', 'deferred'].includes(v.status);
-      const capOn = v.capture !== 0;
-      const capBtn = waitingRow && v.status !== 'kf_retry'
-        ? `<button class="mq-cap-row ${capOn ? 'on' : ''}" role="switch" aria-checked="${capOn}" onclick="mqToggleCapture(${v.id}, ${capOn ? 'false' : 'true'})">캡처</button>` : '';
-      const dsOn = v.distill !== 0;       // NULL=채널/기본 따름(포함 취급), 0=제외 — PC 큐와 같은 규칙
-      const dsBtn = waitingRow && v.status !== 'kf_retry'
-        ? `<button class="mq-cap-row ${dsOn ? 'on' : ''}" role="switch" aria-checked="${dsOn}" onclick="mqToggleDistill(${v.id}, ${dsOn ? 'false' : 'true'})">증류</button>` : '';
+      // 캡처·증류 칩 — PC 큐와 같은 공용 표시(YS.queueFlag·queueResult)
+      const canToggle = waitingRow && v.status !== 'kf_retry';
+      const isRecent = ['done', 'failed'].includes(v.status);
+      const capBtn = isRecent ? '' : YS.queueFlag('capture', v, { toggle: canToggle, cls: 'q-flag mq-flag',
+        onclick: `mqToggleCapture(${v.id}, ${v.capture_on === false ? 'true' : 'false'})` });
+      const dsBtn = isRecent ? '' : YS.queueFlag('distill', v, { toggle: canToggle, cls: 'q-flag mq-flag',
+        onclick: `mqToggleDistill(${v.id}, ${v.distill_on === false ? 'true' : 'false'})` });
+      const result = isRecent ? `<div class="q-result">${YS.queueResult(v, 'q-flag mq-flag')}</div>` : '';
       const ctl = (movable || capBtn || dsBtn || extraCtl) ? `<span class="mq-ctl">${capBtn}${dsBtn}${extraCtl}${movable ? `
-          <button onclick="mqMove(${v.id},'up')">↑</button>
-          <button onclick="mqMove(${v.id},'down')">↓</button>
+          <button onclick="mqMove(${v.id},'top')" aria-label="맨 위로">⤒</button>
+          <button onclick="mqMove(${v.id},'up')" aria-label="위로">↑</button>
+          <button onclick="mqMove(${v.id},'down')" aria-label="아래로">↓</button>
+          <button onclick="mqMove(${v.id},'bottom')" aria-label="맨 아래로">⤓</button>
           <button class="mq-del" onclick="mqCancel(${v.id})">×</button>` : ''}</span>` : '';
       return `<div class="mq-row">
         <span class="mq-st mq-${v.status}">${i ? i + ' · ' : ''}${_Q_ST[v.status] || v.status}</span>
         <div class="mq-main"><div class="mq-title">${attrEsc(v.title || v.yt_id)}</div>
-          <div class="mq-sub">${attrEsc([ch, extra].filter(Boolean).join(' · '))}</div></div>${ctl}</div>`;
+          <div class="mq-sub">${attrEsc([ch, extra].filter(Boolean).join(' · '))}</div>${result}</div>${ctl}</div>`;
     };
     const main = d.waiting.filter(v => v.status !== 'kf_retry');
     const kf = d.waiting.filter(v => v.status === 'kf_retry');

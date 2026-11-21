@@ -1112,6 +1112,33 @@
       .observe(document.documentElement, { childList: true, subtree: true });
   }
 
+  /* ── 큐 행의 캡처·증류 표시(2026-11-21 사용자 지시 '큐에서 캡처/증류 여부를 알아보기 어려워') — PC·폰 공용 ──
+     서버(queue_overview)가 실제 여부(capture_on·distill_on)와 근거(*_src: video·channel·default·item)를 준다.
+     켜짐은 채운 칩 '✓ 캡처', 꺼짐은 옅은 취소선 칩 '✕ 캡처'. toggle이면 버튼(누르면 영상 단위로 바꾼다), 아니면 표시만. */
+  const _FLAG_SRC = { video: '이 영상만 지정', channel: '채널 설정', default: '기본값(포함)', item: '이 영상만 지정' };
+  function queueFlag(kind, v, { toggle = false, cls = 'q-flag', onclick = '' } = {}) {
+    const name = kind === 'capture' ? '캡처' : '증류';
+    const on = v[kind + '_on'] !== false;
+    const why = _FLAG_SRC[v[kind + '_src']] || '';
+    const label = `${on ? '✓' : '✕'} ${name}`;
+    const title = `${name} ${on ? '포함' : '제외'}${why ? ' — ' + why : ''}${toggle ? ` · 누르면 ${on ? '제외' : '포함'}` : ''}`;
+    return toggle
+      ? `<button type="button" class="${cls} ${on ? 'on' : 'off'}" role="switch" aria-checked="${on}" title="${escapeHtml(title)}" onclick="${onclick}">${label}</button>`
+      : `<span class="${cls} ${on ? 'on' : 'off'}" title="${escapeHtml(title)}">${label}</span>`;
+  }
+  /** 최근 처리 행의 결과 글: '완료 11-21 22:36' + 캡처 장수 칩 + 증류 칩 */
+  function queueResult(v, cls = 'q-flag') {
+    const when = (v.finished_at || '').slice(5, 16);
+    const st = v.status === 'done' ? '완료' : v.status === 'failed' ? '실패' : '';
+    const head = when ? `<span class="q-when">${st} ${escapeHtml(when)}</span>` : '';
+    if (v.status !== 'done') return head;
+    let cap;
+    if (v.capture_on === false) cap = `<span class="${cls} off" title="캡처 제외로 처리">✕ 캡처</span>`;
+    else if (v.frames > 0) cap = `<span class="${cls} on" title="요약에 실린 캡처 이미지 수">✓ 캡처 ${v.frames}장</span>`;
+    else cap = `<span class="${cls} none" title="캡처가 없다(재시도 대기 중이거나 쓸 만한 장면이 없었다)">캡처 없음</span>`;
+    return head + cap + queueFlag('distill', v, { cls });
+  }
+
   /** YYYYMMDD → "YYYY-MM-DD" (그 외 형식은 원본 반환). */
   function fmtDate(d) {
     const s = String(d || '');
@@ -2154,6 +2181,8 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
     escapeHtml,
     attrEscape,
     fmtDate,
+    queueFlag,
+    queueResult,
     fmtDateShort,
     fmtClock,
     cardTitles,

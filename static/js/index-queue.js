@@ -212,25 +212,23 @@ async function refreshQueueModal() {
       if (v.status === 'deferred' && v.next_retry_at) bits.push(`${v.next_retry_at.slice(5, 16)} 재시도`);
       if (v.eta) bits.push(`~${fmtEta(v.eta)} 시작 예정`);
       if (v.start_sec) bits.push(`${_qhms(v.start_sec)}부터`);
-      if (v.capture === 0) bits.push('캡처 제외');
-      if (v.distill === 0) bits.push('증류 제외');
       if (v.attempt_count > 1) bits.push(`시도 ${v.attempt_count}`);
       const extra = bits.length ? `<span class="q-extra">${_attrEsc(bits.join(' · '))}</span>` : '';
       const waiting = ['pending', 'kf_retry', 'deferred'].includes(v.status);
-      const capOn = v.capture !== 0;      // NULL=채널/기본 따름(사실상 포함), 0=제외
-      const capBtn = waiting && v.status !== 'kf_retry'
-        ? `<button class="q-cap-row ${capOn ? 'on' : ''}" role="switch" aria-checked="${capOn}"
-                   onclick="toggleQueueCapture(${v.id}, ${capOn ? 'false' : 'true'})"
-                   title="이 영상의 캡처 포함/제외">캡처</button>` : '';
-      const dsOn = v.distill !== 0;       // NULL=채널/기본 따름(포함 취급), 0=제외
-      const dsBtn = waiting && v.status !== 'kf_retry'
-        ? `<button class="q-cap-row ${dsOn ? 'on' : ''}" role="switch" aria-checked="${dsOn}"
-                   onclick="toggleQueueDistill(${v.id}, ${dsOn ? 'false' : 'true'})"
-                   title="이 영상의 지식증류 포함/제외">증류</button>` : '';
+      // 캡처·증류: 서버가 준 실제 여부(영상 지정 > 채널 설정 > 기본)를 칩으로. 대기 중이면 눌러서 바꾼다
+      const canToggle = waiting && v.status !== 'kf_retry';
+      const isRecent = ['done', 'failed'].includes(v.status);
+      const capBtn = isRecent ? '' : YS.queueFlag('capture', v, { toggle: canToggle,
+        onclick: `toggleQueueCapture(${v.id}, ${v.capture_on === false ? 'true' : 'false'})` });
+      const dsBtn = isRecent ? '' : YS.queueFlag('distill', v, { toggle: canToggle,
+        onclick: `toggleQueueDistill(${v.id}, ${v.distill_on === false ? 'true' : 'false'})` });
+      const result = isRecent ? `<div class="q-result">${YS.queueResult(v)}</div>` : '';
       const ctl = (movable || capBtn || dsBtn || extraCtl) ? `
         <span class="q-ctl">${capBtn}${dsBtn}${extraCtl}${movable ? `
+          <button onclick="moveQueueItem(${v.id},'top')" title="맨 위로">⤒</button>
           <button onclick="moveQueueItem(${v.id},'up')" title="위로">↑</button>
           <button onclick="moveQueueItem(${v.id},'down')" title="아래로">↓</button>
+          <button onclick="moveQueueItem(${v.id},'bottom')" title="맨 아래로">⤓</button>
           <button class="q-del" onclick="cancelQueueItem(${v.id})" title="취소">×</button>` : ''}
         </span>` : '';
       return `<div class="q-row">
@@ -238,7 +236,7 @@ async function refreshQueueModal() {
         <span class="q-st ${cls}">${label}</span>
         <div class="q-main">
           <div class="q-title">${_attrEsc(v.title || v.yt_id)}</div>
-          <div class="q-sub">${_attrEsc(ch)}${ch && extra ? ' · ' : ''}${extra}</div>
+          <div class="q-sub">${_attrEsc(ch)}${ch && extra ? ' · ' : ''}${extra}</div>${result}
         </div>${ctl}</div>`;
     };
     // 본편 큐와 캡처 재시도 큐는 분리돼 있다(주기당 본편 1건 + 캡처 1건)

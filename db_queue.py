@@ -6,6 +6,7 @@ db.py가 이 모듈의 이름을 다시 내보낸다. 이 모듈 안에서도 db
 """
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, timedelta
 import db
@@ -262,7 +263,52 @@ def queue_overview(recent: int = 10) -> dict:
              LEFT JOIN channels c ON c.channel_id = q.channel_id
             WHERE q.status IN ('done', 'failed')
             ORDER BY q.updated_at DESC LIMIT ?""", (recent,))]
+    for v in waiting:
+        _annotate_flags(conn, v)
+    excluded = set(db.distill_excluded_names())
+    for v in finished:
+        _annotate_flags(conn, v)
+        _annotate_result(conn, v, excluded)
     return {"waiting": waiting, "recent": finished}
+
+
+def _annotate_flags(conn, v: dict) -> None:
+    """화면이 바로 읽는 실제 캡처·증류 여부와 근거(2026-11-21 사용자 지시 '큐에서 캡처/증류 여부를 알아보기 어려워').
+
+    capture_on·distill_on = 영상 지정 > 채널 설정 > 기본(포함). *_src = 'video'|'channel'|'default'.
+    """
+    ch = None
+    if v.get("channel_id"):
+        ch = conn.execute("SELECT capture, distill FROM channels WHERE channel_id = ?",
+                          (v["channel_id"],)).fetchone()
+    for key in ("capture", "distill"):
+        if v.get(key) is not None:
+            v[key + "_on"], v[key + "_src"] = bool(v[key]), "video"
+        elif ch is not None and ch[key] is not None:
+            v[key + "_on"], v[key + "_src"] = bool(ch[key]), "channel"
+        else:
+            v[key + "_on"], v[key + "_src"] = True, "default"
+
+
+def _annotate_result(conn, v: dict, excluded: set) -> None:
+    """최근 처리 행: 끝난 시각, 실제로 만든 캡처 장수, 이력의 최종 증류 여부(이력 필터와 같은 규칙)."""
+    v["finished_at"] = v.get("updated_at") or ""
+    v["frames"] = None
+    if v.get("status") != "done":
+        return
+    it = conn.execute(
+        "SELECT summary_path, distill, channel, uploader FROM items WHERE yt_id = ? ORDER BY rowid DESC LIMIT 1",
+        (v.get("yt_id"),)).fetchone()
+    if it is None:
+        return
+    v["distill_on"] = db._history_distill(it, excluded)
+    v["distill_src"] = "item" if it["distill"] is not None else "channel"
+    sp = it["summary_path"] or ""
+    frames_dir = sp[:-3] + ".frames" if sp.endswith(".md") else ""
+    try:
+        v["frames"] = len([f for f in os.listdir(frames_dir) if f.endswith(".jpg")]) if frames_dir else 0
+    except OSError:
+        v["frames"] = 0
 
 
 def queue_move(qid: int, direction: str) -> bool:
@@ -270,6 +316,8 @@ def queue_move(qid: int, direction: str) -> bool:
 
     본편(pending)과 캡처 재시도(kf_retry)는 별도 큐라 서로 순서를 넘나들지 않는다.
     """
+    if direction in ("top", "bottom"):
+        return _queue_move_end(qid, direction)
     if direction not in ("up", "down"):
         return False
     with db._lock:
@@ -292,6 +340,28 @@ def queue_move(qid: int, direction: str) -> bool:
                      (other["pos"], me["id"]))
         conn.execute("UPDATE watch_queue SET position = ? WHERE id = ?",
                      (me["pos"], other["id"]))
+        return True
+
+
+def _queue_move_end(qid: int, direction: str) -> bool:
+    """대기 항목을 같은 큐(같은 status)의 맨 위/맨 아래로(2026-11-21 사용자 지시). 이미 끝이면 False."""
+    with db._lock:
+        conn = db._conn()
+        me = conn.execute(
+            "SELECT id, status, COALESCE(position, id) AS pos FROM watch_queue "
+            "WHERE id = ? AND status IN ('pending', 'kf_retry')", (qid,)).fetchone()
+        if me is None:
+            return False
+        agg = "MIN" if direction == "top" else "MAX"
+        edge = conn.execute(
+            f"SELECT {agg}(COALESCE(position, id)) FROM watch_queue WHERE status = ? AND id != ?",
+            (me["status"], me["id"])).fetchone()[0]
+        if edge is None:
+            return False
+        if (direction == "top" and me["pos"] < edge) or (direction == "bottom" and me["pos"] > edge):
+            return False
+        conn.execute("UPDATE watch_queue SET position = ? WHERE id = ?",
+                     (edge - 1 if direction == "top" else edge + 1, me["id"]))
         return True
 
 
