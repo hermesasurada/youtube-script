@@ -1849,6 +1849,9 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   background: var(--surface);
   box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .3);
 }
+/* 고정 영역 안 메타 칩 줄(2026-11-21) — 아래 구분선·여백은 고정 영역 그림자가 대신한다 */
+.sum-head-sticky > .ys-meta { margin: .45rem 0 0; padding-bottom: 0; border-bottom: 0; }
+.imm-text > .sum-head-sticky > .ys-meta { max-width: 660px; }
 .imm-text > .sum-head-sticky { max-width: none; }   /* 가독 칼럼(660px) 제한은 배경엔 미적용 */
 .imm-text > .sum-head-sticky h1,
 .imm-text > .sum-head-sticky .sum-title-orig { max-width: 660px; }
