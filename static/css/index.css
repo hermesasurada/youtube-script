@@ -13,8 +13,9 @@
   --accent:    #f4f4f5;        /* primary action: inverse-bg */
   --accent-fg: #18181b;
   --accent2:   #d4d4d8;
-  --highlight: #d8655d;        /* states + primary actions only */
-  --highlight-soft: rgba(216, 101, 93, .14);
+  /* 강조색 = 에르메스 오렌지(2026-11-21 사용자 지시, 그 전 붉은색 #d8655d·#b83a3a). YouTube 로고·'YouTube에서 보기' 버튼의 빨강과 위험 표시(#dc2626)는 그대로 */
+  --highlight: #F37021;        /* states + primary actions only */
+  --highlight-soft: rgba(243, 112, 33, .16);
   --success:   oklch(0.74 0.13 155);
   --error:     oklch(0.66 0.18 22);
   --warn:      oklch(0.78 0.14 75);
@@ -57,8 +58,8 @@
   --accent:    #18181b;
   --accent-fg: #ffffff;
   --accent2:   #3f3f46;
-  --highlight: #b83a3a;
-  --highlight-soft: rgba(184, 58, 58, .09);
+  --highlight: #D45A12;       /* 에르메스 오렌지 #F37021을 흰 바탕 글자 대비용으로 한 톤 깊게 */
+  --highlight-soft: rgba(212, 90, 18, .10);
   --success:   oklch(0.46 0.13 155);
   --error:     oklch(0.5 0.2 22);
   --warn:      oklch(0.65 0.14 75);

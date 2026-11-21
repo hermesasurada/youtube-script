@@ -7,15 +7,15 @@
       --muted:     #71717a;
       --border:    #e4e4e7;
       --border-strong: #c7c9cf;
-      --highlight: #b83a3a;
-      --highlight-soft: rgba(184,58,58,.09);
+      --highlight: #D45A12;   /* 에르메스 오렌지(2026-11-21) — index.css와 같은 값 */
+      --highlight-soft: rgba(212, 90, 18,.10);
       --radius-xs: 4px;
       --radius-sm: 6px;
       --radius:    8px;
       --radius-lg: 12px;
   /* 글자 크기 6단계(2026-11-20 정리 — 전엔 9~15px을 0.5px 단위로 14가지 썼다). 16px 이상(제목·입력칸)은 그대로 적는다 */
   --fs-2xs: 10px; --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 14px; --fs-xl: 15px;
-      --row-sel:   rgba(184,58,58,.09);
+      --row-sel:   rgba(212, 90, 18,.10);
       --font-sans: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
       --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
@@ -27,9 +27,9 @@
         --muted:     #a1a1aa;
         --border:    #2c3036;
         --border-strong: #41464f;
-        --highlight: #d8655d;
-        --highlight-soft: rgba(216,101,93,.14);
-      --row-sel:   rgba(216,101,93,.14);
+        --highlight: #F37021;
+        --highlight-soft: rgba(243, 112, 33,.16);
+      --row-sel:   rgba(243, 112, 33,.16);
     }
     /* 공용 hermes-theme 메뉴가 쓰는 --ui-* 토큰을 yt 색으로 잇는다 */
     :root, :root[data-theme="dark"], :root[data-theme="light"] {

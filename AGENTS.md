@@ -249,6 +249,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 
 ## 화면
 
+- **강조색 = 에르메스 오렌지**(2026-11-21 사용자 지시, 그 전 붉은색): `--highlight` 다크 `#F37021`(에르메스 오렌지 그대로), 라이트 `#D45A12`(흰 바탕 글자 대비를 위해 한 톤 깊게). `index.css`·`mobile.css` 두 곳에 같은 값. **바꾸지 않은 빨강**: YouTube 로고(`#ff0033`)·'YouTube에서 보기' 버튼(`#c00`, YouTube 표지)·삭제/실패 등 위험 표시(`#dc2626`).
 - **크기 토큰(2026-11-20 정리)**: `index.css`·`mobile.css`·`collection.css`의 글자 크기는 `--fs-2xs`(10px)·`--fs-xs`(11)·`--fs-sm`(12)·`--fs-md`(13)·`--fs-lg`(14)·`--fs-xl`(15) 6단계, 모서리는 `--radius-xs`(4)·`--radius-sm`(6)·`--radius`(8)·`--radius-lg`(12)와 알약(999px)만 쓴다. 9~15px 글자 크기나 px 반경을 직접 적지 않는다(16px 이상 제목·입력칸, 본문의 rem·`--reader-scale` 계산식은 그대로). 토큰은 두 파일의 `:root`에 각각 있다(폰 화면은 `index.css`를 싣지 않는다).
 - **색상 모드**: PC·모바일 모두 공용 `hermes-theme`(시스템·라이트·다크, localStorage `hermes-theme`)을 쓴다. `static/js/hermes-theme.js`·`static/css/hermes-theme.css`는 wm 파일의 사본이니 함께 맞춘다. 다크 색은 `:root[data-theme="dark"]`에 두고, 공용 메뉴의 `--ui-*` 토큰은 yt 색 변수로 이어 둔다.
 - **팝업이 열려 있는 동안 뒤 화면 스크롤을 막되 화면 배치는 건드리지 않는다**(wm·sa·td·yt·xw 공통). 스크롤 입력만 막는다. body를 `position:fixed`로 고정하거나 html/body에 `overflow:hidden`을 걸면 상단 고정 영역이 사라진다.

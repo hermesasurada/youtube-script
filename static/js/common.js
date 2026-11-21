@@ -2328,7 +2328,7 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-confirm-msg{margin:0;font-size:14px;line-height:1.6;color:var(--text,#18181b);white-space:pre-line;word-break:keep-all;}
 .ys-confirm-actions{display:flex;justify-content:flex-end;gap:8px;}
 .ys-confirm-actions button{height:34px;padding:0 16px;border-radius:6px;font:inherit;font-size:14px;cursor:pointer;border:1px solid var(--border,#e4e4e7);background:var(--surface2,#f1f3f5);color:var(--text,#18181b);}
-.ys-confirm-actions .ys-confirm-ok{background:var(--highlight,#b83a3a);border-color:var(--highlight,#b83a3a);color:#fff;font-weight:600;}
+.ys-confirm-actions .ys-confirm-ok{background:var(--highlight,#D45A12);border-color:var(--highlight,#D45A12);color:#fff;font-weight:600;}
 .ys-confirm-actions .ys-confirm-ok.danger{background:var(--error,#c0392b);border-color:var(--error,#c0392b);}
 .ys-confirm-actions .ys-confirm-ok:hover{filter:brightness(1.07);}
 /* 메모 = 노란 메모지 카드(2026-11-07, 블로그 발행본 _include_blog_notes와 같은 모양). 다크 모드는 바탕색에 섞어 맞춘다. */
