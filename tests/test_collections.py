@@ -171,3 +171,13 @@ def test_schedule_overrides_upload_time_and_days_count_from_start(tmp_path, monk
     # 시작일 기준이라 1일차 영상이 없어도 2일차는 2일차
     only_day2 = {"start": "2026-11-17"}
     assert cv.day_label(only_day2, "2026-11-18", 1) == "2일차"
+
+
+def test_semafor_short_titles_strip_event_name_in_every_position():
+    """Semafor 모음(2026-11-21): 행사 이름이 앞·뒤·'at …' 여러 모양으로 붙는다."""
+    c = cv.COLLECTIONS["semafor-svw-2026"]
+    st = lambda t: cv.short_title(t, c["tail"], tuple(c["strip"]))
+    assert st("AMI Founder & Chair Yann LeCun at Silicon Valley & The World | Semafor") == "AMI Founder & Chair Yann LeCun"
+    assert st("Sam Altman: ‘It’s Hard To Imagine’ | Silicon Valley & The World | Semafor") == "Sam Altman: ‘It’s Hard To Imagine’"
+    assert st("Silicon Valley & The World: In Conversation With Jane Fraser, CEO, Citigroup | Semafor") == "Jane Fraser, CEO, Citigroup"
+    assert st("‘We Have To Do It’: Amazon CEO Andy Jassy On Racing China | Semafor") == "‘We Have To Do It’: Amazon CEO Andy Jassy On Racing China"

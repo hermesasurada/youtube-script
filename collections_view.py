@@ -68,6 +68,33 @@ COLLECTIONS = {
             "DY8clym2-jQ": "2026-11-18 17:30",   # Elon Musk(화상)
         },
     },
+    # Semafor 'Silicon Valley & The World'(2026-11-21 사용자 지시 '이거 재생목록도 불러와서 정리해줘').
+    # 공식 재생목록 60개 = 생중계 구간(일부 '일부 공개')과 편집 공개본. 같은 세션이 두 번 올라온 8쌍은 공개본만 큐에 넣고,
+    # 공개본엔 생중계 시작 시각이 없어 생중계 구간의 시작 시각(현지)을 schedule에 적는다. 삭제된 1개(vBsqIfl0b88)는 뺀다.
+    "semafor-svw-2026": {
+        "title": "Semafor Silicon Valley & The World 2026",
+        "subtitle": "Semafor · 2026년 11월 16~17일",
+        "match": "Silicon Valley & The World",
+        "tail": "Semafor",
+        "strip": (r"^Silicon Valley & The World\s*[:：]\s*(In Conversation With\s*)?",
+                  r"\s*[|｜]\s*Silicon Valley & The World\s*$",
+                  r"\s+at\s+Silicon Valley & The World\s*$"),
+        # 제목에 행사 이름이 없는 편집본
+        "include": ("uUO4rn-ckqE", "AcFE-uESAy8", "nKDVVEgSdLM"),   # 전 재무장관 경고, Andy Jassy, Ramaphosa
+        "playlist": "https://www.youtube.com/playlist?list=PLOuSW_JzhTEo",
+        "tz": "America/Los_Angeles",
+        "start": "2026-11-16",
+        "schedule": {   # 편집 공개본 ← 같은 세션 생중계 구간의 시작 시각
+            "oi-E6xB4wSU": "2026-11-16 09:09",   # Sam Altman(생중계 OQNvPOkjbvM)
+            "8AOAmCbVGf4": "2026-11-16 09:46",   # Alejandro Reynal(dG3jz6EfMeI)
+            "tyFOUl9ld3I": "2026-11-16 10:35",   # Jane Fraser(yn3giqZO9A8)
+            "vDTL0hLU_QQ": "2026-11-16 10:52",   # Brad Gerstner(e4yYHOoJuPI)
+            "4PxE6phGO3c": "2026-11-16 11:13",   # David Sacks(zFRqhSKuE1o)
+            "nKDVVEgSdLM": "2026-11-16 11:40",   # Cyril Ramaphosa(NWBOJV_-t_o)
+            "00KjRrFzU0k": "2026-11-16 12:13",   # Semafor Innovation Atlas(CK-btJFXjOI)
+            "oibpjbZbSQQ": "2026-11-16 12:38",   # Bill Ackman & Michael Kratsios(lbjIlFL7pxA)
+        },
+    },
 }
 
 CACHE_DIR = os.path.join(yt_core.BASE_DIR, "res", "collections")
@@ -93,9 +120,12 @@ def day_label(c: dict, day: str, index: int) -> str:
     return f"{index}일차"
 
 
-def short_title(title: str, match: str) -> str:
-    """'세션 제목 | 행사 이름[ 뒷말]' → '세션 제목'(행사 이름은 페이지 머리에 이미 있다)."""
+def short_title(title: str, match: str, strip: tuple = ()) -> str:
+    """'세션 제목 | 행사 이름[ 뒷말]' → '세션 제목'(행사 이름은 페이지 머리에 이미 있다).
+    strip: 모음별로 더 떼어 낼 정규식(행사 이름이 제목 앞·뒤에 여러 모양으로 붙는 경우, 2026-11-21 Semafor)."""
     t = re.sub(r"\s*[|｜]\s*" + re.escape(match) + r"\b.*$", "", title or "").strip()
+    for pat in strip:
+        t = re.sub(pat, "", t, flags=re.I).strip()
     return t or (title or "")
 
 
@@ -200,8 +230,9 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
     tz = ZoneInfo(c.get("tz") or "UTC")
     schedule = c.get("schedule") or {}
     for it in out:
-        it["short_title"] = short_title(it["title"], c.get("tail") or c["match"])
-        ko = short_title(it["title_ko"], c.get("tail") or c["match"]) if it["title_ko"] else ""
+        strip = tuple(c.get("strip") or ())
+        it["short_title"] = short_title(it["title"], c.get("tail") or c["match"], strip)
+        ko = short_title(it["title_ko"], c.get("tail") or c["match"], strip) if it["title_ko"] else ""
         if ko and it["short_title"] != it["title"].strip():   # 원제에서 행사 이름을 뗐으면 번역 제목도 마지막 '| …'를 뗀다
             ko = re.sub(r"\s*[|｜][^|｜]*$", "", ko).strip() or ko
         it["short_ko"] = ko if ko != it["short_title"] else ""     # 번역 제목(원제와 같으면 비움)
