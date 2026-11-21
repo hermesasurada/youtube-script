@@ -1862,6 +1862,8 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   transition: color .15s, background .15s, border-color .15s;
 }
 .sum-immersive-btn:hover { color: var(--text); border-color: var(--border-strong); }
+/* 캡처 이미지가 없는 요약은 숨긴다(JS가 hidden을 건다) — 위 display:inline-flex가 hidden 속성을 덮어써 늘 보였다(2026-11-21) */
+.sum-immersive-btn[hidden] { display: none; }
 /* 요약 액션 — 메인 화면의 중립 버튼과 같은 표면·상태색 체계 */
 .sum-action-btn {
   background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
