@@ -1959,10 +1959,7 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 .imm-text > * { max-width: 660px; }   /* 가독 칼럼 폭 제한 */
 /* 몰입형 우측 본문은 한 단계 작게 */
 .imm-text { --sum-topic-sticky-bg: var(--surface); }
-.imm-text.sum-md p, .imm-text.sum-md li { font-size: calc(.85rem * var(--reader-scale, 1)); line-height: 1.68; }
-.imm-text.sum-md h1 { font-size: 1.18rem; margin-bottom: .8rem; }
-.imm-text.sum-md h3 { font-size: .85rem; }
-.imm-text.sum-md td, .imm-text.sum-md th { font-size: .8rem; }
+/* 몰입형 본문 글자 크기·줄간격은 일반형(.sum-md)과 같다 — 전환할 때 글자가 바뀌지 않게(2026-11-21 사용자 지시, 예전 몰입형 전용 축소 규칙 삭제) */
 /* 갤러리: 가로 스트립을 세로 스택 + 원본 비율로 오버라이드 */
 .imm-gallery .kf-strip { display: flex; flex-direction: column; gap: 1rem; overflow: visible; margin: 0; padding: 0; }
 .imm-gallery .kf-strip figure { width: 100%; }
