@@ -14,7 +14,21 @@ let _histDistillOnly = false;   // 증류 대상만(2026-11-07) — item.distill
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
 let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일, 'duration'=영상 길이
 const HIST_SORT_KEYS = ['date', 'upload', 'duration'];   // 기준 버튼이 순환하는 순서
-const HIST_PAGE_SIZE = 20;
+const HIST_PAGE_BASE = 20;   // 한 페이지 기본 카드 수 — 실제 수는 열 수의 배수로 올린다(histPageSize)
+/* 한 페이지 카드 수를 그리드 열 수의 배수로(2026-11-21 사용자 지시 '우측 하단이 비어 보임' — 넓은 화면 8열에서
+   20개면 마지막 줄이 4칸 비었다). 열 수는 .hist-grid의 실제 열(grid-template-columns 트랙 수)로 센다. */
+let _histPageSizeCache = 0;
+function histPageSize() {
+  const grid = document.getElementById('history-grid');
+  let cols = 0;
+  if (grid && grid.offsetParent) {
+    const t = getComputedStyle(grid).gridTemplateColumns;
+    if (t && t !== 'none') cols = t.trim().split(/\s+/).length;
+  }
+  if (!cols) return _histPageSizeCache || HIST_PAGE_BASE;   // 그리드가 아직 안 보이면 직전 값
+  _histPageSizeCache = Math.ceil(HIST_PAGE_BASE / cols) * cols;
+  return _histPageSizeCache;
+}
 
 /* ── 검색조건 유지: 날짜·업로더·제목·미읽음·페이지를 localStorage에 기억해 새로고침 후 복원 ──
    (정렬 _histSort는 예전부터 histSort 키로 별도 저장 중) */
@@ -396,8 +410,28 @@ function openHistCardMenu(btn, ev) {
    나가는 요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
 function _thumbFallback(img) { YS.thumbFallback(img); }
 
+/* 창 폭이 바뀌어 열 수가 달라지면 보던 첫 카드가 들어 있는 페이지로 다시 그린다 */
+let _histResizeTimer = 0;
+function _onHistGridResize() {
+  clearTimeout(_histResizeTimer);
+  _histResizeTimer = setTimeout(() => {
+    const before = _histPageSizeCache;
+    if (!before || histPageSize() === before) return;
+    const firstIdx = (_historyPage - 1) * before;
+    _historyPage = Math.floor(firstIdx / _histPageSizeCache) + 1;
+    _renderHistoryList();
+  }, 200);
+}
+// 창 크기 대신 그리드 자체의 폭을 본다(사이드 패널·확대 배율이 바뀌어도 잡힌다)
+if (typeof ResizeObserver !== 'undefined') {
+  const _hg = document.getElementById('history-grid');
+  if (_hg) new ResizeObserver(_onHistGridResize).observe(_hg);
+} else {
+  window.addEventListener('resize', _onHistGridResize);
+}
+
 function _historyGoToPage(p) {
-  const totalPages = Math.max(1, Math.ceil(_historyFiltered.length / HIST_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(_historyFiltered.length / histPageSize()));
   _historyPage = Math.min(Math.max(1, p), totalPages);
   _saveHistFilter();   // 보던 페이지도 기억(새로고침 시 그 페이지로 복귀)
   _renderHistoryList();
@@ -407,7 +441,7 @@ function _historyGoToPage(p) {
 
 function _renderPagination(totalItems) {
   const pgEl = document.getElementById('history-pagination');
-  const totalPages = Math.ceil(totalItems / HIST_PAGE_SIZE);
+  const totalPages = Math.ceil(totalItems / histPageSize());
   if (totalPages <= 1) {
     pgEl.style.display = 'none';
     pgEl.innerHTML = '';
@@ -490,10 +524,11 @@ function _renderHistoryList() {
   empty.style.display = 'none';
   grid.style.display = '';
 
-  const totalPages = Math.ceil(shown / HIST_PAGE_SIZE);
+  const pageSize  = histPageSize();       // 그리드가 보인 뒤에 열 수를 센다
+  const totalPages = Math.ceil(shown / pageSize);
   if (_historyPage > totalPages) _historyPage = totalPages;
-  const start = (_historyPage - 1) * HIST_PAGE_SIZE;
-  const pageItems = _historyFiltered.slice(start, start + HIST_PAGE_SIZE);
+  const start = (_historyPage - 1) * pageSize;
+  const pageItems = _historyFiltered.slice(start, start + pageSize);
 
   grid.innerHTML = pageItems.map(item => {
     const vid       = _ytVideoId(item.webpage_url);
