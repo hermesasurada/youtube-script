@@ -191,7 +191,7 @@
       }
       const urlA = kv['URL'] && kv['URL'].querySelector('a');
       if (urlA) row2.push(`<a class="ys-chip ys-chip-link" href="${urlA.href}" target="_blank" rel="noopener noreferrer">${compact ? 'YouTube' : 'YouTube에서 보기 ↗'}</a>`);
-      if (model) row2.push(`<span class="ys-chip ys-chip-model" title="이 요약을 생성한 LLM 모델">🧠 ${escapeHtml(model)}</span>`);
+      if (model) row2.push(`<span class="ys-chip ys-chip-model" data-model="${escapeHtml(model)}" title="이 요약을 생성한 LLM 모델">${_modelMarkHtml(model)}${escapeHtml(model)}</span>`);
       const chips = row1.concat(row2);
       if (chips.length) {
         const bar = document.createElement('div');
@@ -1067,6 +1067,50 @@
     }[c]));
   }
   const attrEscape = escapeHtml;
+
+  /* ── 요약 메타 칩의 제공사 로고(2026-11-21 사용자 지시 'llm 모델 카탈로그 기준') ──
+     모델 이름 → 제공사·로고는 서버 /llm/model-marks(공용 llm_catalog.provider_mark, 로고는 data URI)가 정한다.
+     받아 둔 이름은 바로 <img>로 그리고(HTML 내보내기 파일에도 그대로 실린다), 처음 보는 이름은 🧠 자리표시를 두었다가
+     문서에 칩이 나타나면(MutationObserver) 한꺼번에 물어 바꾼다. 제공사를 모르면 🧠 그대로. 하루 동안 기기에 저장. */
+  const _MARK_KEY = 'ytModelMarks.v1', _MARK_TTL = 86400000;
+  let _marks = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(_MARK_KEY) || '{}');
+    if (saved && saved.at && Date.now() - saved.at < _MARK_TTL) _marks = saved.marks || {};
+  } catch (e) { /* 저장소를 못 쓰면 매번 묻는다 */ }
+  function _modelMarkHtml(model) {
+    const m = _marks[model];
+    if (m && m.icon) return `<img class="ys-model-mark" src="${escapeHtml(m.icon)}" alt="${escapeHtml(m.label || '')}" title="${escapeHtml(m.label || '')}">`;
+    return `<span class="ys-model-mark-wait" aria-hidden="true">🧠</span>`;
+  }
+  function _applyModelMarks(root) {
+    (root || document).querySelectorAll('.ys-chip-model[data-model]').forEach(chip => {
+      const m = _marks[chip.dataset.model], wait = chip.querySelector('.ys-model-mark-wait');
+      if (!wait || !m || !m.icon) return;
+      wait.outerHTML = _modelMarkHtml(chip.dataset.model);
+    });
+  }
+  const _markAsked = new Set();
+  let _markTimer = 0;
+  function _fetchModelMarks() {
+    const names = [...new Set([...document.querySelectorAll('.ys-chip-model[data-model]')]
+      .filter(c => c.querySelector('.ys-model-mark-wait')).map(c => c.dataset.model))]
+      .filter(n => !(n in _marks) && !_markAsked.has(n));
+    if (!names.length) { _applyModelMarks(); return; }
+    names.forEach(n => _markAsked.add(n));
+    fetch('/llm/model-marks?names=' + encodeURIComponent(names.join('|')))
+      .then(r => r.ok ? r.json() : {})
+      .then(d => {
+        Object.assign(_marks, d || {});
+        try { localStorage.setItem(_MARK_KEY, JSON.stringify({ at: Date.now(), marks: _marks })); } catch (e) { /* 무시 */ }
+        _applyModelMarks();
+      })
+      .catch(() => { /* 서버에 못 닿으면(내보낸 파일 등) 🧠 그대로 */ });
+  }
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && location.protocol.startsWith('http')) {
+    new MutationObserver(() => { clearTimeout(_markTimer); _markTimer = setTimeout(_fetchModelMarks, 30); })
+      .observe(document.documentElement, { childList: true, subtree: true });
+  }
 
   /** YYYYMMDD → "YYYY-MM-DD" (그 외 형식은 원본 반환). */
   function fmtDate(d) {
@@ -2174,6 +2218,7 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
 .ys-chip{display:inline-flex;align-items:center;gap:.28em;font-size:.75rem;color:var(--muted,#666);background:var(--surface2,#f3f0e9);border:1px solid var(--border,#e5e5e5);border-radius:2px;padding:.19rem .52rem;line-height:1.2;}
 .ys-chip-up{color:var(--text,#222);font-weight:600;}
 .ys-chip-date,.ys-chip-dur,.ys-chip-model{font-family:inherit;font-size:.75rem;letter-spacing:normal;}
+.ys-model-mark{width:13px;height:13px;object-fit:contain;flex:none;border-radius:2px;}
 .ys-chip a{color:inherit;text-decoration:none;}
 a.ys-chip-link{color:var(--highlight,#2563eb);border-color:color-mix(in oklab,var(--highlight,#2563eb) 38%,transparent);background:var(--highlight-soft,rgba(99,102,241,.08));text-decoration:none;font-weight:600;transition:filter .15s;}
 a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}

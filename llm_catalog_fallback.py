@@ -119,3 +119,12 @@ class Choices(Sequence):
 
 class ExecutorChoices(Choices):
     pass
+
+
+def provider_of(name):
+    return ''
+
+
+def provider_mark(name, provider=None):
+    """대체 모드: 제공사를 모른다(칩은 로고 없이 보인다)."""
+    return {'provider': '', 'label': '', 'mark': ''}

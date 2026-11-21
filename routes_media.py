@@ -131,3 +131,42 @@ def keyframes_status():
     cur = next((j["title"] for j in jobs_ if j["state"] == "processing"), None)
     queued = sum(1 for j in jobs_ if j["state"] == "queued")
     return yt_core._json({"processing": cur, "queued": queued, "active": len(jobs_)})
+
+
+# ── 요약 메타 칩의 제공사 로고(2026-11-21 사용자 지시 'llm 모델 카탈로그 기준') ─────────────────
+# 모델 이름 → 제공사는 공용 llm_catalog.provider_mark(카탈로그 우선, 옛 모델은 계열). 로고는 공용 자원
+# ~/projects/hermes-reader-fonts/providers/ 파일을 data URI로 돌려준다 — 화면이 HTML 파일로 내보내거나 공개 사본에
+# 실어도 서버 없이 보이게.
+_MARK_URI: dict[str, str] = {}
+_MARK_TYPES = {".ico": "image/x-icon", ".png": "image/png", ".svg": "image/svg+xml"}
+
+
+def _mark_data_uri(fname: str) -> str:
+    if not fname:
+        return ""
+    if fname not in _MARK_URI:
+        import base64
+        from yt_web import READER_FONT_DIR
+        path = os.path.join(READER_FONT_DIR, "providers", os.path.basename(fname))
+        try:
+            with open(path, "rb") as f:
+                data = base64.b64encode(f.read()).decode("ascii")
+            _MARK_URI[fname] = f"data:{_MARK_TYPES.get(os.path.splitext(fname)[1], 'application/octet-stream')};base64,{data}"
+        except OSError:
+            _MARK_URI[fname] = ""
+    return _MARK_URI[fname]
+
+
+@app.get("/llm/model-marks")
+def llm_model_marks():
+    """?names=Opus 5.5|GPT 6.1 Sol → {이름: {provider, label, icon}}. 모르는 이름은 provider ''·icon ''."""
+    import llm_gateway
+    names = [n.strip() for n in (request.args.get("names") or "").split("|") if n.strip()][:40]
+    out = {}
+    for n in names:
+        try:
+            m = llm_gateway.llm_catalog.provider_mark(n)
+        except Exception:  # noqa: BLE001 — 카탈로그 문제로 화면이 깨지면 안 된다
+            m = {"provider": "", "label": "", "mark": ""}
+        out[n] = {"provider": m["provider"], "label": m["label"], "icon": _mark_data_uri(m["mark"])}
+    return yt_core._json(out)
