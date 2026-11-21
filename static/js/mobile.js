@@ -593,7 +593,7 @@ async function loadQueueM() {
   try {
     const d = await (await fetch('/queue/items')).json();
     const row = (v, i, movable, extraCtl = '') => {
-      const ch = v.channel_name || (v.channel_id === 'manual' ? '수동' : '') || '';
+      const ch = v.channel_name || '';   // 손으로 넣은 영상(channel_id 'manual')은 채널 칸을 비운다(2026-11-21 사용자 지시 — '수동' 글자 삭제)
       const fmtEta = t => { const d = new Date(t * 1000);
         return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
       const bits = [];
