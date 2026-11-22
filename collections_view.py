@@ -68,6 +68,31 @@ COLLECTIONS = {
             "DY8clym2-jQ": "2026-11-18 17:30",   # Elon Musk(화상)
         },
     },
+    # NYT DealBook Summit 2026(2026-11-22 사용자 지시 '팔머영상 포함해서 전부 큐에 넣어'). 공식 영상 제목에 행사 이름이
+    # 없어 match는 어느 제목에도 없는 문구로 두고 include로만 모은다(다른 채널 재업로드본 — 예: Palmer Luckey #2149 — 은 넣지 않는다).
+    # 하루 행사인데 세션별 무대 시각이 공개되지 않아 one_day로 한 날에 묶고 시각은 표시하지 않는다(업로드 순서대로).
+    "dealbook-2026": {
+        "title": "NYT DealBook Summit 2026",
+        "subtitle": "뉴욕 Jazz at Lincoln Center · 2026년 11월 18일",
+        "match": "DealBook Summit 2026",
+        "include": (
+            "zWeT91uH7LI",   # Elon Musk Says He’s ‘Not MAGA’,
+            "J5EA7QeBm8k",   # Why Sam Altman and Greg Brockman Say Humans Must Stay in Control of AI,
+            "2Jqn1GxyZbc",   # How David Ellison Thinks CBS Can Earn Trust Back,
+            "xS9eltccFAY",   # Can Zohran Mamdani Fix the Cost of Living in New York City?,
+            "MsZmV9wzEZ8",   # Satya Nadella on the New Algorithm,
+            "QARxiqCkJF4",   # Palmer Luckey on War 2.0,
+            "r9tBI340-vA",   # Christine Lagarde on the New Global Order,
+            "7_h1U2ghPCs",   # Coplan, Friedman and Tenev on the Gamble,
+            "NXW-vPOc3SM",   # Artificial Intelligence and the A.G.I. Horizon,
+            "K23EnNX67QA",   # 2026 Midterm Elections and a Look Toward 2028,
+            "N7ItdxGLzao",   # Hailey Bieber on Why She Decided to Sell Rhode,
+            "aIYbaGKMKQw",   # Open Source’s Trillion-Dollar Bet | Dell Sponsored Session,
+        ),
+        "tz": "America/New_York",
+        "start": "2026-11-18",
+        "one_day": "2026-11-18",
+    },
     # Semafor 'Silicon Valley & The World'(2026-11-21 사용자 지시 '이거 재생목록도 불러와서 정리해줘').
     # 공식 재생목록 60개 = 생중계 구간(일부 '일부 공개')과 편집 공개본. 같은 세션이 두 번 올라온 8쌍은 공개본만 큐에 넣고,
     # 공개본엔 생중계 시작 시각이 없어 생중계 구간의 시작 시각(현지)을 schedule에 적는다. 삭제된 1개(vBsqIfl0b88)는 뺀다.
@@ -251,6 +276,8 @@ def items(slug: str, *, fill: bool = True) -> dict | None:
             d = it["upload_date"]
             it["day"] = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 else ""
             it["time"], it["ts"] = "", None
+        if c.get("one_day"):            # 하루 행사인데 세션 시각을 모른다 — 한 날에 묶고 시각은 숨긴다(순서는 업로드 순)
+            it["day"], it["time"], it["time_src"] = c["one_day"], "", ""
 
     missing = [it["yt_id"] for it in out if it["ts"] is None and it["yt_id"] not in schedule]
     filling = _schedule_fill(slug, missing) if fill else False

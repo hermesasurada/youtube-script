@@ -190,3 +190,14 @@ def test_collections_members_lists_item_ids():
     slugs = [c["slug"] for c in d["collections"]]
     assert slugs == list(cv.COLLECTIONS)
     assert all(isinstance(c["item_ids"], list) and c["title"] for c in d["collections"])
+
+
+def test_one_day_collection_groups_everything_without_times():
+    """DealBook(2026-11-22): 세션 시각을 모르는 하루 행사 — 한 날에 묶고 시각은 숨긴다."""
+    db.init()
+    db.enqueue_video("zWeT91uH7LI", "https://youtu.be/zWeT91uH7LI", "Elon Musk Says He’s ‘Not MAGA’", "manual")
+    d = cv.items("dealbook-2026", fill=False)
+    days = [x for x in d["days"] if any(i["yt_id"] == "zWeT91uH7LI" for i in x["items"])]
+    assert days and days[0]["date"] == "2026-11-18"
+    it = next(i for i in days[0]["items"] if i["yt_id"] == "zWeT91uH7LI")
+    assert it["time"] == "" and it["time_src"] == ""
