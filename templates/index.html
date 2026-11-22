@@ -205,17 +205,17 @@
       <div class="imm-text sum-md"></div>
     </div>
     <div class="sum-panel-footer" id="sum-panel-footer" hidden aria-label="요약 작업">
-      <button class="sum-action-btn sum-read-btn" id="sum-read-btn" onclick="toggleSummaryRead(this)">
-        <svg class="sum-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        <span class="read-label">읽음 처리</span>
-      </button>
-      <button class="sum-action-btn sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
-              aria-label="증류 대상 전환">증류 —</button>
-      <span class="sum-footer-spacer"></span>
       <button class="sum-action-btn" id="sum-export-btn" onclick="exportSummaryHtml(this)"
               title="이 요약을 HTML 파일 하나로 저장 — 캡처 이미지까지 들어 있어 받는 사람이 브라우저로 바로 연다">
         <svg class="sum-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>
         <span class="exp-label">HTML 파일</span>
+      </button>
+      <button class="sum-action-btn sum-distill-ctrl" id="sum-distill-ctrl" onclick="cycleItemDistill()"
+              aria-label="증류 대상 전환">증류 —</button>
+      <span class="sum-footer-spacer"></span>
+      <button class="sum-action-btn sum-read-btn" id="sum-read-btn" onclick="toggleSummaryRead(this)">
+        <svg class="sum-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="read-label">읽음 처리</span>
       </button>
       <button class="sum-action-btn sum-primary-action" id="sum-publish-btn" onclick="publishSummaryToBlog(this)"
               title="요약을 내 블로그스팟에 바로 발행 (즉시 공개)">

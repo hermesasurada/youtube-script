@@ -611,7 +611,9 @@
     }
     .summary-action-btn svg { display: block; flex-shrink: 0; }
     .summary-actions .distill-ctrl { margin-left: 0; }
-    .summary-action-btn.primary { margin-left: auto; background: var(--highlight); color: #fff; }
+    /* 하단 순서(2026-11-22): HTML 파일 · 증류 | (오른쪽) 읽음 처리 · 블로그 발행 */
+    #summary-read-btn { margin-left: auto; }
+    .summary-action-btn.primary { background: var(--highlight); color: #fff; }
     .summary-action-btn.active,
     .summary-action-btn.done { color: var(--highlight); background: var(--highlight-soft); }
     .summary-action-btn.done.stale { color: var(--warn, #b7791f); background: color-mix(in oklab, var(--warn, #b7791f) 12%, var(--surface)); }
