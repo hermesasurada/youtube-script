@@ -1139,6 +1139,24 @@
     return head + cap + queueFlag('distill', v, { cls });
   }
 
+  /* ── 영상 모음 필터(2026-11-22 사용자 지시 — 채널 팝업의 '영상 모음' 탭) — PC·폰 공용 ──
+     /collections/members로 모음마다 이름·요약된 이력 id를 받아 둔다. 상태는 histFilter.collection(슬러그). */
+  let _collections = null, _collectionsAt = 0;
+  const collections = {
+    async load(force = false) {
+      if (!force && _collections && Date.now() - _collectionsAt < 60000) return _collections;
+      try {
+        const d = await (await fetch('/collections/members', { cache: 'no-store' })).json();
+        _collections = (d.collections || []).map(c => ({ ...c, ids: new Set(c.item_ids || []) }));
+        _collectionsAt = Date.now();
+      } catch (e) { _collections = _collections || []; }
+      return _collections;
+    },
+    list() { return _collections || []; },
+    get(slug) { return (_collections || []).find(c => c.slug === slug) || null; },
+    has(slug, itemId) { const c = this.get(slug); return !c || c.ids.has(itemId); },   // 목록을 못 받았으면 거르지 않는다
+  };
+
   /** YYYYMMDD → "YYYY-MM-DD" (그 외 형식은 원본 반환). */
   function fmtDate(d) {
     const s = String(d || '');
@@ -2181,6 +2199,7 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
     escapeHtml,
     attrEscape,
     fmtDate,
+    collections,
     queueFlag,
     queueResult,
     fmtDateShort,

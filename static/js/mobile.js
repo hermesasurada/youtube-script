@@ -16,13 +16,16 @@ function _savedFilter() {
 function _saveUnread() {
   try {
     localStorage.setItem('histFilter', JSON.stringify({
-      ..._savedFilter(), unread: _unreadOnly, bookmark: _bookmarkOnly, distill: _distillOnly, uploader: _uploader }));
+      ..._savedFilter(), unread: _unreadOnly, bookmark: _bookmarkOnly, distill: _distillOnly, uploader: _uploader,
+      collection: _collection }));
   } catch { /* 스토리지 불가(사파리 프라이빗 등) — 무시 */ }
 }
 let _unreadOnly = !!_savedFilter().unread;
 let _bookmarkOnly = !!_savedFilter().bookmark;
 let _distillOnly = !!_savedFilter().distill;   // 증류 대상 + 게시일 7일 이내(데스크톱과 같은 histFilter.distill)
 let _uploader = String(_savedFilter().uploader || '');   // 채널 선택(데스크톱과 같은 histFilter.uploader)
+let _collection = String(_savedFilter().collection || '');   // 영상 모음(2026-11-22, PC와 같은 histFilter.collection)
+let _uploaderTabM = '';   // 채널 팝업에서 '영상 모음' 탭을 보는 중이면 'coll'
 let _sort = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순 (데스크톱과 공유)
 let _sortKey = localStorage.getItem('histSortKey') || 'date';  // 'date'=전사 처리일, 'upload'=영상 게시일 (데스크톱과 공유)
 /* 정렬 기준값 — 게시일이 없으면 처리일로 대체(순서 뒤엉킴 방지) */
@@ -53,13 +56,10 @@ async function loadHistory(force) {
     $('state').textContent = '오류: ' + e.message;
     return;
   }
+  await YS.collections.load(force);   // 영상 모음별 이력 id(모음 필터용)
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
   $('unread-filter-btn').classList.toggle('active', _unreadOnly);
   $('unread-filter-btn').setAttribute('aria-pressed', String(_unreadOnly));   // 저장된 미읽음 상태 반영
-  $('bookmark-filter-btn').classList.toggle('active', _bookmarkOnly);
-  $('bookmark-filter-btn').setAttribute('aria-pressed', String(_bookmarkOnly));
-  $('distill-filter-btn').classList.toggle('active', _distillOnly);
-  $('distill-filter-btn').setAttribute('aria-pressed', String(_distillOnly));
   applyFilter();
 }
 
@@ -68,6 +68,7 @@ function applyFilter() {
   FILTERED = ALL.filter(i => {
     if (YS.isPendingDelete(i.item_id)) return false;   // 되돌리기 대기 중인 삭제
     if (_uploader && i.uploader !== _uploader) return false;
+    if (_collection && !YS.collections.has(_collection, i.item_id)) return false;
     if (q && !(i.title||'').toLowerCase().includes(q) && !(i.title_ko||'').toLowerCase().includes(q)
           && !(i.uploader||'').toLowerCase().includes(q)) return false;
     if (_unreadOnly && i.is_read) return false;
@@ -92,6 +93,8 @@ function applyFilter() {
 /* 켜진 필터를 글자 칩으로(2026-11-20) — 검색 줄 버튼은 아이콘뿐이라 무엇이 켜졌는지 알기 어려웠다. 누르면 해제 */
 function _paintFilterChips() {
   const chips = [];
+  const coll = _collection && YS.collections.get(_collection);
+  if (coll)          chips.push(['collection', coll.title]);
   if (_uploader)     chips.push(['uploader', _uploader]);
   if (_unreadOnly)   chips.push(['unread', '미읽음만']);
   if (_bookmarkOnly) chips.push(['bookmark', '북마크만']);
@@ -104,6 +107,7 @@ document.getElementById('filter-chips').addEventListener('click', e => {
   if (!b) return;
   const k = b.dataset.filter;
   if (k === 'uploader') { _uploader = ''; _saveUnread(); applyFilter(); }
+  else if (k === 'collection') { _collection = ''; _saveUnread(); applyFilter(); }
   else if (k === 'unread') toggleUnreadFilter();
   else if (k === 'bookmark') toggleBookmarkFilter();
   else if (k === 'distill') toggleDistillFilter();
@@ -127,9 +131,10 @@ _paintListView();
 function _paintUploaderBtnM() {
   const b = $('uploader-filter-btn');
   if (!b) return;
-  b.classList.toggle('active', !!_uploader);
-  b.setAttribute('aria-pressed', String(!!_uploader));
-  b.title = _uploader ? `채널: ${_uploader}` : '채널 선택';
+  const on = !!(_uploader || _collection || _bookmarkOnly || _distillOnly);   // 북마크·증류도 이 팝업 안에서 건다(2026-11-22)
+  b.classList.toggle('active', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.title = _uploader ? `채널: ${_uploader}` : '채널 · 영상 모음 · 북마크 · 증류';
   $('q').placeholder = _uploader ? `${_uploader} 안에서 검색` : '검색';
 }
 // 안읽은 영상의 원본 길이 합계(2026-10-15 사용자 지시) — '3시간 12분'·'45분'
@@ -139,20 +144,54 @@ function openUploaderM() {
   $('fs-ctrl').hidden = true;
   $('font-ctrl').hidden = true;
   openModal('채널 선택', 'utility');
+  _uploaderTabM = _collection ? 'coll' : '';   // 모음을 걸어 둔 상태면 모음 탭부터
   $('modal-body').className = 'modal-body uploader-pick';
   $('modal-body').innerHTML = '<input type="search" id="uploader-q" class="uploader-q" placeholder="채널 검색" autocomplete="off">'
-    + '<div class="uploader-sort" id="uploader-sort" role="group" aria-label="채널 정렬">'
+    // 북마크만·증류만은 검색 줄 아이콘에서 이 팝업으로(2026-11-22 사용자 지시, PC와 같다)
+    + '<div class="uploader-flags" role="group" aria-label="함께 거르기">'
+    + '<button type="button" class="uploader-flag" id="bookmark-filter-btn" onclick="toggleBookmarkFilter()" aria-pressed="false">북마크만</button>'
+    + '<button type="button" class="uploader-flag" id="distill-filter-btn" onclick="toggleDistillFilter()" aria-pressed="false">증류만</button></div>'
+    + '<div class="uploader-sort" id="uploader-sort" role="group" aria-label="채널 정렬 · 영상 모음">'
     + '<button type="button" data-sort="unread" onclick="setUploaderSortM(this.dataset.sort)">안읽은 개수</button>'
     + '<button type="button" data-sort="secs" onclick="setUploaderSortM(this.dataset.sort)">길이 합계</button>'
-    + '<button type="button" data-sort="avg" onclick="setUploaderSortM(this.dataset.sort)">평균 길이</button></div>'
+    + '<button type="button" data-sort="avg" onclick="setUploaderSortM(this.dataset.sort)">평균 길이</button>'
+    + '<button type="button" data-sort="coll" onclick="setUploaderSortM(this.dataset.sort)">영상 모음</button></div>'
     + '<div class="uploader-list" id="uploader-list" role="listbox" aria-label="채널"></div>';
+  _paintFlagBtnsM();
   $('uploader-q').addEventListener('input', _renderUploaderM);
   _renderUploaderM();
 }
 // 채널 정렬 기준·통계는 common.js YS.uploaderSort(PC와 같은 규칙·같은 localStorage ytUploaderSort)
 function _uploaderSortModeM() { return YS.uploaderSort.mode(); }
 function setUploaderSortM(mode) {
-  if (YS.uploaderSort.set(mode)) _renderUploaderM();
+  if (mode === 'coll') { _uploaderTabM = 'coll'; _renderUploaderM(); return; }   // 영상 모음 탭
+  _uploaderTabM = '';
+  YS.uploaderSort.set(mode);
+  _renderUploaderM();
+}
+function _paintFlagBtnsM() {
+  [['bookmark-filter-btn', _bookmarkOnly], ['distill-filter-btn', _distillOnly]].forEach(([id, on]) => {
+    const b = $(id);
+    if (b) { b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
+  });
+}
+/* 영상 모음 탭 — 모음 하나를 고르면 그 모음의 요약된 영상만(채널 선택은 풀린다) */
+function _renderCollectionsM() {
+  const list = YS.collections.list();
+  const row = (slug, label, sub, n) => `<button type="button" class="uploader-item${slug === _collection ? ' selected' : ''}" role="option"
+      aria-selected="${slug === _collection}" data-coll="${attrEsc(slug)}" onclick="pickCollectionM(this.dataset.coll)">
+      <span class="up-name">${esc(label)}${sub ? `<small class="up-sub">${esc(sub)}</small>` : ''}</span>${n != null ? `<span class="up-total">${n}</span>` : ''}</button>`;
+  $('uploader-list').innerHTML = row('', '모음 전체(해제)', '', null)
+    + list.map(c => row(c.slug, c.title, c.subtitle, c.ids.size)).join('')
+    + (list.length ? '' : '<div class="uploader-empty">영상 모음이 없습니다</div>');
+}
+function pickCollectionM(slug) {
+  _collection = slug || '';
+  if (_collection) _uploader = '';
+  _saveUnread();
+  closeModal();
+  applyFilter();
+  window.scrollTo({ top: 0 });
 }
 function _uploaderDurM(st, mode) { return YS.uploaderSort.durText(st, mode); }
 function _renderUploaderM() {
@@ -160,7 +199,9 @@ function _renderUploaderM() {
   const stats = _uploaderStatsM();
   const mode = _uploaderSortModeM();
   document.querySelectorAll('#uploader-sort button').forEach(b =>
-    b.setAttribute('aria-pressed', String(b.dataset.sort === mode)));
+    b.setAttribute('aria-pressed', String(_uploaderTabM === 'coll' ? b.dataset.sort === 'coll' : b.dataset.sort === mode)));
+  $('uploader-q').hidden = _uploaderTabM === 'coll';
+  if (_uploaderTabM === 'coll') { _renderCollectionsM(); return; }
   const names = YS.uploaderSort.order(stats, mode);
   const all = { total: ALL.length, unread: [...stats.values()].reduce((n, s) => n + s.unread, 0),
                 unreadSecs: [...stats.values()].reduce((n, s) => n + s.unreadSecs, 0) };
@@ -174,6 +215,7 @@ function _renderUploaderM() {
 }
 function pickUploaderM(uploader) {
   _uploader = uploader || '';
+  if (_uploader) _collection = '';   // 채널을 고르면 모음 필터는 푼다
   _saveUnread();
   closeModal();
   applyFilter();
@@ -242,18 +284,17 @@ function toggleUnreadFilter() {
 
 /* 썸네일은 전사 때 받아둔 로컬 사본(/thumb)만 쓴다 — 조회 중 외부(i.ytimg)로 나가는
    요청이 없어 VPN 경유에서도 즉시 뜬다. 사본이 없으면 자리표시로 대체한다. */
-function toggleDistillFilter() {
+function toggleDistillFilter() {      // 채널 팝업 안 버튼·필터 칩에서 부른다(2026-11-22)
   _distillOnly = !_distillOnly;
-  $('distill-filter-btn').classList.toggle('active', _distillOnly);
-  $('distill-filter-btn').setAttribute('aria-pressed', String(_distillOnly));
+  _paintFlagBtnsM();
   _saveUnread();
   applyFilter();
 }
 
 function toggleBookmarkFilter() {
   _bookmarkOnly = !_bookmarkOnly;
-  $('bookmark-filter-btn').classList.toggle('active', _bookmarkOnly);
-  $('bookmark-filter-btn').setAttribute('aria-pressed', String(_bookmarkOnly));
+  _paintFlagBtnsM();
+  _saveUnread();
   applyFilter();
 }
 

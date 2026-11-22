@@ -103,6 +103,12 @@
     .uploader-q { width: 100%; box-sizing: border-box; height: 38px; padding: 0 .7rem; margin-bottom: .5rem;
       border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-lg); }
     .uploader-sort { display: flex; gap: 5px; margin-bottom: .5rem; }   /* 정렬 기준(2026-10-29) */
+    /* 채널 팝업 안 북마크만·증류만(2026-11-22) */
+    .uploader-flags { display: flex; gap: 5px; margin-bottom: .5rem; }
+    .uploader-flag { flex: 1; height: 34px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+      color: var(--muted); font: inherit; font-size: var(--fs-md); }
+    .uploader-flag.active { background: var(--highlight); border-color: var(--highlight); color: #fff; font-weight: 700; }
+    .uploader-item .up-sub { display: block; margin-top: 1px; font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
     .uploader-sort button { flex: 1; height: 34px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
       color: var(--muted); font: inherit; font-size: var(--fs-md); white-space: nowrap; }
     .uploader-sort button[aria-pressed="true"] { color: var(--highlight); border-color: var(--highlight); background: var(--highlight-soft); font-weight: 700; }

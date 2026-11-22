@@ -181,3 +181,12 @@ def test_semafor_short_titles_strip_event_name_in_every_position():
     assert st("Sam Altman: ‘It’s Hard To Imagine’ | Silicon Valley & The World | Semafor") == "Sam Altman: ‘It’s Hard To Imagine’"
     assert st("Silicon Valley & The World: In Conversation With Jane Fraser, CEO, Citigroup | Semafor") == "Jane Fraser, CEO, Citigroup"
     assert st("‘We Have To Do It’: Amazon CEO Andy Jassy On Racing China | Semafor") == "‘We Have To Do It’: Amazon CEO Andy Jassy On Racing China"
+
+
+def test_collections_members_lists_item_ids():
+    """채널 팝업 '영상 모음' 탭(2026-11-22): 모음마다 이름과 요약된 이력 id 목록."""
+    import app
+    d = app.app.test_client().get("/collections/members").get_json()
+    slugs = [c["slug"] for c in d["collections"]]
+    assert slugs == list(cv.COLLECTIONS)
+    assert all(isinstance(c["item_ids"], list) and c["title"] for c in d["collections"])

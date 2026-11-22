@@ -57,6 +57,7 @@ _REMOTE_DATA_ALLOWED = {
     "/history/publish-blog",  # 블로그스팟 발행(원격에서도 — 폰에서 읽고 바로 올린다)
     "/history/delete-blog",   # 발행한 블로그 글 삭제(발행 메뉴, 원격에서도)
     "/llm/model-marks",       # 요약 메타 칩의 제공사 로고(2026-11-21) — 읽기 전용
+    "/collections/members",   # 채널 팝업 '영상 모음' 탭(2026-11-22) — 읽기 전용
     "/terms/excluded",        # 각주 제외 용어 — 요약 뷰어 ✕ 버튼(폰에서도 누른다)
     "/people/excluded",       # 인명 소개에서 제외 — 소개 창의 제외 버튼(폰에서도 누른다)
 }

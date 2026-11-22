@@ -16,6 +16,18 @@ def collections_index():
     return render_template("collection.html", slug="", collection=None, collections=collections_view.summaries())
 
 
+@app.route("/collections/members")
+def collections_members():
+    """이력 화면 채널 팝업의 '영상 모음' 탭(2026-11-22) — 모음마다 이름과 요약된 이력 id 목록."""
+    out = []
+    for s in collections_view.summaries():
+        data = collections_view.items(s["slug"], fill=False) or {}
+        ids = [it["item_id"] for d in data.get("days", []) for it in d["items"] if it.get("item_id")]
+        out.append({"slug": s["slug"], "title": s["title"], "subtitle": s["subtitle"],
+                    "counts": s["counts"], "item_ids": ids})
+    return yt_core._json({"collections": out})
+
+
 @app.route("/collection/<slug>")
 def collection_page(slug):
     c = collections_view.get(slug)

@@ -11,6 +11,8 @@ let _historyRevision = '';
 let _histUnreadOnly  = false;
 let _histBookmarkOnly = false;
 let _histDistillOnly = false;   // 증류 대상만(2026-11-07) — item.distill = 증류 파이프라인과 같은 판정
+let _histCollection = '';       // 영상 모음 슬러그(2026-11-22) — 채널 팝업 '영상 모음' 탭에서 고른다
+let _uploaderTab = '';          // 채널 팝업에서 '영상 모음' 탭을 보는 중이면 'coll'
 let _histSort        = localStorage.getItem('histSort') || 'desc';   // 'desc'=최신순(기본), 'asc'=과거순
 let _histSortKey     = localStorage.getItem('histSortKey') || 'date'; // 'date'=전사 처리일(기본), 'upload'=영상 게시일, 'duration'=영상 길이
 const HIST_SORT_KEYS = ['date', 'upload', 'duration'];   // 기준 버튼이 순환하는 순서
@@ -44,6 +46,7 @@ function _saveHistFilter() {
       unread:   _histUnreadOnly,
       bookmark: _histBookmarkOnly,
       distill:  _histDistillOnly,
+      collection: _histCollection,
       page:     _historyPage,
     }));
   } catch { /* 사파리 프라이빗 등 스토리지 불가 — 무시 */ }
@@ -62,9 +65,8 @@ function _restoreHistFilter() {
     _histUnreadOnly = !!s.unread;
     document.getElementById('hf-unread-btn').classList.toggle('active', _histUnreadOnly);
     _histBookmarkOnly = !!s.bookmark;
-    document.getElementById('hf-bookmark-btn').classList.toggle('active', _histBookmarkOnly);
     _histDistillOnly = !!s.distill;
-    document.getElementById('hf-distill-btn').classList.toggle('active', _histDistillOnly);
+    _histCollection = String(s.collection || '');
     _histRestorePage = Number(s.page) > 1 ? Number(s.page) : 1;   // 필터 적용 후 반영
   } finally {
     _histRestoring = false;
@@ -87,6 +89,7 @@ async function loadHistory(force = false) {
     if (!_historyItems.length) _historyItems = [];
   }
   _populateUploaderOptions();
+  await YS.collections.load(force);   // 영상 모음별 이력 id(모음 필터용)
   _updateSortBtn();   // 저장된 정렬값 → 토글 버튼 라벨 반영
   _restoreHistFilter();          // 저장된 검색조건 복원(업로더 옵션 채운 뒤여야 값이 붙는다)
   applyHistoryFilter();
@@ -121,16 +124,42 @@ function _uploaderDurLabel(s, mode) {
   return text ? { text, title: mode === 'avg' ? '안읽은 영상 평균 길이' : '안읽은 영상 원본 길이 합계' } : null;
 }
 function setUploaderSort(mode) {
-  if (YS.uploaderSort.set(mode)) _renderUploaderList();
+  if (mode === 'coll') { _uploaderTab = 'coll'; _renderUploaderList(); return; }   // 영상 모음 탭
+  _uploaderTab = '';
+  YS.uploaderSort.set(mode);
+  _renderUploaderList();
 }
 function _uploaderStats() { return YS.uploaderSort.stats(_historyItems); }
 function _paintUploaderBtn() {
   const btn = document.getElementById('hf-uploader-btn');
   if (!btn) return;
   const u = document.getElementById('hf-uploader').value;
-  btn.querySelector('.nm').textContent = u || '전체 채널';
-  btn.classList.toggle('active', !!u);
-  btn.title = u ? `채널: ${u} — 바꾸기` : '채널 선택';
+  const coll = _histCollection && YS.collections.get(_histCollection);
+  // 버튼 글자: 모음 > 채널 > '전체 채널', 함께 건 북마크·증류는 뒤에 붙인다(2026-11-22 — 두 버튼이 팝업 안으로 들어가서)
+  const extra = [_histBookmarkOnly && '북마크', _histDistillOnly && '증류'].filter(Boolean);
+  const main = coll ? coll.title : (u || '전체 채널');
+  btn.querySelector('.nm').textContent = main + (extra.length ? ' · ' + extra.join(' · ') : '');
+  btn.classList.toggle('active', !!(u || coll || extra.length));
+  btn.title = `${coll ? '영상 모음: ' + coll.title : u ? '채널: ' + u : '채널 선택'}${extra.length ? ' + ' + extra.join('·') + '만' : ''} — 바꾸기`;
+  const bm = document.getElementById('hf-bookmark-btn'), ds = document.getElementById('hf-distill-btn');
+  if (bm) { bm.classList.toggle('active', _histBookmarkOnly); bm.setAttribute('aria-pressed', String(_histBookmarkOnly)); }
+  if (ds) { ds.classList.toggle('active', _histDistillOnly); ds.setAttribute('aria-pressed', String(_histDistillOnly)); }
+}
+/* 영상 모음 탭 — 모음 하나를 고르면 그 모음의 요약된 영상만 보인다(채널 선택은 풀린다) */
+function _renderCollectionList(box) {
+  const list = YS.collections.list();
+  const row = (slug, label, sub, n) => `<button type="button" class="uploader-item${slug === _histCollection ? ' selected' : ''}" role="option"
+      aria-selected="${slug === _histCollection}" data-coll="${_attrEsc(slug)}" onclick="pickCollection(this.dataset.coll)">
+      <span class="up-name">${esc(label)}${sub ? `<small class="up-sub">${esc(sub)}</small>` : ''}</span>${n != null ? `<span class="up-total" title="요약된 영상">${n}</span>` : ''}</button>`;
+  box.innerHTML = row('', '모음 전체(해제)', '', null)
+    + list.map(c => row(c.slug, c.title, c.subtitle, c.ids.size)).join('')
+    + (list.length ? '' : '<div class="uploader-empty">영상 모음이 없습니다</div>');
+}
+function pickCollection(slug) {
+  _histCollection = slug || '';
+  if (_histCollection) document.getElementById('hf-uploader').value = '';
+  document.getElementById('uploader-modal').classList.remove('open');
+  applyHistoryFilter();
 }
 function _renderUploaderList() {
   const box = document.getElementById('uploader-list');
@@ -140,7 +169,9 @@ function _renderUploaderList() {
   const stats = _uploaderStats();
   const mode = _uploaderSortMode();
   document.querySelectorAll('#uploader-sort button').forEach(b =>
-    b.setAttribute('aria-pressed', String(b.dataset.sort === mode)));
+    b.setAttribute('aria-pressed', String(_uploaderTab === 'coll' ? b.dataset.sort === 'coll' : b.dataset.sort === mode)));
+  document.getElementById('uploader-search').hidden = _uploaderTab === 'coll';
+  if (_uploaderTab === 'coll') { _renderCollectionList(box); return; }
   const names = _sortUploaders(stats, mode);
   const totalUnread = [...stats.values()].reduce((n, s) => n + s.unread, 0);
   const row = (val, label, s) => {
@@ -160,6 +191,7 @@ function _renderUploaderList() {
 }
 function openUploaderModal() {
   document.getElementById('uploader-search').value = '';
+  _uploaderTab = _histCollection ? 'coll' : '';   // 모음을 걸어 둔 상태면 모음 탭부터
   _renderUploaderList();
   document.getElementById('uploader-modal').classList.add('open');
   const sel = document.querySelector('#uploader-list .uploader-item.selected');
@@ -174,6 +206,7 @@ function pickUploader(uploader) {
   const sel = document.getElementById('hf-uploader');
   if (uploader && ![...sel.options].some(o => o.value === uploader)) return;
   sel.value = uploader || '';
+  if (uploader) _histCollection = '';      // 채널을 고르면 모음 필터는 푼다
   document.getElementById('uploader-modal').classList.remove('open');
   applyHistoryFilter();
 }
@@ -201,6 +234,7 @@ function applyHistoryFilter(keepPage = false) {
   _historyFiltered = _historyItems.filter(item => {
     if (YS.isPendingDelete(item.item_id)) return false;   // 되돌리기 대기 중인 삭제
     if (uploader && item.uploader !== uploader)  return false;
+    if (_histCollection && !YS.collections.has(_histCollection, item.item_id)) return false;
     if (titleQ   && !item.title.toLowerCase().includes(titleQ)
                  && !(item.title_ko || '').toLowerCase().includes(titleQ)) return false;
     if (_histUnreadOnly && item.is_read) return false;
@@ -286,15 +320,13 @@ function filterByUploader(uploader, ev) {
   document.getElementById('history-grid')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
-function toggleDistillFilter() {
+function toggleDistillFilter() {      // 채널 팝업 안 버튼(2026-11-22) — 팝업은 닫지 않는다
   _histDistillOnly = !_histDistillOnly;
-  document.getElementById('hf-distill-btn').classList.toggle('active', _histDistillOnly);
   applyHistoryFilter();
 }
 
 function toggleBookmarkFilter() {
   _histBookmarkOnly = !_histBookmarkOnly;
-  document.getElementById('hf-bookmark-btn').classList.toggle('active', _histBookmarkOnly);
   applyHistoryFilter();
 }
 
@@ -467,23 +499,6 @@ function _renderPagination(totalItems) {
   parts.push(`<button class="pg-btn" onclick="_historyGoToPage(${cur+1})" ${cur===totalPages?'disabled':''} title="다음">›</button>`);
   parts.push(`<button class="pg-btn" onclick="_historyGoToPage(${totalPages})" ${cur===totalPages?'disabled':''} title="끝">»</button>`);
   pgEl.innerHTML = parts.join('');
-}
-
-function resetHistoryFilter() {
-  document.getElementById('hf-uploader').value  = '';
-  document.getElementById('hf-title').value      = '';
-  _histUnreadOnly = false;
-  document.getElementById('hf-unread-btn').classList.remove('active');
-  _histBookmarkOnly = false;
-  document.getElementById('hf-bookmark-btn').classList.remove('active');
-  _histDistillOnly = false;
-  document.getElementById('hf-distill-btn').classList.remove('active');
-  _histSort    = 'desc';                                // 정렬도 기본(전사처리일·최신순)으로
-  _histSortKey = 'date';
-  localStorage.setItem('histSort', _histSort);
-  localStorage.setItem('histSortKey', _histSortKey);
-  _updateSortBtn();
-  applyHistoryFilter();
 }
 
 // 순수 헬퍼는 공유 모듈(common.js)로 일원화 — 여기선 위임만(함수 선언이라 호이스팅 안전).

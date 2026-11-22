@@ -131,7 +131,6 @@
           <div class="history-toolbar">
             <div class="history-filter-row">
               <div class="history-filter-group history-filter-primary">
-                <button class="btn-sm btn-ghost" onclick="loadHistory(true)" title="새로고침">새로고침</button>
                 <!-- 채널 선택은 팝업(2026-10-11 사용자 지시). select는 상태 보관용으로 숨겨 둔다 -->
                 <select id="hf-uploader" class="hf-uploader" onchange="applyHistoryFilter()" hidden aria-hidden="true" tabindex="-1">
                   <option value="">전체 업로더</option>
@@ -146,19 +145,12 @@
                 </div>
               </div>
               <div class="history-filter-group history-filter-state">
-                <button class="hf-unread-btn" id="hf-distill-btn" onclick="toggleDistillFilter()" title="증류 대상이면서 영상 게시일 7일 이내(오늘 포함)인 영상만 보기 — 증류 대상은 영상 설정 우선, 없으면 채널 설정">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.6 18.6A1.6 1.6 0 0 0 6 21h12a1.6 1.6 0 0 0 1.4-2.4L14 9V3"/><path d="M7.5 15h9"/></svg>
-                  증류만
-                </button>
-                <button class="hf-unread-btn" id="hf-bookmark-btn" onclick="toggleBookmarkFilter()" title="북마크된 영상만 보기">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-                  북마크만
-                </button>
                 <button class="hf-unread-btn" id="hf-unread-btn" onclick="toggleUnreadFilter()" title="미읽음만 보기">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   미읽음만
                 </button>
-                <button class="btn-sm btn-ghost" onclick="resetHistoryFilter()" title="검색 초기화">초기화</button>
+                <!-- 초기화 → 새로고침(2026-11-22 사용자 지시) -->
+                <button class="btn-sm btn-ghost" onclick="loadHistory(true)" title="목록 새로고침">새로고침</button>
               </div>
               <div class="history-filter-group history-filter-count">
                 <span class="history-count" id="history-count">—</span>
@@ -374,10 +366,18 @@
       <button class="modal-close" onclick="closeUploaderModal()" aria-label="닫기">✕</button>
     </div>
     <div class="uploader-search-wrap"><input type="search" id="uploader-search" class="hf-title" placeholder="채널 검색" oninput="_renderUploaderList()" autocomplete="off">
-      <div class="uploader-sort" id="uploader-sort" role="group" aria-label="채널 정렬">
+      <!-- 북마크만·증류만은 필터 줄에서 이 팝업으로(2026-11-22 사용자 지시) -->
+      <div class="uploader-flags" role="group" aria-label="함께 거르기">
+        <button type="button" class="uploader-flag" id="hf-bookmark-btn" onclick="toggleBookmarkFilter()" aria-pressed="false" title="북마크한 영상만">북마크만</button>
+        <button type="button" class="uploader-flag" id="hf-distill-btn" onclick="toggleDistillFilter()" aria-pressed="false"
+                title="증류 대상이면서 영상 게시일 7일 이내(오늘 포함)인 영상만 — 증류 대상은 영상 설정 우선, 없으면 채널 설정">증류만</button>
+      </div>
+      <!-- 채널 정렬 3개 + 영상 모음 탭(2026-11-22) -->
+      <div class="uploader-sort" id="uploader-sort" role="group" aria-label="채널 정렬 · 영상 모음">
         <button type="button" data-sort="unread" onclick="setUploaderSort(this.dataset.sort)">안읽은 개수</button>
         <button type="button" data-sort="secs" onclick="setUploaderSort(this.dataset.sort)">길이 합계</button>
         <button type="button" data-sort="avg" onclick="setUploaderSort(this.dataset.sort)">평균 길이</button>
+        <button type="button" data-sort="coll" onclick="setUploaderSort(this.dataset.sort)">영상 모음</button>
       </div></div>
     <div class="modal-body"><div class="uploader-list" id="uploader-list" role="listbox" aria-label="채널"></div></div>
   </div>
