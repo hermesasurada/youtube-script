@@ -116,6 +116,8 @@
     .uploader-item { display: flex; align-items: center; gap: .55rem; width: 100%; padding: .7rem .6rem; border: 0;
       border-bottom: 1px solid var(--border); background: none; color: var(--text); font: inherit; font-size: var(--fs-lg); text-align: left; }
     .uploader-item.selected { color: var(--highlight); font-weight: 700; }
+    /* '전체 채널' 줄은 목록을 내려도 위에 남는다(2026-11-22) */
+    .uploader-item.up-all { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: 0 -1rem 0 var(--bg); }   /* 그림자로 팝업 위쪽 안쪽 여백을 덮어 그 틈으로 다른 줄이 비치지 않게 */
     .uploader-item .up-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .uploader-item .up-unread { flex-shrink: 0; min-width: 22px; padding: 1px 7px; border-radius: var(--radius-lg); background: var(--highlight);
       color: #fff; font-size: var(--fs-sm); font-weight: 700; text-align: center; }

@@ -212,6 +212,7 @@ function _renderUploaderM() {
   const list = names.filter(n => !q || n.toLowerCase().includes(q));
   $('uploader-list').innerHTML = (q ? '' : row('', '전체 채널', all)) + list.map(n => row(n, n, stats.get(n))).join('')
     + (list.length || !q ? '' : '<div class="uploader-empty">일치하는 채널이 없습니다</div>');
+  if (!q) $('uploader-list').querySelector('.uploader-item')?.classList.add('up-all');   // '전체 채널'은 목록 위에 고정(2026-11-22)
 }
 function pickUploaderM(uploader) {
   _uploader = uploader || '';

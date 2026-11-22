@@ -2110,6 +2110,10 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
   background: none; color: var(--text); font: inherit; font-size: var(--fs-md); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 .uploader-item:hover { background: var(--surface2); }
 .uploader-item.selected { background: var(--highlight-soft); color: var(--highlight); font-weight: 600; }
+/* '전체 채널' 줄은 목록을 내려도 위에 남는다(2026-11-22) — 투명한 선택 배경 아래로 다른 줄이 비치지 않게 바탕을 깐다 */
+.uploader-item.up-all { position: sticky; top: 0; z-index: 1; background: var(--surface); box-shadow: 0 1px 0 var(--border); border-radius: 0; }
+.uploader-item.up-all.selected { background: linear-gradient(var(--highlight-soft), var(--highlight-soft)), var(--surface); }
+.uploader-item.up-all:hover { background: linear-gradient(var(--surface2), var(--surface2)), var(--surface); }
 .uploader-item .up-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uploader-item .up-unread { flex-shrink: 0; min-width: 20px; padding: 1px 7px; border-radius: var(--radius-lg); background: var(--highlight);
   color: #fff; font-size: var(--fs-xs); font-weight: 700; text-align: center; font-family: var(--font-mono); }
