@@ -116,6 +116,7 @@ YouTube 영상을 전사(whisper.cpp)하고 한국어로 요약·캡처해 서�
 - **6분 이하 영상은 한눈 요약만 만들지 않는다**(사용자 결정 — 본 요약·캡처는 평소대로). 규칙은 `summary_policy.skip_brief` 한 곳: 전사 md의 `duration`이 360초 이하면 `/summarize`가 `brief=False`를 넘긴다. 구간 전사(`clip_start`)와 길이를 모르는 md는 만든다. 조정 `YT_BRIEF_MIN_SECONDS`(0 = 모든 영상).
 - 각주 대상이 아니다 — 별표도 `term-notes`도 넣지 않는다(`brief_rebuild.PROMPT` + 렌더의 `_stripBriefMarks`).
 - 카드(`.ys-tldr`)는 **소제목과 다른 모양**을 유지한다: 사방 테두리 카드, 채운 배지 '✦ 한눈 요약', '요점 N개', 번호 원 요점. 왼쪽 막대+그라데이션 띠는 h3 전용이다. 기본은 접힘.
+- **번호를 누르면 짝인 소제목으로 이동**(2026-11-23 사용자 지시): `_linkBriefToSections`가 i번째 요점과 `## 3. 핵심 내용`의 i번째 h3에 `data-brief`·`data-brief-sec`를 단다 — 개수가 다르면(옛 형식·사용자 프롬프트) 잇지 않는다. 클릭은 문서 위임 `_onBriefNumClick`이 번호 칸(li 왼쪽 여백)만 받고, 고정 제목 높이만큼 `scroll-margin-top`을 두고 부드럽게 스크롤한 뒤 도착한 소제목에 테두리 빛(`.ys-brief-hit`)을 잠깐 준다.
 
 ## 각주(용어 해설)
 

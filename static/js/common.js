@@ -226,9 +226,51 @@
       ul.replaceWith(card);
       card.appendChild(ul);
       tldrH.remove();
+      _linkBriefToSections(tpl.content, ul);
     }
     return tpl.innerHTML;
   }
+
+  /**
+   * 한눈 요약 번호 → 본문 소제목 이동(2026-11-23 사용자 지시 "번호 클릭시 해당 문단으로 자동이동").
+   * 한눈 요약은 `## 3. 핵심 내용`의 소제목 하나당 불릿 하나, 소제목 순서대로 만든다(brief_rebuild). 그래서 i번째 요점 =
+   * i번째 h3. 개수가 다르면(옛 형식·사용자 프롬프트) 짝을 추측하지 않고 잇지 않는다. 표식은 data 속성뿐이라
+   * HTML 내보내기·블로그 본문에 실려도 모양은 그대로다(클릭 처리는 이 화면의 문서 위임 `_onBriefNumClick`).
+   */
+  function _linkBriefToSections(root, ul) {
+    const items = [...ul.querySelectorAll(':scope > li')];
+    const coreH = [...root.querySelectorAll('h2')].find(h => /핵심\s*내용/.test(h.textContent));
+    const heads = [];
+    if (coreH) {
+      for (let n = coreH.nextElementSibling; n && n.tagName !== 'H2'; n = n.nextElementSibling) {
+        if (n.tagName === 'H3') heads.push(n);
+      }
+    }
+    if (!items.length || items.length !== heads.length) return;
+    items.forEach((li, i) => { li.dataset.brief = String(i + 1); li.title = '눌러서 이 문단으로 이동'; });
+    heads.forEach((h, i) => { h.dataset.briefSec = String(i + 1); });
+  }
+
+  /** 번호 원(li::before, 왼쪽 여백 칸)을 누르면 짝인 소제목으로 부드럽게 스크롤하고 잠깐 강조한다. */
+  function _onBriefNumClick(ev) {
+    const li = ev.target && ev.target.closest && ev.target.closest('.ys-tldr li[data-brief]');
+    if (!li || ev.target !== li) return;                 // 요점 글자(링크·인명 등)를 누른 건 그대로 둔다
+    const pad = parseFloat(getComputedStyle(li).paddingLeft) || 0;
+    if (ev.clientX - li.getBoundingClientRect().left > pad) return;   // 번호 칸만
+    const card = li.closest('.ys-tldr');
+    const target = card && card.parentElement && card.parentElement.querySelector(`[data-brief-sec="${li.dataset.brief}"]`);
+    if (!target) return;
+    ev.preventDefault();
+    const sticky = card.parentElement.querySelector('.sum-head-sticky');
+    target.style.scrollMarginTop = `${(sticky ? sticky.offsetHeight : 0) + 12}px`;   // 고정 제목에 가리지 않게
+    const reduce = global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    target.classList.remove('ys-brief-hit');
+    void target.offsetWidth;                             // 연달아 눌러도 강조가 다시 돈다
+    target.classList.add('ys-brief-hit');
+    setTimeout(() => target.classList.remove('ys-brief-hit'), 1600);
+  }
+  if (typeof document !== 'undefined') document.addEventListener('click', _onBriefNumClick);
 
   const _COMMON_TERM_PATTERN = String.raw`(?:Codex|ASIC|HBM|open[- ]weight|오픈웨이트|FSD|ETF|FDA|AGI|Neocloud|bay|token|토큰|API|LLM|GPU|CPU|SaaS|클라우드|데이터센터|반도체|오픈소스|스타트업|벤치마크|프롬프트|에이전트|강화학습|휴머노이드|피지컬\s*AI|샌드박스|KV\s*캐시|KV\s*cache|MoE|RAG|어텐션|attention|chain\s+of\s+thought|CoT|사고\s*연쇄|컨텍스트\s*창|context\s*window|제품[\s\-–—]*시장\s*적합성|product[\s\-–—]*market\s*fit|언어\s*모델|코딩\s*에이전트|지분\s*희석|통신\s*대역폭|휴머노이드\s*로봇)`;
   const _COMMON_TERM_NOTE = new RegExp(`^${_COMMON_TERM_PATTERN}(?=$|\\s*\\()`, 'i');
@@ -2284,6 +2326,11 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 .ys-tldr li:last-child{margin-bottom:0;}
 .ys-tldr li::before{content:counter(ys-tldr);position:absolute;left:0;top:.2em;width:1.3rem;height:1.3rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;color:var(--highlight,#2563eb);border:1px solid color-mix(in oklab,var(--highlight,#2563eb) 45%,transparent);background:var(--surface,#fff);}
 .ys-tldr li::marker{content:none;}
+/* 번호 클릭 → 해당 소제목 이동(2026-11-23). 이어진 요점만 번호 원이 눌리는 모양이다. */
+.ys-tldr li[data-brief]::before{cursor:pointer;transition:background .15s,color .15s;}
+/* 도착한 소제목은 테두리 빛으로 잠깐 표시 — h3에 그라데이션 띠가 있어 배경색은 안 보인다 */
+@keyframes ys-brief-hit{0%,40%{box-shadow:0 0 0 2px color-mix(in oklab,var(--highlight,#2563eb) 70%,transparent);}100%{box-shadow:0 0 0 2px transparent;}}
+.ys-brief-hit{animation:ys-brief-hit 1.6s ease-out;}
 .ys-lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;z-index:99999;cursor:zoom-out;}
 .ys-lb.open{display:block;}
 .ys-lb-viewport{position:absolute;inset:0;overflow:hidden;touch-action:pinch-zoom;}
