@@ -260,7 +260,8 @@
     /* 목록 보기(2026-11-20): 썸네일을 왼쪽에 작게 — 한 화면에 6~7개 */
     .hist-grid.compact { gap: .5rem; }
     .hist-grid.compact .hist-card { flex-direction: row; align-items: stretch; }
-    .hist-grid.compact .hist-thumb-wrap { flex: 0 0 124px; align-self: flex-start; aspect-ratio: 16/9; margin: .5rem 0 .5rem .5rem; border-radius: var(--radius-sm); }
+    /* 썸네일은 카드 세로 가운데 — 제목이 두 줄이면 위에 붙여 둔 썸네일 아래만 넓게 비었다(2026-11-24 사용자 지시) */
+    .hist-grid.compact .hist-thumb-wrap { flex: 0 0 124px; align-self: center; aspect-ratio: 16/9; margin: .5rem 0 .5rem .5rem; border-radius: var(--radius-sm); }
     .hist-grid.compact .hist-thumb-dur { right: .25rem; bottom: .25rem; font-size: var(--fs-2xs); padding: .05rem .3rem; }
     .hist-grid.compact .hist-card-body { min-width: 0; gap: .2rem; padding: .5rem .6rem .45rem; }
     .hist-grid.compact .hist-card-title { font-size: var(--fs-lg); line-height: 1.35; }
