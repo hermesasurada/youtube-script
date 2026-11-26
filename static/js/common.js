@@ -878,8 +878,19 @@
     });
   }
 
+  /* 구간 수정 버튼 자리 = 섹션 끝 '내 의견 메모' 버튼 옆(2026-11-27 사용자 지시, 예전엔 소제목 오른쪽).
+     버튼은 섹션 요소(_secEditBtn)가 들고 있고, 메모 상자는 다시 그릴 때마다(show) 이 함수로 되붙인다 —
+     메모 편집 중(textarea)에는 숨긴다. 메모 상자가 없는 화면이면 소제목에 둔다. */
+  function _placeSectionEditBtn(section) {
+    const btn = section && section._secEditBtn;
+    if (!btn) return;
+    const memo = section.querySelector(':scope > .summary-memo');
+    if (memo) { if (!memo.querySelector('textarea')) memo.appendChild(btn); else btn.remove(); }
+    else { const h = section.querySelector(':scope > h3'); if (h) h.appendChild(btn); }
+  }
+
   /**
-   * 소제목마다 ✏️ 편집 버튼을 달아 그 구간의 마크다운을 직접 고치게 한다.
+   * 소제목 구간마다 ✎ 수정 버튼을 달아 그 구간의 마크다운을 직접 고치게 한다.
    * 저장은 '원래 구간 텍스트'와 함께 보내 서버가 중간 변경을 감지하도록 한다.
    * onSaved(새 전체 마크다운, blog 상태)로 뷰어가 다시 그린다.
    */
@@ -895,9 +906,11 @@
       btn.className = 'sec-edit-btn';
       btn.title = '이 소제목 구간을 직접 편집';
       btn.setAttribute('aria-label', '구간 편집');
-      btn.textContent = '\u270E';
-      heading.appendChild(btn);
+      btn.textContent = '\u270E 구간 수정';
       btn.onclick = () => openEditor(heading, section, btn);
+      const host = heading.closest('.sum-topic-section');
+      if (host) { host._secEditBtn = btn; _placeSectionEditBtn(host); }
+      else heading.appendChild(btn);
     });
 
     function openEditor(heading, section, btn) {
@@ -920,7 +933,9 @@
       status.className = 'sec-edit-status'; status.setAttribute('role', 'status');
       bar.append(save, cancel, status);
       box.append(ta, bar);
-      heading.after(box);
+      // 버튼이 섹션 끝(메모 옆)에 있으므로 편집창도 그 위(섹션 끝)에 연다.
+      const memo = host.querySelector(':scope > .summary-memo');
+      if (memo) memo.before(box); else heading.after(box);
       // 내용에 맞춰 높이를 잡되 화면을 넘기지 않는다.
       ta.style.height = Math.min(Math.max(ta.scrollHeight + 8, 160), 520) + 'px';
       ta.focus();
@@ -976,9 +991,10 @@
         const edit = document.createElement('button');
         edit.type = 'button'; edit.textContent = body ? '메모 편집' : '+ 내 의견 메모';
         box.appendChild(edit);
+        _placeSectionEditBtn(section);                     // 구간 수정 버튼은 메모 버튼 옆
         edit.onclick = () => {
           box.classList.remove('empty');
-          box.replaceChildren();
+          box.replaceChildren();                           // 메모 편집 중엔 구간 수정 버튼도 숨긴다
           const input = document.createElement('textarea');
           input.value = notes[key] || ''; input.maxLength = 10000; input.rows = 4;
           input.placeholder = '이 내용에 대한 생각을 기록하세요. 저장한 메모는 블로그 발행에도 포함됩니다.';
@@ -1006,7 +1022,7 @@
           input.focus();
         };
       };
-      show(); section.appendChild(box);
+      section.appendChild(box); show();
     });
   }
   function setupStickySummarySections(rootEl) {
@@ -2380,9 +2396,11 @@ a.ys-chip-link:hover{filter:brightness(1.12);text-decoration:none;}
 /* 뷰어에서 JS가 h3별로 만든 경계 안에서만 소제목을 고정한다. */
 .sum-topic-section{display:flow-root;min-width:0;}
 .sum-topic-section>h3{position:sticky;top:calc(var(--sum-topic-sticky-top,0px) + 8px);z-index:5;background:linear-gradient(90deg,var(--highlight-soft,rgba(99,102,241,.1)),transparent 88%),var(--sum-topic-sticky-bg,var(--surface,#fff));box-shadow:0 -8px 0 var(--sum-topic-sticky-bg,var(--surface,#fff)),0 8px 10px -12px rgba(0,0,0,.45);}
-.sec-edit-btn{margin-left:auto;flex:none;padding:0 .42em;border:0;border-radius:5px;background:none;color:var(--muted,#8a8f95);font-size:.95em;line-height:1.6;cursor:pointer;opacity:.55;}
-.sec-edit-btn:hover:not([disabled]){opacity:1;background:var(--surface2,#f1f3f1);}
-.sec-edit-btn[disabled]{opacity:.25;cursor:default;}
+/* 구간 수정 버튼 — 메모 상자 안에서는 .summary-memo button 모양(메모 버튼과 나란히)을 따르고 글자만 흐리게. */
+.sec-edit-btn{flex:none;cursor:pointer;color:var(--muted,#8a8f95) !important;}
+h3 > .sec-edit-btn{margin-left:auto;padding:0 .42em;border:0;border-radius:5px;background:none;font-size:.8em;line-height:1.6;opacity:.55;}
+.sec-edit-btn:hover:not([disabled]){color:var(--text,#34443a) !important;}
+.sec-edit-btn[disabled]{opacity:.4;cursor:default;}
 .sec-edit-box{margin:.5rem 0 1rem;}
 .sec-edit-box textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86rem;line-height:1.6;padding:10px;border:1px solid var(--border,#ccd5ce);border-radius:7px;background:var(--surface,#fff);color:var(--text,#242424);}
 .sec-edit-bar{display:flex;align-items:center;gap:6px;margin-top:6px;}

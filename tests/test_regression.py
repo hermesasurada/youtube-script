@@ -455,6 +455,10 @@ def test_section_editor_is_wired_and_never_reaches_the_blog():
     for src in (js, mobile):
         assert "attachSectionEditors" in src
     assert "/summary/section" in _server_src()
+    # 수정 버튼은 소제목이 아니라 섹션 끝 메모 버튼 옆(2026-11-27) — 메모 상자를 다시 그릴 때마다 되붙인다
+    assert "function _placeSectionEditBtn(section)" in common
+    assert common.count("_placeSectionEditBtn(") >= 3
+    assert "heading.appendChild(btn);\n      btn.onclick" not in common
 
 
 def test_blog_paragraph_leading_is_tighter_than_paragraph_gap():
