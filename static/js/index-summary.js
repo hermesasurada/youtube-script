@@ -116,6 +116,7 @@ function _attachSectionEditors(rootEl) {
       body.innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation(body, _titleKo);
       YS.stripSummaryPopupChrome(body);
+      YS.pinMetaToHead(body);
       YS.setupStickySummarySections(body);
       YS.decoratePeople(body);                 // 인명 클릭 소개(토스트)
       YS.attachSummaryNotes(body, _summaryItemId);
@@ -336,7 +337,7 @@ async function openSummaryModal(itemId, title) {
     bodyEl.innerHTML = YS.renderMarkdown(_summaryMd);
     YS.applyTitleTranslation(bodyEl, _titleKo);            // 제목을 번역본으로, 원문은 아래 병기
     YS.stripSummaryPopupChrome(bodyEl);                    // '핵심 내용' 머리말·목차는 팝업에서 생략
-    _pinMetaToHead(bodyEl);                                // 메타 칩 줄도 상단 고정 영역에
+    YS.pinMetaToHead(bodyEl);                              // 메타 칩 줄도 상단 고정 영역에
     YS.setupStickySummarySections(bodyEl);                 // 소제목은 해당 h3 섹션 안에서만 고정
     YS.decoratePeople(bodyEl);                 // 인명 클릭 소개(토스트)
     YS.attachSummaryNotes(bodyEl, itemId);
@@ -354,14 +355,6 @@ async function openSummaryModal(itemId, title) {
     _summaryMd = '';
     bodyEl.innerHTML = `<p class="sum-error">오류: ${e.message}</p>`;
   }
-}
-
-/* 요약 팝업의 상단 고정 영역에 제목 밑 메타 칩 줄(.ys-meta: 채널·날짜·길이·모델)까지 넣는다(2026-11-21 사용자 지시).
-   공용 렌더러는 제목(+원제)만 감싸므로 PC 팝업(일반·몰입형)에서만 옮긴다 — 폰은 고정 영역을 줄이는 쪽이라 그대로. */
-function _pinMetaToHead(root) {
-  const head = root.querySelector(':scope > .sum-head-sticky');
-  const meta = root.querySelector(':scope > .ys-meta');
-  if (head && meta) head.appendChild(meta);
 }
 
 function toggleImmersive() {
@@ -386,7 +379,7 @@ function _setImmersive(on) {
   tmp.innerHTML = YS.renderMarkdown(_summaryMd);
   YS.applyTitleTranslation(tmp, _titleKo);                      // 몰입형에서도 제목은 번역본
   YS.stripSummaryPopupChrome(tmp);
-  _pinMetaToHead(tmp);
+  YS.pinMetaToHead(tmp);
   const figs = [...tmp.querySelectorAll('.kf-strip figure')];   // 모든 캡처 수집(좌측으로)
   tmp.querySelectorAll('.kf-strip').forEach(s => s.remove());   // 본문에선 스트립 제거
   // 이미지가 모두 좌측으로 이동했으니 빈 '기타 자료 캡처' 부록 제목 제거

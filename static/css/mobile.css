@@ -501,6 +501,18 @@
       background: var(--bg);
       box-shadow: 0 6px 10px -8px rgba(0, 0, 0, .28);
     }
+    /* 고정 영역 안 메타 칩 줄(2026-11-27 사용자 지시): 폰에서만 글자·여백을 줄여 한 줄에 둔다.
+       긴 채널명(최대 40자 넘음)은 그 칩만 줄어 말줄임 — 날짜·길이·모델 칩은 늘 다 보인다. */
+    .modal-body.markdown > .sum-head-sticky > .ys-meta {
+      flex-wrap: nowrap; gap: .2rem; margin: .3rem 0 0; padding-bottom: 0; border-bottom: 0; overflow: hidden;
+    }
+    .modal-body.markdown > .sum-head-sticky > .ys-meta .ys-chip {
+      flex: none; white-space: nowrap; font-size: .7rem; padding: .12rem .34rem; gap: .2em;
+    }
+    .modal-body.markdown > .sum-head-sticky > .ys-meta .ys-chip-up {
+      display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    }
+    .modal-body.markdown > .sum-head-sticky > .ys-meta .ys-model-mark { width: 11px; height: 11px; }
     .modal-body.markdown h2 { font-size: 16.5px; }
     .modal-body.markdown h3 { font-size: var(--fs-xl); }
     .modal-body.markdown p { margin: .55em 0; }

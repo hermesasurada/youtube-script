@@ -1769,6 +1769,15 @@
     return true;
   }
 
+  /* 요약 창 상단 고정 영역에 제목 밑 메타 칩 줄(.ys-meta: 채널·날짜·길이·모델)까지 넣는다.
+     PC 팝업(2026-11-21)·폰 요약 창(2026-11-27) 공통. 공용 렌더러는 제목(+원제)만 감싸므로 화면이 옮긴다 —
+     모음·내보내기 파일은 그대로. */
+  function pinMetaToHead(rootEl) {
+    const head = rootEl && rootEl.querySelector(':scope > .sum-head-sticky');
+    const meta = rootEl && rootEl.querySelector(':scope > .ys-meta');
+    if (head && meta) head.appendChild(meta);
+  }
+
   /** 요약 원문은 보존하고 팝업에서만 중복 안내 요소를 제거한다. */
   function stripSummaryPopupChrome(rootEl) {
     if (!rootEl) return;
@@ -2262,6 +2271,7 @@ html, body { margin: 0; padding: 0; height: auto !important; overflow: auto !imp
     ensureReaderAssets,
     applyTitleTranslation,
     stripSummaryPopupChrome,
+    pinMetaToHead,
     ensureTermExclusions,
     apiTermExclusion,
     applyTermExclusions,

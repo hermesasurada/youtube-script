@@ -917,6 +917,7 @@ async function openSummary(itemId, title) {
       $('modal-body').innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation($('modal-body'), d.title_ko);  // 제목은 번역본, 원문은 아래 병기
       YS.stripSummaryPopupChrome($('modal-body'));            // '핵심 내용' 머리말·목차는 팝업에서 생략
+      YS.pinMetaToHead($('modal-body'));                      // 메타 칩 줄도 상단 고정 영역에(PC와 같다)
       YS.setupStickySummarySections($('modal-body'));         // 소제목은 해당 h3 섹션 안에서만 고정
       YS.decoratePeople($('modal-body'));                 // 인명 클릭 소개(토스트)
       YS.attachSummaryNotes($('modal-body'), itemId);
@@ -1021,6 +1022,7 @@ function _attachSectionEditorsM(rootEl) {
       body.innerHTML = YS.renderMarkdown(_summaryMd);
       YS.applyTitleTranslation(body, _titleKoM);
       YS.stripSummaryPopupChrome(body);
+      YS.pinMetaToHead(body);
       YS.setupStickySummarySections(body);
       YS.decoratePeople(body);                 // 인명 클릭 소개(토스트)
       YS.attachSummaryNotes(body, _summaryItemId);

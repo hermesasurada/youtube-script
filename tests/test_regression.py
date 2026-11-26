@@ -131,6 +131,12 @@ def test_summary_popup_sticky_sections_are_wired_for_desktop_and_mobile():
     assert desktop_js.count("YS.setupStickySummarySections") == 3
     # 모바일은 최초 렌더 + 구간 편집 후 재렌더
     assert mobile_html.count("YS.setupStickySummarySections") == 2
+    # 메타 칩 줄도 고정 영역에 — 소제목 고정을 다시 거는 모든 경로에서 함께 옮긴다(PC 2026-11-21, 폰 2026-11-27)
+    assert "function pinMetaToHead(rootEl)" in common_js
+    assert desktop_js.count("YS.pinMetaToHead") == 3
+    assert mobile_html.count("YS.pinMetaToHead") == 2
+    mobile_css = open(os.path.join(project, "static/css/mobile.css"), encoding="utf-8").read()
+    assert ".sum-head-sticky > .ys-meta" in mobile_css and "flex-wrap: nowrap" in mobile_css
 
 
 def test_summary_note_save_edit_delete_and_blog_escape(tmp_path, monkeypatch):
