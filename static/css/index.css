@@ -1980,7 +1980,7 @@ button.hist-card-uploader:hover { color: var(--highlight); text-decoration: unde
 }
 .sum-md h2::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .sum-md h3 { font-size: .9375rem; font-weight: 650; color: var(--text); word-break: keep-all; scroll-margin-top: 12px; }
-.sum-md p { margin-bottom: .75rem; line-height: 1.8; font-size: calc(.9375rem * var(--reader-scale, 1)); }
+.sum-md p { margin-bottom: 1.05rem; line-height: 1.8; font-size: calc(.9375rem * var(--reader-scale, 1)); }
 .sum-md hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .sum-md ul, .sum-md ol { padding-left: 1.35rem; margin-bottom: .85rem; }
 .sum-md li { line-height: 1.78; font-size: calc(.9375rem * var(--reader-scale, 1)); margin-bottom: .32rem; }

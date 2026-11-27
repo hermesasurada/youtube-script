@@ -515,7 +515,7 @@
     .modal-body.markdown > .sum-head-sticky > .ys-meta .ys-model-mark { width: 11px; height: 11px; }
     .modal-body.markdown h2 { font-size: 16.5px; }
     .modal-body.markdown h3 { font-size: var(--fs-xl); }
-    .modal-body.markdown p { margin: .55em 0; }
+    .modal-body.markdown p { margin: .8em 0; }
     .modal-body.markdown ul, .modal-body.markdown ol { padding-left: 1.3em; margin: .55em 0; }
     .modal-body.markdown li { margin: .25em 0; }
     .modal-body.markdown code {
