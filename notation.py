@@ -23,6 +23,30 @@ BRANDS_KO_TO_EN = {
     "딥마인드": "DeepMind", "챗GPT": "ChatGPT", "챗지피티": "ChatGPT",
     "허깅페이스": "Hugging Face", "로켓랩": "Rocket Lab",
     "L3해리스": "L3Harris", "L3 해리스": "L3Harris", "엘쓰리해리스": "L3Harris",
+    # 2026-11-28 보강(td 최근 30일 요약에서 한글로 남던 이름). 사람 성·일반어와 겹치는 이름
+    # (번스타인·코히런트·퍼플렉시티·루시드·안두릴)은 넣지 않는다.
+    "마이크론 테크놀로지": "Micron Technology", "마이크론테크놀로지": "Micron Technology",
+    "소프트뱅크 그룹": "SoftBank Group", "소프트뱅크그룹": "SoftBank Group",
+    "마벨 테크놀로지": "Marvell Technology", "키옥시아 홀딩스": "Kioxia Holdings",
+    "마이크론": "Micron", "키옥시아": "Kioxia", "샌디스크": "SanDisk", "씨게이트": "Seagate",
+    "웨스턴디지털": "Western Digital", "웨스턴 디지털": "Western Digital",
+    "골드만삭스": "Goldman Sachs", "골드만 삭스": "Goldman Sachs",
+    "모건스탠리": "Morgan Stanley", "모건 스탠리": "Morgan Stanley",
+    "JP모건": "JPMorgan", "JP 모건": "JPMorgan", "제이피모건": "JPMorgan",
+    "씨티그룹": "Citigroup", "씨티": "Citi", "노무라": "Nomura", "맥쿼리": "Macquarie",
+    "웨드부시": "Wedbush", "블랙록": "BlackRock",
+    "화웨이": "Huawei", "알리바바": "Alibaba", "텐센트": "Tencent", "바이두": "Baidu",
+    "바이트댄스": "ByteDance", "샤오미": "Xiaomi", "폭스콘": "Foxconn", "소프트뱅크": "SoftBank",
+    "닌텐도": "Nintendo", "딥시크": "DeepSeek", "미스트랄": "Mistral",
+    "네비우스": "Nebius", "블룸에너지": "Bloom Energy", "블룸 에너지": "Bloom Energy",
+    "마벨": "Marvell", "램리서치": "Lam Research", "램 리서치": "Lam Research",
+    "루멘텀": "Lumentum", "버티브": "Vertiv", "시스코": "Cisco", "슈퍼마이크로": "Supermicro",
+    "델 테크놀로지스": "Dell Technologies", "델테크놀로지스": "Dell Technologies",
+    "크라우드스트라이크": "CrowdStrike", "지스케일러": "Zscaler",
+    "세일즈포스": "Salesforce", "서비스나우": "ServiceNow", "어도비": "Adobe",
+    "우버": "Uber", "웨이모": "Waymo", "코스트코": "Costco", "월마트": "Walmart",
+    "코인베이스": "Coinbase", "로빈후드": "Robinhood", "보잉": "Boeing",
+    "록히드마틴": "Lockheed Martin", "록히드 마틴": "Lockheed Martin",
 }
 
 # 한글 이름 뒤에 붙어도 되는 말(조사·서술격 등). 이 밖의 한글이 붙으면 다른 낱말의
@@ -50,6 +74,9 @@ def _brand_re(names, tail, extra_lookbehind=""):
 
 
 _BRAND_RE = _brand_re(BRANDS_KO_TO_EN, _TAIL)
+# '루멘텀(Lumentum)'을 바꾸면 'Lumentum(Lumentum)'이 된다 — 같은 이름을 되풀이한 괄호는 뗀다.
+_DUP_RE = re.compile(r"(?<![A-Za-z])(" + "|".join(sorted(map(re.escape, set(BRANDS_KO_TO_EN.values())),
+                                                        key=len, reverse=True)) + r") ?\(\1\)", re.I)
 
 # 영문 이름 → 한국어 발음의 끝소리. 'none'=받침 없음, 'rieul'=ㄹ 받침, 'other'=그 밖의 받침.
 FINAL_SOUND = {
@@ -60,6 +87,10 @@ FINAL_SOUND = {
     "Oracle": "rieul", "Qualcomm": "other", "Broadcom": "other", "CoreWeave": "none",
     "DeepMind": "none", "ChatGPT": "none", "Samsung": "other", "Neocloud": "none",
     "Starship": "other", "Starlink": "none", "Blackwell": "rieul", "Rubin": "other",
+    "Micron": "other", "Kioxia": "none", "SanDisk": "none", "Goldman Sachs": "none",
+    "Morgan Stanley": "none", "JPMorgan": "other", "Citi": "none", "Nomura": "none",
+    "Huawei": "none", "Alibaba": "none", "Tencent": "none", "SoftBank": "none",
+    "Nebius": "none", "Marvell": "rieul", "Lumentum": "other", "Cisco": "none", "Dell": "rieul",
 }
 
 _PAIRS = (("이", "가"), ("은", "는"), ("을", "를"), ("과", "와"))
@@ -103,7 +134,7 @@ def _apply(text: str, fn, protect: re.Pattern = _PROTECT) -> str:
 
 
 def _brands(s: str) -> str:
-    return _BRAND_RE.sub(lambda m: BRANDS_KO_TO_EN[m.group(1)], s)
+    return _DUP_RE.sub(r"\1", _BRAND_RE.sub(lambda m: BRANDS_KO_TO_EN[m.group(1)], s))
 
 
 def _particles(s: str) -> str:

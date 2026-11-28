@@ -101,3 +101,18 @@ def test_footnote_title_rule_matches_viewer_normalization():
     assert "`비추력 (specific impulse)`" not in text
     assert "`flywheel`, `specific impulse`처럼 원어만" in text
     assert "이번 원문에 더 분명한 철자가 나오면 원문을 우선" in open(tt.__file__, encoding="utf-8").read()
+
+
+def test_finance_and_chip_names_added_2026_11_28():
+    """td 요약에 한글로 남던 이름 보강 — 사람 성·일반어와 겹치는 이름은 그대로 둔다."""
+    assert notation.normalize("마이크론은 JP모건이 목표가를 올렸고 씨티는 유지") == \
+        "Micron은 JPMorgan이 목표가를 올렸고 Citi는 유지"
+    assert notation.normalize("마이크론 테크놀로지와 소프트뱅크 그룹") == "Micron Technology와 SoftBank Group"
+    assert notation.normalize("델 테크놀로지스는 웨스턴 디지털을") == "Dell Technologies는 Western Digital을"
+    # 같은 이름을 되풀이한 괄호는 뗀다
+    assert notation.normalize("루멘텀(Lumentum)과 엔비디아(NVIDIA)가") == "Lumentum과 NVIDIA가"
+    assert notation.normalize("시스코(Cisco Systems)") == "Cisco(Cisco Systems)"
+    # 다른 낱말의 일부·사람 성·일반어
+    for same in ("골드만삭스자산운용", "씨티카드", "모델 테크놀로지스", "마이클 번스타인", "퍼플렉시티 지표", "코히런트 대역폭"):
+        assert notation.normalize(same) == same
+    assert notation.normalize("Micron가 Marvell와 Dell는") == "Micron이 Marvell과 Dell은"
